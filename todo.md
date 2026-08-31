@@ -1,0 +1,39 @@
+# Supperclub Direct — Complete App Backlog
+
+- [x] Upgrade the project with persistent database, authentication, and server-side API support.
+- [x] Define restaurant, outlet, menu, modifier, availability, cart, customer, address, coupon, payment, and order data models.
+- [x] Implement role-based admin access for restaurant owner and operations staff.
+- [x] Build the admin dashboard with order queue, menu management, availability controls, coupons, restaurant settings, and customer/order views.
+- [x] Replace the customer prototype’s mock reads with typed API queries and authoritative pricing/serviceability validation.
+- [x] Add secure checkout integration boundaries for OTP authentication, Razorpay order creation and verification, and delivery-provider status updates.
+- [x] Test customer and admin flows, validate responsive behavior, and document any production credentials or provider setup still required.
+- [x] Add an admin integrations workspace with secure credential-status indicators and guided access to managed project secrets.
+- [x] Complete the server-validated checkout handoff without exposing or persisting provider credentials in the application database.
+- [x] Confirm VPS operating system, Node runtime, database reachability, reverse-proxy, TLS, and deployment-access constraints for the dry run.
+- [x] Prepare a production deployment manifest, environment-variable inventory, health checks, rollback procedure, and dry-run acceptance script.
+- [ ] Execute the VPS dry run with actual payment, OTP, and delivery-provider sandbox credentials, validating customer ordering, payment verification, and provider failure paths.
+- [x] Prepare DNS, TLS, and post-cutover validation steps for 9housekitchen.in without changing live traffic until explicit approval.
+- [x] Generate a dedicated temporary SSH key, perform a root-level read-only VPS inventory, and avoid all configuration changes until the existing Nginx and application topology is documented.
+- [x] Obtain explicit approval for an isolated `/opt/supperclub-direct` container stack, loopback-only test port, separate MySQL-compatible database, and temporary non-production hostname before any VPS write operation.
+- [x] Capture the current 9house container and routing metadata, then stop only the legacy 9house containers without removing images, volumes, uploads, or Nginx configuration.
+- [x] Replace the legacy 9house upstream with the Supperclub runtime only after the new app has passed local health and database checks.
+- [x] Add a VPS-local administrator bootstrap path and re-home managed-runtime image assets so the standalone deployment does not depend on managed OAuth or storage services.
+- [x] Add standalone-mode safeguards that suppress managed OAuth entry points and direct customers to the pending OTP integration instead.
+- [x] Add a repeatable VPS acceptance script covering storefront availability, assets, protected admin entry, payment-disabled behavior, container health, and rollback artifacts.
+- [x] Replace seeded restaurant, menu, coupon, sample-cart, and sample-order content with a clean production baseline that contains no customer-facing demo data.
+- [x] Rotate the standalone VPS administrator passphrase, verify the administrator session, and deliver the private access handoff to the owner.
+- [x] Verify the public domain exposes a clean empty menu state and the protected admin workspace remains available for genuine restaurant configuration.
+- [x] Remove all remaining hard-coded demonstration restaurant, location, address, coupon, order, and document-title copy from customer-facing routes.
+- [x] Re-verify the live root domain and administrator entry after the public copy cleanup.
+- [x] Remove residual sample coupon, address, order, and restaurant copy from checkout, cart, account, and auxiliary customer screens.
+- [x] Re-verify the settled root domain and the administrator entry route after removing the residual customer copy.
+- [x] Fix the VPS-local admin token validation failure that rejects a mobile administrator sign-in before authentication completes.
+- [x] Verify the corrected administrator login on the live mobile route and replace raw validation output with a clear access error when input is invalid.
+- [x] Research Rista’s current restaurant ordering, menu, operations, POS-adjacent, integration, and mobile management capabilities and document applicable gaps.
+- [x] Produce a prioritized 9House Kitchen gap assessment with product, operational, security, and mobile recommendations.
+- [x] Redesign the administration sidebar and mobile navigation so operational sections remain discoverable and usable on a phone.
+- [x] Add a production-ready menu import workflow with validation, preview, and error reporting rather than manual item-by-item setup.
+- [x] Extend the integrations workspace with guided secret configuration status and provider connection instructions that do not expose plaintext credentials.
+- [x] Apply the encrypted provider-credential schema to the isolated live VPS database and provision its server-only encryption key without exposing it in the browser or source control.
+- [x] Verify the live VPS encrypted-provider path end-to-end by saving a non-production test value, reading it server-side, and confirming that no plaintext is returned through the API.
+- [x] Harden the VPS deployment procedure so the encryption key is consistently preserved across every isolated application recreate or restart without relying on transient shell state.

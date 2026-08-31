@@ -1,0 +1,38 @@
+services:
+  app:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 4300
+      DATABASE_URL: mysql://supperclub:${MYSQL_PASSWORD}@db:3306/supperclub
+      ASSET_BASE_URL: /assets
+      JWT_SECRET: ${JWT_SECRET}
+      LOCAL_ADMIN_TOKEN: ${LOCAL_ADMIN_TOKEN}
+      SECRET_ENCRYPTION_KEY: ${SECRET_ENCRYPTION_KEY}
+    ports:
+      - "127.0.0.1:4300:4300"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    image: mysql:8.4
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: supperclub
+      MYSQL_USER: supperclub
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+    volumes:
+      - supperclub_mysql:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -u root -p$$MYSQL_ROOT_PASSWORD"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  supperclub_mysql:

@@ -1,0 +1,111 @@
+/* Market Table design: rice-paper surfaces, tamarind-red actions, and subtle ticket textures. */
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+}
+
+:root {
+  --primary: oklch(0.53 0.16 31);
+  --primary-foreground: oklch(0.99 0.01 75);
+  --chart-1: oklch(0.72 0.12 55);
+  --chart-2: oklch(0.53 0.16 31);
+  --chart-3: oklch(0.42 0.1 120);
+  --chart-4: oklch(0.76 0.08 80);
+  --chart-5: oklch(0.32 0.03 55);
+  --radius: 1.1rem;
+  --background: oklch(0.985 0.012 80);
+  --foreground: oklch(0.23 0.025 50);
+  --card: oklch(1 0.005 80);
+  --card-foreground: oklch(0.23 0.025 50);
+  --popover: oklch(1 0.005 80);
+  --popover-foreground: oklch(0.23 0.025 50);
+  --secondary: oklch(0.95 0.02 72);
+  --secondary-foreground: oklch(0.35 0.035 50);
+  --muted: oklch(0.955 0.012 82);
+  --muted-foreground: oklch(0.52 0.03 58);
+  --accent: oklch(0.93 0.03 75);
+  --accent-foreground: oklch(0.28 0.035 48);
+  --destructive: oklch(0.54 0.19 26);
+  --destructive-foreground: oklch(0.99 0.01 75);
+  --border: oklch(0.89 0.018 75);
+  --input: oklch(0.89 0.018 75);
+  --ring: oklch(0.53 0.16 31);
+}
+
+.dark {
+  --background: oklch(0.19 0.02 48);
+  --foreground: oklch(0.94 0.015 80);
+  --card: oklch(0.24 0.023 48);
+  --card-foreground: oklch(0.94 0.015 80);
+  --popover: oklch(0.24 0.023 48);
+  --popover-foreground: oklch(0.94 0.015 80);
+  --secondary: oklch(0.29 0.027 48);
+  --secondary-foreground: oklch(0.86 0.02 80);
+  --muted: oklch(0.29 0.027 48);
+  --muted-foreground: oklch(0.72 0.025 80);
+  --accent: oklch(0.3 0.035 48);
+  --accent-foreground: oklch(0.94 0.015 80);
+  --border: oklch(0.94 0.015 80 / 12%);
+  --input: oklch(0.94 0.015 80 / 15%);
+}
+
+@layer base {
+  * { @apply border-border outline-ring/50; }
+  body { @apply bg-background text-foreground; font-family: "Manrope", sans-serif; }
+  button:not(:disabled), [role="button"]:not([aria-disabled="true"]), [type="button"]:not(:disabled), [type="submit"]:not(:disabled), [type="reset"]:not(:disabled), a[href], select:not(:disabled), input[type="checkbox"]:not(:disabled), input[type="radio"]:not(:disabled) { @apply cursor-pointer; }
+}
+
+@layer components {
+  .container { width: 100%; margin-left: auto; margin-right: auto; padding-left: 1rem; padding-right: 1rem; }
+  .flex { min-height: 0; min-width: 0; }
+  @media (min-width: 640px) { .container { padding-left: 1.5rem; padding-right: 1.5rem; } }
+  @media (min-width: 1024px) { .container { padding-left: 2rem; padding-right: 2rem; max-width: 1280px; } }
+}
+
+@layer utilities {
+  .font-display { font-family: "DM Serif Display", Georgia, serif; }
+  .ticket-edge { clip-path: polygon(0.9rem 0, calc(100% - 0.9rem) 0, 100% 0.9rem, 100% calc(100% - 0.9rem), calc(100% - 0.9rem) 100%, 0.9rem 100%, 0 calc(100% - 0.9rem), 0 0.9rem); }
+  .paper-grain { background-image: radial-gradient(rgba(91, 58, 36, 0.06) 0.7px, transparent 0.7px); background-size: 8px 8px; }
+  .dotted-rule { border-top: 1px dashed oklch(0.78 0.035 70); }
+  .hide-scrollbar::-webkit-scrollbar { display: none; }
+  .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+}
+
+button, a, input { transition: transform 160ms cubic-bezier(0.23, 1, 0.32, 1), background-color 160ms cubic-bezier(0.23, 1, 0.32, 1), border-color 160ms cubic-bezier(0.23, 1, 0.32, 1), box-shadow 160ms cubic-bezier(0.23, 1, 0.32, 1); }
+button:active:not(:disabled) { transform: scale(0.97); }
+
+@media (prefers-reduced-motion: no-preference) {
+  .rise-in { animation: rise-in 420ms cubic-bezier(0.23, 1, 0.32, 1) both; }
+  @keyframes rise-in { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+}

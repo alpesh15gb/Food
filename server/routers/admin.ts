@@ -1,0 +1,441 @@
+/**
+ * Admin API — comprehensive restaurant operations, order management, catalogue,
+ * customer management, reporting, and settings.
+ */
+import { z } from "zod";
+import { adminProcedure, router } from "../_core/trpc";
+import {
+  createMenuItem,
+  getAdminDashboard,
+  getOrders,
+  getOrderWithItems,
+  updateMenuItemAvailability,
+  updateMenuItem,
+  updateOrderStatus,
+  updateRestaurant,
+  upsertRestaurantCoupon,
+  getRestaurantBySlug,
+  getAllRestaurants,
+  createCategory,
+  updateCategory,
+  getCustomerList,
+  getCustomerById,
+  getSalesReport,
+  logAudit,
+  getSetting,
+  setSetting,
+  getItemById,
+} from "../db";
+import { getIntegrationStatus } from "../integrations";
+import { applyMenuImport, previewMenuImport } from "../menuImport";
+import { readIntegrationSecret, saveIntegrationSecret } from "../security/secretVault";
+import { getDeliveryProvider } from "../integrations/shadowfax";
+import { initiateRefund } from "../integrations/razorpay";
+
+const availability = z.enum(["AVAILABLE", "SOLD_OUT", "SCHEDULED_UNAVAILABLE", "OUT_OF_STOCK", "DISABLED"]);
+const orderStatus = z.enum([
+  "PENDING_PAYMENT", "PAYMENT_CONFIRMED", "PLACED", "RESTAURANT_ACCEPTED",
+  "PREPARING", "READY_FOR_PICKUP", "DELIVERY_REQUESTED", "RIDER_ASSIGNED",
+  "PICKED_UP", "OUT_FOR_DELIVERY", "DELIVERED", "CANCELLED", "REJECTED",
+  "REFUND_PENDING", "REFUNDED",
+]);
+
+export const adminRouter = router({
+  // =========================================================================
+  // Dashboard & Analytics
+  // =========================================================================
+  dashboard: adminProcedure
+    .input(z.object({ slug: z.string().min(2) }))
+    .query(async ({ input }) => {
+      const restaurant = await getRestaurantBySlug(input.slug);
+      if (!restaurant) return null;
+      return getAdminDashboard(restaurant.id);
+    }),
+
+  restaurants: adminProcedure.query(() => getAllRestaurants()),
+
+  // =========================================================================
+  // Order Management
+  // =========================================================================
+  orders: adminProcedure
+    .input(z.object({
+      restaurantId: z.string().min(4),
+      status: orderStatus.optional(),
+      startDate: z.coerce.date().optional(),
+      endDate: z.coerce.date().optional(),
+      customerId: z.string().optional(),
+      limit: z.number().int().min(1).max(200).default(50),
+      offset: z.number().int().min(0).default(0),
+    }))
+    .query(({ input }) => getOrders(
+      input.restaurantId,
+      { status: input.status, startDate: input.startDate, endDate: input.endDate, customerId: input.customerId },
+      input.limit,
+      input.offset
+    )),
+
+  orderDetail: adminProcedure
+    .input(z.object({ orderId: z.string().min(4) }))
+    .query(({ input }) => getOrderWithItems(input.orderId)),
+
+  updateOrderStatus: adminProcedure
+    .input(z.object({
+      orderId: z.string().min(4),
+      status: orderStatus,
+      note: z.string().max(500).optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      await updateOrderStatus(input.orderId, input.status, ctx.user.id, input.note);
+      await logAudit({
+        actorId: ctx.user.id,
+        actorName: ctx.user.name ?? undefined,
+        action: `Order status changed to ${input.status}`,
+        targetType: "order",
+        targetId: input.orderId,
+        afterData: { status: input.status, note: input.note },
+      });
+      return { success: true } as const;
+    }),
+
+  // =========================================================================
+  // Restaurant Management
+  // =========================================================================
+  updateSettings: adminProcedure
+    .input(z.object({
+      id: z.string().min(4),
+      name: z.string().min(2).max(180),
+      cuisineSummary: z.string().min(2).max(255),
+      description: z.string().max(2000).optional(),
+      primaryColor: z.string().regex(/^#[0-9A-Fa-f]{6}$/),
+      deliveryFeePaise: z.number().int().nonnegative(),
+      packagingFeePaise: z.number().int().nonnegative(),
+      minOrderPaise: z.number().int().nonnegative(),
+      isOpen: z.boolean(),
+      allowScheduledOrders: z.boolean(),
+      preparationMinutes: z.number().int().positive().optional(),
+      deliveryRadiusKm: z.number().positive().optional(),
+      gstNumber: z.string().optional(),
+      gstPercentage: z.string().optional(),
+      tempClosureStart: z.coerce.date().nullish(),
+      tempClosureEnd: z.coerce.date().nullish(),
+      tempClosureMessage: z.string().max(500).nullish(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      await updateRestaurant(input);
+      await logAudit({
+        actorId: ctx.user.id,
+        actorName: ctx.user.name ?? undefined,
+        action: "Restaurant settings updated",
+        targetType: "restaurant",
+        targetId: input.id,
+        afterData: { name: input.name, isOpen: input.isOpen },
+      });
+      return { success: true } as const;
+    }),
+
+  // =========================================================================
+  // Menu / Catalogue Management
+  // =========================================================================
+  createMenuItem: adminProcedure
+    .input(z.object({
+      restaurantId: z.string().min(4),
+      categoryId: z.string().min(4),
+      name: z.string().min(2).max(180),
+      description: z.string().max(1000).optional(),
+      pricePaise: z.number().int().positive(),
+      offerPricePaise: z.number().int().positive().optional(),
+      dietaryType: z.enum(["veg", "nonveg", "egg"]),
+      imageUrl: z.string().url().optional(),
+      isCustomizable: z.boolean().optional(),
+      sku: z.string().max(64).optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const item = await createMenuItem(input);
+      await logAudit({
+        actorId: ctx.user.id,
+        actorName: ctx.user.name ?? undefined,
+        action: "Menu item created",
+        targetType: "menuItem",
+        targetId: item.id,
+        afterData: { name: input.name, pricePaise: input.pricePaise },
+      });
+      return item;
+    }),
+
+  updateMenuItem: adminProcedure
+    .input(z.object({
+      itemId: z.string().min(4),
+      name: z.string().min(2).max(180).optional(),
+      description: z.string().max(1000).optional(),
+      pricePaise: z.number().int().positive().optional(),
+      offerPricePaise: z.number().int().positive().nullish(),
+      categoryId: z.string().optional(),
+      dietaryType: z.enum(["veg", "nonveg", "egg"]).optional(),
+      isBestseller: z.boolean().optional(),
+      isRecommended: z.boolean().optional(),
+      isOpen: z.boolean().optional(),
+      sortOrder: z.number().int().optional(),
+      stock: z.number().int().nullish(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const { itemId, ...updates } = input;
+      const before = await getItemById(itemId);
+      await updateMenuItem(itemId, updates);
+      await logAudit({
+        actorId: ctx.user.id,
+        actorName: ctx.user.name ?? undefined,
+        action: "Menu item updated",
+        targetType: "menuItem",
+        targetId: itemId,
+        beforeData: before ? { name: before.name, pricePaise: before.pricePaise, isOpen: before.isOpen } : undefined,
+        afterData: updates,
+      });
+      return { success: true } as const;
+    }),
+
+  updateMenuAvailability: adminProcedure
+    .input(z.object({
+      itemId: z.string().min(4),
+      availability,
+      availableNote: z.string().max(160).optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      await updateMenuItemAvailability(input.itemId, input.availability, input.availableNote);
+      await logAudit({
+        actorId: ctx.user.id,
+        actorName: ctx.user.name ?? undefined,
+        action: `Item availability changed to ${input.availability}`,
+        targetType: "menuItem",
+        targetId: input.itemId,
+      });
+      return { success: true } as const;
+    }),
+
+  toggleItemOpen: adminProcedure
+    .input(z.object({ itemId: z.string().min(4), isOpen: z.boolean() }))
+    .mutation(async ({ ctx, input }) => {
+      await updateMenuItem(input.itemId, { isOpen: input.isOpen });
+      await logAudit({
+        actorId: ctx.user.id,
+        actorName: ctx.user.name ?? undefined,
+        action: `Item ${input.isOpen ? "enabled" : "disabled"}`,
+        targetType: "menuItem",
+        targetId: input.itemId,
+      });
+      return { success: true } as const;
+    }),
+
+  // =========================================================================
+  // Category Management
+  // =========================================================================
+  createCategory: adminProcedure
+    .input(z.object({
+      restaurantId: z.string().min(4),
+      name: z.string().min(2).max(120),
+      description: z.string().max(500).optional(),
+      sortOrder: z.number().int().optional(),
+    }))
+    .mutation(({ input }) => createCategory(input)),
+
+  updateCategory: adminProcedure
+    .input(z.object({
+      categoryId: z.string().min(4),
+      name: z.string().min(2).max(120).optional(),
+      sortOrder: z.number().int().optional(),
+      isVisible: z.boolean().optional(),
+      isOpen: z.boolean().optional(),
+    }))
+    .mutation(async ({ input }) => {
+      const { categoryId, ...updates } = input;
+      await updateCategory(categoryId, updates);
+      return { success: true } as const;
+    }),
+
+  // =========================================================================
+  // Coupon Management
+  // =========================================================================
+  upsertCoupon: adminProcedure
+    .input(z.object({
+      restaurantId: z.string().min(4),
+      code: z.string().min(3).max(48),
+      description: z.string().min(4).max(255),
+      discountType: z.enum(["flat", "percent"]),
+      discountValue: z.number().int().positive(),
+      minOrderPaise: z.number().int().nonnegative(),
+      maxDiscountPaise: z.number().int().positive().optional(),
+      totalUsageLimit: z.number().int().positive().optional(),
+      perCustomerLimit: z.number().int().positive().optional(),
+      isNewCustomerOnly: z.boolean().optional(),
+      startsAt: z.coerce.date().optional(),
+      endsAt: z.coerce.date().optional(),
+    }))
+    .mutation(({ input }) => upsertRestaurantCoupon(input)),
+
+  // =========================================================================
+  // Customer Management
+  // =========================================================================
+  customers: adminProcedure
+    .input(z.object({
+      search: z.string().optional(),
+      limit: z.number().int().min(1).max(100).default(50),
+      offset: z.number().int().min(0).default(0),
+    }))
+    .query(({ input }) => getCustomerList({ search: input.search }, input.limit, input.offset)),
+
+  customerDetail: adminProcedure
+    .input(z.object({ customerId: z.string().min(4) }))
+    .query(({ input }) => getCustomerById(input.customerId)),
+
+  updateCustomerNotes: adminProcedure
+    .input(z.object({ customerId: z.string().min(4), notes: z.string().max(2000) }))
+    .mutation(async ({ input }) => {
+      const db = await import("../db").then(m => m.getDb());
+      if (!db) throw new Error("Database unavailable");
+      const { customerProfiles } = await import("../../drizzle/schema");
+      const { eq } = await import("drizzle-orm");
+      await db.update(customerProfiles).set({ adminNotes: input.notes }).where(eq(customerProfiles.id, input.customerId));
+      return { success: true } as const;
+    }),
+
+  // =========================================================================
+  // Reporting
+  // =========================================================================
+  salesReport: adminProcedure
+    .input(z.object({
+      restaurantId: z.string().min(4),
+      startDate: z.coerce.date(),
+      endDate: z.coerce.date(),
+    }))
+    .query(({ input }) => getSalesReport(input.restaurantId, input.startDate, input.endDate)),
+
+  // =========================================================================
+  // Integration Status & Settings
+  // =========================================================================
+  integrationStatus: adminProcedure.query(() => getIntegrationStatus()),
+
+  saveIntegrationSecret: adminProcedure
+    .input(z.object({
+      restaurantId: z.string().min(4),
+      provider: z.enum(["razorpay", "otp", "delivery"]),
+      keyName: z.string().min(3).max(96),
+      value: z.string().min(1).max(4096),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      await saveIntegrationSecret({ ...input, userId: ctx.user.id });
+      await logAudit({
+        actorId: ctx.user.id,
+        actorName: ctx.user.name ?? undefined,
+        action: `Integration secret saved for ${input.provider}/${input.keyName}`,
+        targetType: "integration",
+        targetId: input.restaurantId,
+      });
+      return { success: true } as const;
+    }),
+
+  verifyIntegrationSecret: adminProcedure
+    .input(z.object({
+      restaurantId: z.string().min(4),
+      provider: z.enum(["razorpay", "otp", "delivery"]),
+      keyName: z.string().min(3).max(96),
+    }))
+    .mutation(async ({ input }) => ({
+      readable: Boolean(await readIntegrationSecret(input.restaurantId, input.provider, input.keyName)),
+    })),
+
+  // =========================================================================
+  // Menu Import / Export
+  // =========================================================================
+  previewMenuImport: adminProcedure
+    .input(z.object({ csv: z.string().min(10).max(1_500_000) }))
+    .mutation(({ input }) => previewMenuImport(input.csv)),
+
+  applyMenuImport: adminProcedure
+    .input(z.object({ restaurantId: z.string().min(4), csv: z.string().min(10).max(1_500_000) }))
+    .mutation(async ({ ctx, input }) => {
+      const result = await applyMenuImport(input.restaurantId, input.csv);
+      await logAudit({
+        actorId: ctx.user.id,
+        actorName: ctx.user.name ?? undefined,
+        action: `Menu import: ${result.created} created, ${result.updated} updated`,
+        targetType: "restaurant",
+        targetId: input.restaurantId,
+      });
+      return result;
+    }),
+
+  // =========================================================================
+  // Delivery Integration
+  // =========================================================================
+  checkDeliveryServiceability: adminProcedure
+    .input(z.object({ pincode: z.string().min(4).max(10) }))
+    .query(async ({ input }) => {
+      const provider = getDeliveryProvider();
+      return provider.checkServiceability(input.pincode);
+    }),
+
+  // =========================================================================
+  // Refunds
+  // =========================================================================
+  initiateRefund: adminProcedure
+    .input(z.object({
+      orderId: z.string().min(4),
+      paymentId: z.string().min(4),
+      amountPaise: z.number().int().positive(),
+      reason: z.string().max(500).optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const result = await initiateRefund({
+        ...input,
+        initiatedBy: ctx.user.id,
+      });
+      await logAudit({
+        actorId: ctx.user.id,
+        actorName: ctx.user.name ?? undefined,
+        action: `Refund initiated: ₹${input.amountPaise / 100}`,
+        targetType: "order",
+        targetId: input.orderId,
+        afterData: { refundId: result.refundId, amountPaise: input.amountPaise },
+      });
+      return result;
+    }),
+
+  // =========================================================================
+  // Audit Logs
+  // =========================================================================
+  auditLogs: adminProcedure
+    .input(z.object({
+      targetType: z.string().optional(),
+      targetId: z.string().optional(),
+      limit: z.number().int().min(1).max(100).default(50),
+    }))
+    .query(async ({ input }) => {
+      const db = await import("../db").then(m => m.getDb());
+      if (!db) return [];
+      const { auditLogs } = await import("../../drizzle/schema");
+      const { eq, and, desc } = await import("drizzle-orm");
+
+      const conditions = [];
+      if (input.targetType) conditions.push(eq(auditLogs.targetType, input.targetType));
+      if (input.targetId) conditions.push(eq(auditLogs.targetId, input.targetId));
+
+      return db.select().from(auditLogs)
+        .where(conditions.length ? and(...conditions) : undefined)
+        .orderBy(desc(auditLogs.createdAt))
+        .limit(input.limit);
+    }),
+
+  // =========================================================================
+  // Settings
+  // =========================================================================
+  getSetting: adminProcedure
+    .input(z.object({ key: z.string().min(1) }))
+    .query(({ input }) => getSetting(input.key)),
+
+  setSetting: adminProcedure
+    .input(z.object({
+      key: z.string().min(1),
+      value: z.string(),
+      category: z.string().default("general"),
+    }))
+    .mutation(({ ctx, input }) => setSetting(input.key, input.value, input.category, ctx.user.id)),
+});
