@@ -1,6 +1,9 @@
-/** Vite dev server integration for development mode. */
+/** Vite dev server integration for development mode, and static file serving for production. */
 import type { Express } from "express";
 import type { Server } from "http";
+import express from "express";
+import path from "path";
+import fs from "fs";
 
 let vite: any;
 
@@ -20,5 +23,27 @@ export async function setupVite(app: Express, server: Server) {
 }
 
 export function serveStatic(app: Express) {
-  // In production, static files are served by the index.ts entry
+  const distPath = path.resolve(process.cwd(), "dist", "public");
+
+  if (!fs.existsSync(distPath)) {
+    console.warn(`[Static] dist/public not found at ${distPath}`);
+    return;
+  }
+
+  // Serve static assets with long cache
+  app.use(
+    express.static(distPath, {
+      maxAge: "30d",
+      index: false,
+    })
+  );
+
+  // SPA fallback — serve index.html for all non-API routes
+  const indexPath = path.join(distPath, "index.html");
+  app.get("*", (req, res) => {
+    if (req.path.startsWith("/api/")) {
+      return res.status(404).json({ error: "API route not found" });
+    }
+    res.sendFile(indexPath);
+  });
 }
