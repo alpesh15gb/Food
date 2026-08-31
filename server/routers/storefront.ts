@@ -22,9 +22,13 @@ const addressSchema = z.object({
   landmark: z.string().max(180).optional(),
   area: z.string().min(1).max(180),
   city: z.string().min(1).max(120),
-  postalCode: z.string().regex(/^\\d{6}$/, "A valid 6-digit Indian pincode is required."),
-  latitude: z.string().optional(),
-  longitude: z.string().optional(),
+  postalCode: z.string().regex(/^\\d{6}$/),
+  // Required: precise delivery coordinates
+  latitude: z.number().min(-90).max(90),
+  longitude: z.number().min(-180).max(180),
+  accuracyMeters: z.number().min(0).max(10000).optional(),
+  locationSource: z.enum(["device_gps", "map_pin", "place_search", "saved_address"]),
+  placeId: z.string().max(256).optional(),
 }).refine(
   value => Boolean(value.flatHouse && value.area && value.city && value.postalCode),
   "A complete delivery address with pincode is required."
@@ -223,13 +227,45 @@ export const storefrontRouter = router({
     }),
 
   // =========================================================================
-  // Serviceability
+  // Serviceability — coordinate-based, server-side authoritative
   // =========================================================================
   checkServiceability: publicProcedure
-    .input(z.object({ pincode: z.string().regex(/^\\d{6}$/) }))
+    .input(z.object({
+      slug: z.string().min(2),
+      latitude: z.number().min(-90).max(90),
+      longitude: z.number().min(-180).max(180),
+    }))
     .query(async ({ input }) => {
-      const provider = getDeliveryProvider();
-      return provider.checkServiceability(input.pincode);
+      const { checkServiceability, validateGeoLocation } = await import("../domain/locationService");
+      const { getDb } = await import("../db");
+      const { restaurants, outlets } = await import("../../drizzle/schema");
+      const { eq, and } = await import("drizzle-orm");
+
+      // Validate coordinates server-side
+      const loc = validateGeoLocation({ latitude: input.latitude, longitude: input.longitude });
+      if (!loc.valid) {
+        return { serviceable: false as const, reason: "INVALID_LOCATION" as const };
+      }
+
+      const db = await getDb();
+      if (!db) return { serviceable: false as const, reason: "NO_ACTIVE_OUTLET" as const };
+
+      // Find restaurant
+      const restaurant = (await db.select().from(restaurants).where(eq(restaurants.slug, input.slug)).limit(1))[0];
+      if (!restaurant) return { serviceable: false as const, reason: "NO_ACTIVE_OUTLET" as const };
+
+      const getOutlets = async (restId: string) => {
+        return db.select().from(outlets).where(eq(outlets.restaurantId, restId)) as any;
+      };
+
+      const result = await checkServiceability(
+        loc.latitude!,
+        loc.longitude!,
+        restaurant.id,
+        getOutlets,
+      );
+
+      return result;
     }),
 
   // =========================================================================
@@ -249,7 +285,7 @@ export const storefrontRouter = router({
         userId: 0, // Issue 3: guest user — createOrderFromValidatedCart handles this
         slug: input.slug,
         lines: input.lines,
-        address: input.address as Record<string, string>,
+        address: input.address as Record<string, unknown>,
         couponCode: input.couponCode,
         deliveryNotes: input.deliveryNotes,
         cutleryPreference: input.cutleryPreference,

@@ -13,6 +13,7 @@ import {
   TicketPercent, UserRound, Utensils, X, Zap,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import DeliveryLocationDrawer, { type DeliveryLocation } from "@/components/DeliveryLocationDrawer";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Drawer, DrawerContent, DrawerDescription, DrawerFooter, DrawerHeader, DrawerTitle } from "@/components/ui/drawer";
 import { Input } from "@/components/ui/input";
@@ -134,14 +135,11 @@ export default function OrderingApp() {
   const [size, setSize] = useState("Regular");
   const [extras, setExtras] = useState<string[]>([]);
   const [note, setNote] = useState("");
-  const [addressOpen, setAddressOpen] = useState(false);
   const [couponOpen, setCouponOpen] = useState(false);
   const [processing, setProcessing] = useState(false);
   // Issue 4: Delivery address and phone for checkout
-  const [deliveryAddress, setDeliveryAddress] = useState<{
-    flatHouse?: string; building?: string; street?: string;
-    landmark?: string; area?: string; city?: string; postalCode?: string;
-  }>({});
+  const [deliveryAddress, setDeliveryAddress] = useState<DeliveryLocation | null>(null);
+  const [locationOpen, setLocationOpen] = useState(false);
   const [customerPhone, setCustomerPhone] = useState(() => localStorage.getItem("ck_phone_prefill") ?? "");
   // Customer auth state — server-side session via HttpOnly cookie
   const [authOpen, setAuthOpen] = useState(false);
@@ -328,6 +326,16 @@ export default function OrderingApp() {
         `Minimum order is ${formatINR(restaurant?.minOrder ?? 0)}`
       );
     }
+    // Require confirmed delivery location with coordinates
+    if (!deliveryAddress?.confirmed) {
+      setLocationOpen(true);
+      return toast.error("Please confirm your delivery location first.", {
+        description: "Tap on the delivery address bar to set your location.",
+      });
+    }
+    if (!customerPhone || customerPhone.length < 10) {
+      return toast.error("Please enter your phone number.");
+    }
 
     setProcessing(true);
     try {
@@ -340,14 +348,21 @@ export default function OrderingApp() {
           modifierOptionIds: line.modifiers?.length ? line.modifiers.map((name, i) => `${line.item.id}_opt_${i}`) : undefined,
           specialInstructions: line.note,
         })),
-        // Issue 4: Address requires postalCode and customerPhone
+        // Issue 4: Address with precise coordinates — NO fallbacks
         address: {
-          flatHouse: deliveryAddress?.flatHouse || "To be confirmed",
-          area: deliveryAddress?.area || "To be confirmed",
-          city: deliveryAddress?.city || "Bengaluru",
-          postalCode: deliveryAddress?.postalCode || "560034",
+          flatHouse: deliveryAddress.flatHouse,
+          building: deliveryAddress.building,
+          street: deliveryAddress.street,
+          landmark: deliveryAddress.landmark,
+          area: deliveryAddress.area,
+          city: deliveryAddress.city,
+          postalCode: deliveryAddress.postalCode,
+          latitude: deliveryAddress.latitude,
+          longitude: deliveryAddress.longitude,
+          accuracyMeters: deliveryAddress.accuracyMeters,
+          locationSource: deliveryAddress.locationSource,
         },
-        customerPhone: customerPhone || "+919999999999",
+        customerPhone,
       });
 
       // Load Razorpay checkout
@@ -496,7 +511,7 @@ export default function OrderingApp() {
         <div className="mx-auto max-w-[1440px] px-4 sm:px-6 lg:px-10">
           <section className="relative -mt-1 border-x border-b border-[#eadac9] bg-[#fffdf9] px-4 py-3 shadow-sm sm:px-5 lg:rounded-b-2xl">
             <button
-              onClick={() => setAddressOpen(true)}
+              onClick={() => setLocationOpen(true)}
               className="flex w-full items-center justify-between gap-3 text-left"
             >
               <div className="flex min-w-0 items-center gap-3">
@@ -505,11 +520,17 @@ export default function OrderingApp() {
                 </span>
                 <div className="min-w-0">
                   <p className="text-[11px] font-extrabold uppercase tracking-[0.14em] text-[#9a7660]">
-                    Delivery service
+                    {deliveryAddress?.confirmed ? "Delivering to" : "Set delivery location"}
                   </p>
-                  <p className="truncate text-sm font-bold text-[#382719]">
-                    {restaurant.address}
-                  </p>
+                  {deliveryAddress?.confirmed ? (
+                    <p className="truncate text-sm font-bold text-[#382719]">
+                      {deliveryAddress.flatHouse}, {deliveryAddress.area}, {deliveryAddress.city} {deliveryAddress.postalCode}
+                    </p>
+                  ) : (
+                    <p className="truncate text-sm font-bold text-[#C84630]">
+                      Tap to set your delivery location
+                    </p>
+                  )}
                 </div>
               </div>
               <ChevronRight className="h-4 w-4 text-[#9a7660]" />
@@ -727,8 +748,13 @@ export default function OrderingApp() {
         onAdd={addCustomItem}
       />
 
-      {/* Address Dialog */}
-      <AddressDialog open={addressOpen} onOpenChange={setAddressOpen} />
+      {/* Delivery Location Drawer */}
+      <DeliveryLocationDrawer
+        open={locationOpen}
+        onOpenChange={setLocationOpen}
+        onConfirm={(loc) => setDeliveryAddress(loc)}
+        existingLocation={deliveryAddress}
+      />
 
       {/* Customer Auth Drawer */}
       <Drawer open={authOpen} onOpenChange={setAuthOpen}>
@@ -1432,44 +1458,6 @@ function OptionGroup({
         })}
       </div>
     </div>
-  );
-}
-
-function AddressDialog({
-  open,
-  onOpenChange,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-}) {
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md rounded-[1.5rem] border-[#dfcbb9] bg-[#fffaf3] p-0">
-        <div className="paper-grain rounded-t-[1.5rem] border-b border-[#ead8c6] p-6">
-          <DialogHeader>
-            <DialogTitle className="font-display text-3xl text-[#382719]">
-              Delivery coverage
-            </DialogTitle>
-            <DialogDescription className="text-[#856653]">
-              Service areas and address selection will be configured by the kitchen team.
-            </DialogDescription>
-          </DialogHeader>
-        </div>
-        <div className="space-y-4 p-6">
-          <div className="rounded-xl border border-dashed border-[#d9b89e] bg-[#fff4e9] p-4 text-sm leading-relaxed text-[#885e43]">
-            <MapPin className="mr-1 inline h-4 w-4" />
-            Delivery address selection will activate once customer sign-in is configured.
-          </div>
-          <Button
-            onClick={() => onOpenChange(false)}
-            variant="outline"
-            className="h-11 w-full rounded-xl border-[#dfcbb9] bg-white font-extrabold text-[#5c4332]"
-          >
-            Close
-          </Button>
-        </div>
-      </DialogContent>
-    </Dialog>
   );
 }
 

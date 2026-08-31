@@ -430,7 +430,7 @@ export async function createOrderFromValidatedCart(args: {
     selectedVariantId?: string;
     specialInstructions?: string;
   }>;
-  address: Record<string, string>;
+  address: Record<string, unknown>;
   couponCode?: string;
   deliveryNotes?: string;
   cutleryPreference?: boolean;
@@ -461,6 +461,19 @@ export async function createOrderFromValidatedCart(args: {
   }
   if (!addr.postalCode || !/^\d{6}$/.test(String(addr.postalCode))) {
     throw new Error("A valid 6-digit pincode is required.");
+  }
+
+  // --- Require precise delivery coordinates ---
+  const lat = typeof addr.latitude === "string" ? parseFloat(addr.latitude) : addr.latitude;
+  const lng = typeof addr.longitude === "string" ? parseFloat(addr.longitude) : addr.longitude;
+  if (lat == null || lng == null || !Number.isFinite(Number(lat)) || !Number.isFinite(Number(lng))) {
+    throw new Error("Precise delivery coordinates (latitude/longitude) are required. Please confirm your delivery location on the map.");
+  }
+  if (Number(lat) < -90 || Number(lat) > 90) {
+    throw new Error("Invalid delivery latitude. Please confirm your location on the map.");
+  }
+  if (Number(lng) < -180 || Number(lng) > 180) {
+    throw new Error("Invalid delivery longitude. Please confirm your location on the map.");
   }
 
   // --- Issue 5: Resolve modifier prices from DB, never trust client ---

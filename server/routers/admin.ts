@@ -35,6 +35,10 @@ import { applyMenuImport, previewMenuImport } from "../menuImport";
 import { readIntegrationSecret, saveIntegrationSecret } from "../security/secretVault";
 import { getDeliveryProvider, createManualDelivery } from "../integrations/shadowfax";
 import { initiateRefund } from "../integrations/razorpay";
+import { orders, deliveries, outlets, restaurants, deliveryStatusHistory, orderStatusHistory } from "../../drizzle/schema";
+import { getDb } from "../db";
+import { nanoid } from "nanoid";
+import { eq } from "drizzle-orm";
 
 const availability = z.enum(["AVAILABLE", "SOLD_OUT", "SCHEDULED_UNAVAILABLE", "OUT_OF_STOCK", "DISABLED"]);
 const orderStatus = z.enum([
@@ -415,6 +419,130 @@ export const adminRouter = router({
         afterData: { riderName: input.riderName, riderPhone: input.riderPhone },
       });
       return result;
+    }),
+
+  // --- Shadowfax dispatch: wire createDelivery with idempotency ---
+  shadowfaxDispatch: requirePermission("orders:write").input(z.object({
+    orderId: z.string().min(4),
+  }))
+    .mutation(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new Error("Database not available.");
+
+      // 1. Load order
+      const order = (await db.select().from(orders).where(eq(orders.id, input.orderId)).limit(1))[0];
+      if (!order) throw new Error("Order not found.");
+      if (order.status !== "READY_FOR_PICKUP") {
+        throw new Error(`Order must be READY_FOR_PICKUP to dispatch. Current status: ${order.status}`);
+      }
+
+      // 2. Check for existing delivery (idempotency)
+      const existingDelivery = (await db.select().from(deliveries).where(eq(deliveries.orderId, input.orderId)).limit(1))[0];
+      if (existingDelivery && existingDelivery.provider !== "manual") {
+        throw new Error("Delivery already dispatched for this order.");
+      }
+
+      // 3. Load outlet for pickup coordinates
+      const outlet = (await db.select().from(outlets).where(eq(outlets.id, order.outletId)).limit(1))[0];
+      if (!outlet) throw new Error("Outlet not found.");
+
+      const { validateGeoLocation } = await import("../domain/locationService");
+      const pickupLoc = validateGeoLocation({ latitude: outlet.latitude, longitude: outlet.longitude });
+      if (!pickupLoc.valid) throw new Error("Outlet pickup coordinates are not configured. Please set outlet lat/lng.");
+
+      // 4. Validate drop coordinates from immutable order snapshot
+      const addrSnapshot = order.addressSnapshot as Record<string, string>;
+      const dropLoc = validateGeoLocation({ latitude: addrSnapshot.latitude, longitude: addrSnapshot.longitude });
+      if (!dropLoc.valid) throw new Error("Order delivery coordinates are missing. Cannot dispatch without precise location.");
+
+      // 5. Build Shadowfax payload
+      const provider = getDeliveryProvider();
+      const restaurant = (await db.select().from(restaurants).where(eq(restaurants.id, order.restaurantId)).limit(1))[0];
+
+      const result = await provider.createDelivery({
+        orderId: order.id,
+        orderNumber: order.orderNumber,
+        restaurantName: restaurant?.name ?? "Kitchen",
+        pickupAddress: {
+          name: outlet.name,
+          phone: outlet.phone ?? restaurant?.contactPhone ?? "",
+          address: outlet.address,
+          city: outlet.city,
+          pincode: outlet.postalCode ?? "",
+          latitude: pickupLoc.latitude,
+          longitude: pickupLoc.longitude,
+        },
+        dropAddress: {
+          name: order.customerName ?? "Customer",
+          phone: order.customerPhone ?? "",
+          address: [addrSnapshot.flatHouse, addrSnapshot.building, addrSnapshot.street, addrSnapshot.area].filter(Boolean).join(", "),
+          city: addrSnapshot.city ?? "",
+          pincode: addrSnapshot.postalCode ?? "",
+          latitude: dropLoc.latitude,
+          longitude: dropLoc.longitude,
+        },
+        items: [], // items not needed for dispatch
+        totalAmountPaise: order.totalPaise,
+        estimatedPreparationMinutes: 0,
+        specialInstructions: order.specialInstructions ?? order.deliveryNotes ?? undefined,
+      });
+
+      if (!result.success) {
+        throw new Error(`Shadowfax dispatch failed: ${result.error}`);
+      }
+
+      // 6. Store delivery record (transaction)
+      const deliveryId = nanoid(18);
+      await db.transaction(async (tx) => {
+        await tx.insert(deliveries).values({
+          id: deliveryId,
+          orderId: order.id,
+          provider: "shadowfax",
+          providerDeliveryId: result.deliveryId ?? null,
+          trackingId: result.trackingId ?? null,
+          status: "PENDING",
+          quotedChargePaise: result.quotedChargePaise ?? null,
+          estimatedPickup: result.estimatedPickup ?? null,
+          estimatedDelivery: result.estimatedDelivery ?? null,
+          trackingUrl: result.trackingUrl ?? null,
+          providerPayload: result.rawPayload ?? null,
+        });
+
+        await tx.insert(deliveryStatusHistory).values({
+          id: nanoid(18),
+          deliveryId,
+          status: "PENDING",
+          note: "Shadowfax delivery created.",
+        });
+
+        await tx.update(orders).set({ status: "DELIVERY_REQUESTED" }).where(eq(orders.id, order.id));
+        await tx.insert(orderStatusHistory).values({
+          id: nanoid(18),
+          orderId: order.id,
+          status: "DELIVERY_REQUESTED",
+          note: `Shadowfax delivery dispatched. Tracking: ${result.trackingId ?? "N/A"}.`,
+          actorId: ctx.user.id,
+        });
+      });
+
+      // 7. Audit
+      await logAudit({
+        actorId: ctx.user.id,
+        actorName: ctx.user.name ?? undefined,
+        action: "Shadowfax delivery dispatched",
+        targetType: "delivery",
+        targetId: order.id,
+        afterData: { providerDeliveryId: result.deliveryId, trackingId: result.trackingId },
+      });
+
+      return {
+        success: true,
+        deliveryId,
+        providerDeliveryId: result.deliveryId,
+        trackingId: result.trackingId,
+        trackingUrl: result.trackingUrl,
+        estimatedDelivery: result.estimatedDelivery,
+      };
     }),
 
   // =========================================================================
