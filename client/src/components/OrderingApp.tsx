@@ -337,7 +337,31 @@ export default function OrderingApp() {
       return toast.error("Please enter your phone number.");
     }
 
+    // Serviceability pre-check — block payment if outside delivery area
     setProcessing(true);
+    try {
+      const svcRes = await fetch(
+        `/api/trpc/storefront.checkServiceability?input=${encodeURIComponent(JSON.stringify({ slug: storefrontSlug, latitude: deliveryAddress.latitude, longitude: deliveryAddress.longitude }))}`,
+        { credentials: "include" }
+      );
+      const svcJson = await svcRes.json();
+      const serviceability = svcJson?.result?.data ?? svcJson;
+      if (!serviceability?.serviceable) {
+        setProcessing(false);
+        const reason = serviceability?.reason ?? "";
+        toast.error("Sorry, we can't deliver to this location.", {
+          description: reason === "OUTSIDE_DELIVERY_RADIUS"
+            ? "Your location is outside our current delivery area."
+            : "Please try a different address.",
+        });
+        return;
+      }
+    } catch {
+      setProcessing(false);
+      toast.error("Could not verify delivery availability. Please try again.");
+      return;
+    }
+
     try {
       const created = await initiatePayment.mutateAsync({
         slug: storefrontSlug,

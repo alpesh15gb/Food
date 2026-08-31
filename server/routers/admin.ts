@@ -436,10 +436,12 @@ export const adminRouter = router({
         throw new Error(`Order must be READY_FOR_PICKUP to dispatch. Current status: ${order.status}`);
       }
 
-      // 2. Check for existing delivery (idempotency)
+      // 2. Check for existing active delivery (idempotency guard)
       const existingDelivery = (await db.select().from(deliveries).where(eq(deliveries.orderId, input.orderId)).limit(1))[0];
       if (existingDelivery && existingDelivery.provider !== "manual") {
-        throw new Error("Delivery already dispatched for this order.");
+        if (["DISPATCHING", "PENDING", "ASSIGNED"].includes(existingDelivery.status ?? "")) {
+          throw new Error("Delivery already dispatched or in progress for this order.");
+        }
       }
 
       // 3. Load outlet for pickup coordinates
@@ -455,49 +457,89 @@ export const adminRouter = router({
       const dropLoc = validateGeoLocation({ latitude: addrSnapshot.latitude, longitude: addrSnapshot.longitude });
       if (!dropLoc.valid) throw new Error("Order delivery coordinates are missing. Cannot dispatch without precise location.");
 
-      // 5. Build Shadowfax payload
-      const provider = getDeliveryProvider();
-      const restaurant = (await db.select().from(restaurants).where(eq(restaurants.id, order.restaurantId)).limit(1))[0];
-
-      const result = await provider.createDelivery({
-        orderId: order.id,
-        orderNumber: order.orderNumber,
-        restaurantName: restaurant?.name ?? "Kitchen",
-        pickupAddress: {
-          name: outlet.name,
-          phone: outlet.phone ?? restaurant?.contactPhone ?? "",
-          address: outlet.address,
-          city: outlet.city,
-          pincode: outlet.postalCode ?? "",
-          latitude: pickupLoc.latitude,
-          longitude: pickupLoc.longitude,
-        },
-        dropAddress: {
-          name: order.customerName ?? "Customer",
-          phone: order.customerPhone ?? "",
-          address: [addrSnapshot.flatHouse, addrSnapshot.building, addrSnapshot.street, addrSnapshot.area].filter(Boolean).join(", "),
-          city: addrSnapshot.city ?? "",
-          pincode: addrSnapshot.postalCode ?? "",
-          latitude: dropLoc.latitude,
-          longitude: dropLoc.longitude,
-        },
-        items: [], // items not needed for dispatch
-        totalAmountPaise: order.totalPaise,
-        estimatedPreparationMinutes: 0,
-        specialInstructions: order.specialInstructions ?? order.deliveryNotes ?? undefined,
-      });
-
-      if (!result.success) {
-        throw new Error(`Shadowfax dispatch failed: ${result.error}`);
-      }
-
-      // 6. Store delivery record (transaction)
+      // 5. Create delivery record BEFORE external API call (idempotency)
       const deliveryId = nanoid(18);
       await db.transaction(async (tx) => {
         await tx.insert(deliveries).values({
           id: deliveryId,
           orderId: order.id,
           provider: "shadowfax",
+          status: "DISPATCHING",
+        });
+        await tx.insert(deliveryStatusHistory).values({
+          id: nanoid(18),
+          deliveryId,
+          status: "DISPATCHING",
+          note: "Dispatch initiated — awaiting provider response.",
+        });
+      });
+
+      // 6. Call Shadowfax API
+      const provider = getDeliveryProvider();
+      const restaurant = (await db.select().from(restaurants).where(eq(restaurants.id, order.restaurantId)).limit(1))[0];
+
+      let result;
+      try {
+        result = await provider.createDelivery({
+          orderId: order.id,
+          orderNumber: order.orderNumber,
+          restaurantName: restaurant?.name ?? "Kitchen",
+          pickupAddress: {
+            name: outlet.name,
+            phone: outlet.phone ?? restaurant?.contactPhone ?? "",
+            address: outlet.address,
+            city: outlet.city,
+            pincode: outlet.postalCode ?? "",
+            latitude: pickupLoc.latitude,
+            longitude: pickupLoc.longitude,
+          },
+          dropAddress: {
+            name: order.customerName ?? "Customer",
+            phone: order.customerPhone ?? "",
+            address: [addrSnapshot.flatHouse, addrSnapshot.building, addrSnapshot.street, addrSnapshot.area].filter(Boolean).join(", "),
+            city: addrSnapshot.city ?? "",
+            pincode: addrSnapshot.postalCode ?? "",
+            latitude: dropLoc.latitude,
+            longitude: dropLoc.longitude,
+          },
+          items: [],
+          totalAmountPaise: order.totalPaise,
+          estimatedPreparationMinutes: 0,
+          specialInstructions: order.specialInstructions ?? order.deliveryNotes ?? undefined,
+        });
+      } catch (error) {
+        // External API failed — mark delivery as FAILED
+        await db.update(deliveries).set({
+          status: "FAILED",
+          providerPayload: { error: error instanceof Error ? error.message : "Unknown error" },
+        }).where(eq(deliveries.id, deliveryId));
+        await db.insert(deliveryStatusHistory).values({
+          id: nanoid(18),
+          deliveryId,
+          status: "FAILED",
+          note: `Provider API call failed: ${error instanceof Error ? error.message : "Unknown error"}`,
+        });
+        throw new Error(`Shadowfax dispatch failed: ${error instanceof Error ? error.message : "Unknown error"}`);
+      }
+
+      if (!result.success) {
+        // Provider returned failure — mark delivery as FAILED
+        await db.update(deliveries).set({
+          status: "FAILED",
+          providerPayload: { error: result.error },
+        }).where(eq(deliveries.id, deliveryId));
+        await db.insert(deliveryStatusHistory).values({
+          id: nanoid(18),
+          deliveryId,
+          status: "FAILED",
+          note: `Provider rejected: ${result.error}`,
+        });
+        throw new Error(`Shadowfax dispatch failed: ${result.error}`);
+      }
+
+      // 7. Update delivery record with provider response
+      await db.transaction(async (tx) => {
+        await tx.update(deliveries).set({
           providerDeliveryId: result.deliveryId ?? null,
           trackingId: result.trackingId ?? null,
           status: "PENDING",
@@ -506,13 +548,13 @@ export const adminRouter = router({
           estimatedDelivery: result.estimatedDelivery ?? null,
           trackingUrl: result.trackingUrl ?? null,
           providerPayload: result.rawPayload ?? null,
-        });
+        }).where(eq(deliveries.id, deliveryId));
 
         await tx.insert(deliveryStatusHistory).values({
           id: nanoid(18),
           deliveryId,
           status: "PENDING",
-          note: "Shadowfax delivery created.",
+          note: "Shadowfax delivery created successfully.",
         });
 
         await tx.update(orders).set({ status: "DELIVERY_REQUESTED" }).where(eq(orders.id, order.id));

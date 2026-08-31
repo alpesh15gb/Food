@@ -224,6 +224,7 @@ export const outlets = pgTable("outlets", {
   deliveryRadiusKm: numeric("delivery_radius_km", { precision: 5, scale: 2 }).default("5"),
   isActive: boolean("is_active").notNull().default(true),
   isOpen: boolean("is_open").notNull().default(true),
+  coordinatesConfirmedAt: timestamp("coordinates_confirmed_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (t) => [index("outlet_restaurant_idx").on(t.restaurantId)]);
 

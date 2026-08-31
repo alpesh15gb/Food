@@ -476,6 +476,18 @@ export async function createOrderFromValidatedCart(args: {
     throw new Error("Invalid delivery longitude. Please confirm your location on the map.");
   }
 
+  // --- Server-authoritative outlet selection (nearest serviceable outlet) ---
+  const { selectBestOutlet } = await import("./domain/locationService");
+  const allOutlets = await db.select().from(outlets).where(
+    and(eq(outlets.restaurantId, storefront.restaurant.id), eq(outlets.isActive, true), eq(outlets.isOpen, true))
+  );
+  const outletSelection = selectBestOutlet(allOutlets, Number(lat), Number(lng));
+  if (!outletSelection) {
+    throw new Error("No outlet can deliver to your location. Please choose a different delivery address.");
+  }
+  const selectedOutlet = outletSelection.outlet;
+  const deliveryDistanceKm = outletSelection.distanceKm;
+
   // --- Issue 5: Resolve modifier prices from DB, never trust client ---
   const addonOptionIds = args.lines.flatMap(l => l.modifierOptionIds ?? []);
   let addonOptionMap = new Map<string, { id: string; name: string; pricePaise: number; addonGroupId: string; isAvailable: boolean }>();
@@ -646,11 +658,11 @@ export async function createOrderFromValidatedCart(args: {
       orderNumber,
       trackingToken,
       restaurantId: storefront.restaurant.id,
-      outletId: storefront.outlet.id,
+      outletId: selectedOutlet.id,
       customerId,
       status: "PENDING_PAYMENT",
       paymentStatus: "PENDING",
-      addressSnapshot: addr,
+      addressSnapshot: { ...addr, deliveryDistanceKm },
       customerName: (addr.name as string) || null,
       customerPhone: phone,
       customerEmail: args.customerEmail ?? null,
@@ -659,7 +671,7 @@ export async function createOrderFromValidatedCart(args: {
       deliveryNotes: args.deliveryNotes ?? null,
       specialInstructions: args.lines.map(l => l.specialInstructions).filter(Boolean).join("; ") || null,
       cutleryPreference: args.cutleryPreference ?? false,
-      estimatedMinutes: storefront.outlet.preparationMinutes + 15,
+      estimatedMinutes: selectedOutlet.preparationMinutes + 15,
     });
 
     // Create order items (using server-resolved prices)
@@ -717,7 +729,7 @@ export async function createOrderFromValidatedCart(args: {
     orderNumber,
     trackingToken,
     ...finalQuote,
-    estimatedMinutes: storefront.outlet.preparationMinutes + 15,
+    estimatedMinutes: selectedOutlet.preparationMinutes + 15,
   };
 }
 
@@ -728,12 +740,21 @@ export async function updateOrderStatus(
   note?: string
 ) {
   const db = await requireDb();
+  const { validateTransition } = await import("./domain/orderStateMachine");
 
   // Get current status
   const order = (await db.select().from(orders).where(eq(orders.id, orderId)).limit(1))[0];
   if (!order) throw new Error("Order not found.");
 
+  // Enforce valid state transition
+  const transition = validateTransition(order.status as OrderStatus, status);
+
   const updateData: Record<string, unknown> = { status };
+
+  // Apply payment status from state machine when applicable
+  if (transition.paymentStatus) {
+    updateData.paymentStatus = transition.paymentStatus;
+  }
 
   // Set timestamp fields
   if (status === "RESTAURANT_ACCEPTED") updateData.acceptedAt = new Date();

@@ -126,10 +126,11 @@ describe("Accuracy Classification", () => {
     expect(classifyAccuracy(500)).toBe("POOR");
   });
 
-  it("defaults to GOOD for null/undefined/zero", () => {
-    expect(classifyAccuracy(null)).toBe("GOOD");
-    expect(classifyAccuracy(undefined)).toBe("GOOD");
-    expect(classifyAccuracy(-1)).toBe("GOOD");
+  it("returns UNKNOWN for null/undefined/zero/negative accuracy", () => {
+    expect(classifyAccuracy(null)).toBe("UNKNOWN");
+    expect(classifyAccuracy(undefined)).toBe("UNKNOWN");
+    expect(classifyAccuracy(0)).toBe("UNKNOWN");
+    expect(classifyAccuracy(-5)).toBe("UNKNOWN");
   });
 });
 

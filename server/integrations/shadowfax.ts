@@ -85,6 +85,7 @@ export type DeliveryStatusUpdate = {
 export interface DeliveryProvider {
   name: string;
   checkServiceability(pincode: string): Promise<{ serviceable: boolean; estimatedMinutes?: number }>;
+  checkRouteServiceability?(pickup: { lat: number; lng: number }, drop: { lat: number; lng: number }): Promise<{ serviceable: boolean; estimatedMinutes?: number }>;
   createDelivery(request: CreateDeliveryRequest): Promise<DeliveryResponse>;
   getDelivery(deliveryId: string): Promise<DeliveryResponse>;
   cancelDelivery(deliveryId: string, reason?: string): Promise<{ success: boolean; error?: string }>;
@@ -93,6 +94,9 @@ export interface DeliveryProvider {
 
 // =============================================================================
 // Shadowfax Production Adapter
+// CONTRACT STATUS: UNVERIFIED — These types and payload shapes are based on
+// Shadowfax API documentation. No sandbox verification has been performed.
+// All production calls should be monitored for contract drift.
 // =============================================================================
 
 const SHADOWFAX_API_BASE = process.env.SHADOWFAX_API_URL || "https://api.shadowfax.in";
@@ -133,6 +137,24 @@ class ShadowfaxProductionAdapter implements DeliveryProvider {
   async checkServiceability(pincode: string) {
     try {
       const data = await this.request(`/v1/serviceability/${pincode}`, "GET");
+      return {
+        serviceable: Boolean(data?.serviceable),
+        estimatedMinutes: data?.estimated_minutes,
+      };
+    } catch {
+      return { serviceable: false };
+    }
+  }
+
+  // CONTRACT STATUS: UNVERIFIED — endpoint shape assumed from docs
+  async checkRouteServiceability(pickup: { lat: number; lng: number }, drop: { lat: number; lng: number }) {
+    try {
+      const data = await this.request("/v1/serviceability/route", "POST", {
+        pickup_lat: pickup.lat,
+        pickup_lng: pickup.lng,
+        drop_lat: drop.lat,
+        drop_lng: drop.lng,
+      });
       return {
         serviceable: Boolean(data?.serviceable),
         estimatedMinutes: data?.estimated_minutes,
@@ -250,6 +272,10 @@ class MockDeliveryAdapter implements DeliveryProvider {
   name = "shadowfax_mock";
 
   async checkServiceability(pincode: string) {
+    return { serviceable: true, estimatedMinutes: 35 };
+  }
+
+  async checkRouteServiceability(pickup: { lat: number; lng: number }, drop: { lat: number; lng: number }) {
     return { serviceable: true, estimatedMinutes: 35 };
   }
 

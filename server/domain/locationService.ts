@@ -16,7 +16,7 @@ export type GeoLocation = {
   placeId?: string;
 };
 
-export type AccuracyLevel = "HIGH" | "GOOD" | "LOW" | "POOR";
+export type AccuracyLevel = "HIGH" | "GOOD" | "LOW" | "POOR" | "UNKNOWN";
 
 export type ServiceabilityResult =
   | {
@@ -26,7 +26,9 @@ export type ServiceabilityResult =
       distanceKm: number;
       estimatedDeliveryMinutes: number;
       provider: string;
-      providerServiceable: boolean;
+      localServiceable: true;
+      providerServiceable: boolean | "NOT_CHECKED";
+      providerVerification: "VERIFIED" | "NOT_CHECKED" | "FAILED";
     }
   | {
       serviceable: false;
@@ -82,7 +84,7 @@ export function validateGeoLocation(loc: {
 
 /** Classify GPS accuracy into operational levels. */
 export function classifyAccuracy(accuracyMeters: number | null | undefined): AccuracyLevel {
-  if (accuracyMeters == null || accuracyMeters <= 0) return "GOOD"; // unknown = assume good
+  if (accuracyMeters == null || accuracyMeters <= 0) return "UNKNOWN";
   if (accuracyMeters <= 20) return "HIGH";
   if (accuracyMeters <= 50) return "GOOD";
   if (accuracyMeters <= 100) return "LOW";
@@ -211,7 +213,8 @@ export async function checkServiceability(
   }
 
   // Layer 3: Shadowfax provider serviceability (optional)
-  let providerServiceable = true;
+  let providerServiceable: boolean | "NOT_CHECKED" = "NOT_CHECKED";
+  let providerVerification: "VERIFIED" | "NOT_CHECKED" | "FAILED" = "NOT_CHECKED";
   let estimatedMinutes = selection.outlet.preparationMinutes + 15;
   if (shadowfaxCheckFn) {
     const outletLoc = validateGeoLocation({
@@ -225,6 +228,7 @@ export async function checkServiceability(
           { lat: customerLat, lng: customerLng }
         );
         providerServiceable = providerResult.serviceable;
+        providerVerification = "VERIFIED";
         if (providerResult.estimatedMinutes) {
           estimatedMinutes = providerResult.estimatedMinutes;
         }
@@ -232,8 +236,8 @@ export async function checkServiceability(
           return { serviceable: false, reason: "SHADOWFAX_NOT_SERVICEABLE" };
         }
       } catch {
-        // If Shadowfax is down, allow order but flag it
         providerServiceable = false;
+        providerVerification = "FAILED";
       }
     }
   }
@@ -245,6 +249,8 @@ export async function checkServiceability(
     distanceKm: Math.round(selection.distanceKm * 100) / 100,
     estimatedDeliveryMinutes: estimatedMinutes,
     provider: shadowfaxCheckFn ? "shadowfax" : "direct",
+    localServiceable: true,
     providerServiceable,
+    providerVerification,
   };
 }

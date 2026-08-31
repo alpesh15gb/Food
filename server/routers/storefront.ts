@@ -263,6 +263,14 @@ export const storefrontRouter = router({
         loc.longitude!,
         restaurant.id,
         getOutlets,
+        async (pickup, drop) => {
+          const { getDeliveryProvider } = await import("../integrations/shadowfax");
+          const provider = getDeliveryProvider();
+          if (provider.checkRouteServiceability) {
+            return provider.checkRouteServiceability(pickup, drop);
+          }
+          return provider.checkServiceability("");
+        },
       );
 
       return result;
