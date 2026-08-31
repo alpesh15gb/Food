@@ -6,7 +6,6 @@ COPY patches/ ./patches/
 RUN corepack enable && pnpm install --frozen-lockfile
 
 COPY . .
-COPY deploy/assets/ ./client/public/assets/
 RUN pnpm run build
 
 ENV NODE_ENV=production

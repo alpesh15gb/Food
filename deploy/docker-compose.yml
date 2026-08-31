@@ -7,11 +7,18 @@ services:
     environment:
       NODE_ENV: production
       PORT: 4300
-      DATABASE_URL: mysql://supperclub:${MYSQL_PASSWORD}@db:3306/supperclub
+      DATABASE_URL: postgresql://cloudkitchen:${POSTGRES_PASSWORD}@db:5432/cloudkitchen
       ASSET_BASE_URL: /assets
       JWT_SECRET: ${JWT_SECRET}
+      COOKIE_SECRET: ${COOKIE_SECRET}
       LOCAL_ADMIN_TOKEN: ${LOCAL_ADMIN_TOKEN}
       SECRET_ENCRYPTION_KEY: ${SECRET_ENCRYPTION_KEY}
+      RAZORPAY_KEY_ID: ${RAZORPAY_KEY_ID:-}
+      RAZORPAY_KEY_SECRET: ${RAZORPAY_KEY_SECRET:-}
+      RAZORPAY_WEBHOOK_SECRET: ${RAZORPAY_WEBHOOK_SECRET:-}
+      SHADOWFAX_API_KEY: ${SHADOWFAX_API_KEY:-}
+      SHADOWFAX_MERCHANT_ID: ${SHADOWFAX_MERCHANT_ID:-}
+      SHADOWFAX_WEBHOOK_SECRET: ${SHADOWFAX_WEBHOOK_SECRET:-}
     ports:
       - "127.0.0.1:4300:4300"
     depends_on:
@@ -19,20 +26,19 @@ services:
         condition: service_healthy
 
   db:
-    image: mysql:8.4
+    image: postgres:16-alpine
     restart: unless-stopped
     environment:
-      MYSQL_DATABASE: supperclub
-      MYSQL_USER: supperclub
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      POSTGRES_DB: cloudkitchen
+      POSTGRES_USER: cloudkitchen
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
-      - supperclub_mysql:/var/lib/mysql
+      - cloudkitchen_pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "mysqladmin ping -h localhost -u root -p$$MYSQL_ROOT_PASSWORD"]
+      test: ["CMD-SHELL", "pg_isready -U cloudkitchen -d cloudkitchen"]
       interval: 10s
       timeout: 5s
       retries: 20
 
 volumes:
-  supperclub_mysql:
+  cloudkitchen_pgdata:
