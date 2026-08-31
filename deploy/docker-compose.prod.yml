@@ -1,0 +1,54 @@
+# Production Docker Compose with certbot for SSL
+# Used during initial setup only
+# After SSL is configured, use deploy/docker-compose.yml
+services:
+  app:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 4300
+      DATABASE_URL: postgresql://cloudkitchen:${POSTGRES_PASSWORD}@db:5432/cloudkitchen
+      ASSET_BASE_URL: /assets
+      JWT_SECRET: ${JWT_SECRET}
+      COOKIE_SECRET: ${COOKIE_SECRET}
+      LOCAL_ADMIN_TOKEN: ${LOCAL_ADMIN_TOKEN}
+      SECRET_ENCRYPTION_KEY: ${SECRET_ENCRYPTION_KEY}
+      RAZORPAY_KEY_ID: ${RAZORPAY_KEY_ID:-}
+      RAZORPAY_KEY_SECRET: ${RAZORPAY_KEY_SECRET:-}
+      RAZORPAY_WEBHOOK_SECRET: ${RAZORPAY_WEBHOOK_SECRET:-}
+      SHADOWFAX_API_KEY: ${SHADOWFAX_API_KEY:-}
+      SHADOWFAX_MERCHANT_ID: ${SHADOWFAX_MERCHANT_ID:-}
+      SHADOWFAX_WEBHOOK_SECRET: ${SHADOWFAX_WEBHOOK_SECRET:-}
+    ports:
+      - "127.0.0.1:4300:4300"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: cloudkitchen
+      POSTGRES_USER: cloudkitchen
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - cloudkitchen_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cloudkitchen -d cloudkitchen"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  certbot:
+    image: certbot/certbot
+    volumes:
+      - /var/www/certbot:/var/www/certbot
+      - /etc/letsencrypt:/etc/letsencrypt
+    entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew; sleep 12h & wait $${!}; done;'"
+
+volumes:
+  cloudkitchen_pgdata:
