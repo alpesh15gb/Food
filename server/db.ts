@@ -620,11 +620,11 @@ export async function createOrderFromValidatedCart(args: {
   const orderNumber = `ORD-${Date.now().toString(36).toUpperCase()}-${Math.floor(1000 + Math.random() * 9000)}`;
   const trackingToken = generateTrackingToken();
 
-  // --- Issue 18: Wrap order creation in a try/catch for consistency ---
-  // Note: pg Pool doesn't support drizzle transactions directly in the same way;
-  // we use sequential writes with clear error handling.
-  try {
-    await db.insert(orders).values({
+  // --- Issue 18: Atomic transaction — all-or-nothing order creation ---
+  // drizzle-orm/node-postgres wraps pool.connect() → BEGIN → work → COMMIT/ROLLBACK.
+  // If any step fails, all writes are rolled back atomically.
+  await db.transaction(async (tx) => {
+    await tx.insert(orders).values({
       id: orderId,
       orderNumber,
       trackingToken,
@@ -646,7 +646,7 @@ export async function createOrderFromValidatedCart(args: {
     });
 
     // Create order items (using server-resolved prices)
-    await db.insert(orderItems).values(
+    await tx.insert(orderItems).values(
       resolvedLines.map(line => {
         const item = storefront.items.find(mi => mi.id === line.menuItemId)!;
         const unitPrice = item.offerPricePaise ?? item.pricePaise;
@@ -670,14 +670,14 @@ export async function createOrderFromValidatedCart(args: {
       })
     );
 
-    await db.insert(orderStatusHistory).values({
+    await tx.insert(orderStatusHistory).values({
       id: id(),
       orderId,
       status: "PENDING_PAYMENT",
       note: "Order created; awaiting payment.",
     });
 
-    await db.insert(payments).values({
+    await tx.insert(payments).values({
       id: id(),
       orderId,
       amountPaise: finalQuote.totalPaise,
@@ -685,7 +685,7 @@ export async function createOrderFromValidatedCart(args: {
 
     // Record coupon usage
     if (args.couponCode && couponDiscountPaise > 0 && appliedCoupon) {
-      await db.insert(couponUsage).values({
+      await tx.insert(couponUsage).values({
         id: id(),
         couponId: appliedCoupon.id,
         orderId,
@@ -693,10 +693,7 @@ export async function createOrderFromValidatedCart(args: {
         discountPaise: couponDiscountPaise,
       });
     }
-  } catch (error) {
-    console.error(`[Order] Failed to create order ${orderId}:`, error);
-    throw error;
-  }
+  });
 
   return {
     id: orderId,
@@ -732,25 +729,27 @@ export async function updateOrderStatus(
     updateData.paymentStatus = "CANCELLED";
   }
 
-  await db.update(orders).set(updateData).where(eq(orders.id, orderId));
+  await db.transaction(async (tx) => {
+    await tx.update(orders).set(updateData).where(eq(orders.id, orderId));
 
-  await db.insert(orderStatusHistory).values({
-    id: id(),
-    orderId,
-    status,
-    note: note ?? `Status changed to ${status}`,
-    actorId: actorId ?? null,
+    await tx.insert(orderStatusHistory).values({
+      id: id(),
+      orderId,
+      status,
+      note: note ?? `Status changed to ${status}`,
+      actorId: actorId ?? null,
+    });
+
+    // Update customer stats
+    if (status === "DELIVERED" && order.customerId) {
+      await tx.execute(sql`
+        UPDATE customer_profiles
+        SET total_orders = total_orders + 1,
+            total_spent_paise = total_spent_paise + ${order.totalPaise}
+        WHERE id = ${order.customerId}
+      `);
+    }
   });
-
-  // Update customer stats
-  if (status === "DELIVERED" && order.customerId) {
-    await db.execute(sql`
-      UPDATE customer_profiles
-      SET total_orders = total_orders + 1,
-          total_spent_paise = total_spent_paise + ${order.totalPaise}
-      WHERE id = ${order.customerId}
-    `);
-  }
 }
 
 export async function getOrders(

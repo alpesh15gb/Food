@@ -178,34 +178,38 @@ export async function confirmPayment(input: {
     return { success: false, error: "Order has been cancelled or rejected." };
   }
 
-  // Update payment record
-  await db
-    .update(payments)
-    .set({
-      providerPaymentId: input.providerPaymentId,
-      status: "CAPTURED",
-    })
-    .where(eq(payments.orderId, input.localOrderId));
+  // --- Issue 18: Atomic transaction for payment confirmation ---
+  // All 3 writes (payment update, order update, status history) succeed or fail together.
+  await db.transaction(async (tx) => {
+    // Update payment record
+    await tx
+      .update(payments)
+      .set({
+        providerPaymentId: input.providerPaymentId,
+        status: "CAPTURED",
+      })
+      .where(eq(payments.orderId, input.localOrderId));
 
-  // Update order
-  await db
-    .update(orders)
-    .set({ paymentStatus: "PAID", status: "PLACED" })
-    .where(eq(orders.id, input.localOrderId));
+    // Update order
+    await tx
+      .update(orders)
+      .set({ paymentStatus: "PAID", status: "PLACED" })
+      .where(eq(orders.id, input.localOrderId));
 
-  // Record status history (check for duplicate)
-  const existingHistory = (await db.select().from(orderStatusHistory).where(
-    and(eq(orderStatusHistory.orderId, input.localOrderId), eq(orderStatusHistory.status, "PLACED"))
-  ).limit(1))[0];
+    // Record status history (check for duplicate)
+    const existingHistory = (await tx.select().from(orderStatusHistory).where(
+      and(eq(orderStatusHistory.orderId, input.localOrderId), eq(orderStatusHistory.status, "PLACED"))
+    ).limit(1))[0];
 
-  if (!existingHistory) {
-    await db.insert(orderStatusHistory).values({
-      id: nanoid(18),
-      orderId: input.localOrderId,
-      status: "PLACED",
-      note: `Payment verified via ${input.source === "webhook" ? "Razorpay webhook" : "checkout callback"}.`,
-    });
-  }
+    if (!existingHistory) {
+      await tx.insert(orderStatusHistory).values({
+        id: nanoid(18),
+        orderId: input.localOrderId,
+        status: "PLACED",
+        note: `Payment verified via ${input.source === "webhook" ? "Razorpay webhook" : "checkout callback"}.`,
+      });
+    }
+  });
 
   return { success: true };
 }
@@ -337,25 +341,27 @@ async function handlePaymentFailed(payment: Record<string, unknown>) {
   const db = await getDb();
   if (!db) return;
 
-  await db
-    .update(payments)
-    .set({
-      status: "FAILED",
-      providerPaymentId,
-      failureReason,
-    })
-    .where(eq(payments.orderId, orderId));
+  await db.transaction(async (tx) => {
+    await tx
+      .update(payments)
+      .set({
+        status: "FAILED",
+        providerPaymentId,
+        failureReason,
+      })
+      .where(eq(payments.orderId, orderId));
 
-  // Issue 13: Keep order at PENDING_PAYMENT (not CANCELLED) — allow retry
-  const order = (await db.select().from(orders).where(eq(orders.id, orderId)).limit(1))[0];
-  if (order && order.status === "PENDING_PAYMENT") {
-    await db.insert(orderStatusHistory).values({
-      id: nanoid(18),
-      orderId,
-      status: "PENDING_PAYMENT",
-      note: `Payment attempt failed: ${failureReason}. Customer may retry.`,
-    });
-  }
+    // Issue 13: Keep order at PENDING_PAYMENT (not CANCELLED) — allow retry
+    const order = (await tx.select().from(orders).where(eq(orders.id, orderId)).limit(1))[0];
+    if (order && order.status === "PENDING_PAYMENT") {
+      await tx.insert(orderStatusHistory).values({
+        id: nanoid(18),
+        orderId,
+        status: "PENDING_PAYMENT",
+        note: `Payment attempt failed: ${failureReason}. Customer may retry.`,
+      });
+    }
+  });
 }
 
 async function handleRefundCreated(refundEntity: Record<string, unknown>) {
@@ -376,20 +382,22 @@ async function handleRefundCreated(refundEntity: Record<string, unknown>) {
   ).limit(1))[0];
   if (existingRefund) return;
 
-  await db.insert(refunds).values({
-    id: nanoid(18),
-    paymentId: payment.id,
-    orderId: payment.orderId,
-    providerRefundId,
-    amountPaise: refundEntity.amount as number,
-    status: "PENDING",
-    providerPayload: refundEntity,
-  });
+  await db.transaction(async (tx) => {
+    await tx.insert(refunds).values({
+      id: nanoid(18),
+      paymentId: payment.id,
+      orderId: payment.orderId,
+      providerRefundId,
+      amountPaise: refundEntity.amount as number,
+      status: "PENDING",
+      providerPayload: refundEntity,
+    });
 
-  await db
-    .update(orders)
-    .set({ paymentStatus: "REFUND_PENDING" })
-    .where(eq(orders.id, payment.orderId));
+    await tx
+      .update(orders)
+      .set({ paymentStatus: "REFUND_PENDING" })
+      .where(eq(orders.id, payment.orderId));
+  });
 }
 
 async function handleRefundProcessed(refundEntity: Record<string, unknown>) {
@@ -403,26 +411,28 @@ async function handleRefundProcessed(refundEntity: Record<string, unknown>) {
   ).limit(1))[0];
   if (!existingRefund) return;
 
-  await db
-    .update(refunds)
-    .set({ status: "PROCESSED", providerPayload: refundEntity })
-    .where(eq(refunds.id, existingRefund.id));
+  await db.transaction(async (tx) => {
+    await tx
+      .update(refunds)
+      .set({ status: "PROCESSED", providerPayload: refundEntity })
+      .where(eq(refunds.id, existingRefund.id));
 
-  await db
-    .update(payments)
-    .set({ status: "REFUNDED" })
-    .where(eq(payments.id, existingRefund.paymentId));
+    await tx
+      .update(payments)
+      .set({ status: "REFUNDED" })
+      .where(eq(payments.id, existingRefund.paymentId));
 
-  await db
-    .update(orders)
-    .set({ paymentStatus: "REFUNDED", status: "REFUNDED" })
-    .where(eq(orders.id, existingRefund.orderId));
+    await tx
+      .update(orders)
+      .set({ paymentStatus: "REFUNDED", status: "REFUNDED" })
+      .where(eq(orders.id, existingRefund.orderId));
 
-  await db.insert(orderStatusHistory).values({
-    id: nanoid(18),
-    orderId: existingRefund.orderId,
-    status: "REFUNDED",
-    note: `Refund of ₹${existingRefund.amountPaise / 100} processed.`,
+    await tx.insert(orderStatusHistory).values({
+      id: nanoid(18),
+      orderId: existingRefund.orderId,
+      status: "REFUNDED",
+      note: `Refund of ₹${existingRefund.amountPaise / 100} processed.`,
+    });
   });
 }
 
@@ -465,20 +475,22 @@ export async function initiateRefund(input: {
 
   const refundData = (await response.json()) as RazorpayRefund;
 
-  await db.insert(refunds).values({
-    id: nanoid(18),
-    paymentId: input.paymentId,
-    orderId: input.orderId,
-    providerRefundId: refundData.id,
-    amountPaise: input.amountPaise,
-    reason: input.reason,
-    status: "PENDING",
-    initiatedBy: input.initiatedBy,
-    providerPayload: refundData,
-  });
+  await db.transaction(async (tx) => {
+    await tx.insert(refunds).values({
+      id: nanoid(18),
+      paymentId: input.paymentId,
+      orderId: input.orderId,
+      providerRefundId: refundData.id,
+      amountPaise: input.amountPaise,
+      reason: input.reason,
+      status: "PENDING",
+      initiatedBy: input.initiatedBy,
+      providerPayload: refundData,
+    });
 
-  await db.update(orders).set({ paymentStatus: "REFUND_PENDING", status: "REFUND_PENDING" })
-    .where(eq(orders.id, input.orderId));
+    await tx.update(orders).set({ paymentStatus: "REFUND_PENDING", status: "REFUND_PENDING" })
+      .where(eq(orders.id, input.orderId));
+  });
 
   return { refundId: refundData.id, status: refundData.status };
 }
