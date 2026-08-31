@@ -21,7 +21,7 @@ import {
 } from "@/components/ui/sidebar";
 import { startLogin } from "@/const";
 import { useIsMobile } from "@/hooks/useMobile";
-import { FileUp, LayoutDashboard, LogOut, Menu, PanelLeft, PlugZap, ReceiptText, Settings2, Tag, UtensilsCrossed } from "lucide-react";
+import { FileUp, LayoutDashboard, LogOut, Menu, PanelLeft, PlugZap, ReceiptText, Settings2, Tag, UtensilsCrossed, Users } from "lucide-react";
 import { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { DashboardLayoutSkeleton } from './DashboardLayoutSkeleton';
@@ -33,6 +33,7 @@ const menuItems = [
   { icon: UtensilsCrossed, label: "Menu", path: "/admin/menu" },
   { icon: FileUp, label: "Import menu", path: "/admin/import" },
   { icon: Tag, label: "Coupons", path: "/admin/coupons" },
+  { icon: Users, label: "Customers", path: "/admin/customers" },
   { icon: Settings2, label: "Restaurant", path: "/admin/restaurant" },
   { icon: PlugZap, label: "Integrations", path: "/admin/integrations" },
 ];

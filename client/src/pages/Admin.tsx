@@ -296,6 +296,8 @@ function AdminWorkspace({ section }: { section: string }) {
                 ? "Menu studio"
                 : section === "coupons"
                 ? "Offers desk"
+                : section === "customers"
+                ? "Customer directory"
                 : section === "integrations"
                 ? "Integration settings"
                 : "Restaurant settings"}
@@ -343,6 +345,8 @@ function AdminWorkspace({ section }: { section: string }) {
             setForm={setCouponForm}
             onSave={saveCoupon}
           />
+        ) : section === "customers" ? (
+          <CustomersPanel />
         ) : section === "restaurant" ? (
           <RestaurantPanel
             restaurant={data.restaurant}
@@ -1044,6 +1048,193 @@ function CouponsPanel({
           )}
         </div>
       </section>
+    </div>
+  );
+}
+
+// =============================================================================
+// Customers Panel
+// =============================================================================
+
+function CustomersPanel() {
+  const [search, setSearch] = useState("");
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [notes, setNotes] = useState("");
+
+  const customers = trpc.admin.customers.useQuery({ search: search || undefined, limit: 50 });
+  const customerDetail = trpc.admin.customerDetail.useQuery(
+    { customerId: selectedId! },
+    { enabled: !!selectedId }
+  );
+  const updateNotes = trpc.admin.updateCustomerNotes.useMutation({
+    onSuccess: () => {
+      toast.success("Notes saved");
+      customerDetail.refetch();
+    },
+  });
+
+  const list = customers.data ?? [];
+  const detail = customerDetail.data;
+
+  if (selectedId && detail) {
+    return (
+      <div className="space-y-5">
+        <button
+          onClick={() => { setSelectedId(null); setNotes(""); }}
+          className="flex items-center gap-2 text-sm font-extrabold text-[#c84630] hover:underline"
+        >
+          ← Back to customers
+        </button>
+        <div className="rounded-2xl border border-[#eadccf] bg-white p-6 shadow-sm">
+          <div className="flex items-start justify-between">
+            <div>
+              <h3 className="font-display text-2xl text-[#382719]">
+                {detail.userName || detail.preferredName || "Guest Customer"}
+              </h3>
+              <p className="mt-1 text-sm text-[#91725e]">
+                {detail.mobileNumber ?? "No phone"} · {detail.userEmail ?? "No email"}
+              </p>
+            </div>
+            <span className="rounded-full bg-[#f0e4d8] px-3 py-1 text-[10px] font-extrabold text-[#a77d63]">
+              {detail.totalOrders ?? 0} orders
+            </span>
+          </div>
+          <div className="mt-5 grid gap-4 sm:grid-cols-3">
+            <div className="rounded-xl bg-[#fff9f3] p-4">
+              <p className="text-[10px] font-extrabold uppercase tracking-wider text-[#a77d63]">Lifetime value</p>
+              <p className="mt-1 text-xl font-extrabold text-[#382719]">₹{((detail.totalSpentPaise ?? 0) / 100).toLocaleString("en-IN")}</p>
+            </div>
+            <div className="rounded-xl bg-[#fff9f3] p-4">
+              <p className="text-[10px] font-extrabold uppercase tracking-wider text-[#a77d63]">Total orders</p>
+              <p className="mt-1 text-xl font-extrabold text-[#382719]">{detail.totalOrders ?? 0}</p>
+            </div>
+            <div className="rounded-xl bg-[#fff9f3] p-4">
+              <p className="text-[10px] font-extrabold uppercase tracking-wider text-[#a77d63]">Registered</p>
+              <p className="mt-1 text-sm font-bold text-[#382719]">
+                {detail.createdAt ? new Date(detail.createdAt).toLocaleDateString("en-IN") : "—"}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Admin Notes */}
+        <div className="rounded-2xl border border-[#eadccf] bg-white p-6 shadow-sm">
+          <p className="text-[10px] font-extrabold uppercase tracking-wider text-[#a77d63]">Admin notes</p>
+          <textarea
+            value={notes || detail.adminNotes || ""}
+            onChange={(e) => setNotes(e.target.value)}
+            placeholder="Add private notes about this customer..."
+            className="mt-3 min-h-20 w-full rounded-xl border border-[#ddc6b5] bg-[#fff9f3] p-3 text-sm outline-none focus:ring-2 focus:ring-[#c84630]"
+          />
+          <Button
+            onClick={() => updateNotes.mutate({ customerId: selectedId, notes })}
+            disabled={updateNotes.isPending}
+            className="mt-3 h-10 rounded-xl bg-[#c84630] px-4 text-xs font-extrabold hover:bg-[#ad3627]"
+          >
+            <Save className="mr-1.5 h-3.5 w-3.5" /> Save notes
+          </Button>
+        </div>
+
+        {/* Order History */}
+        <div className="rounded-2xl border border-[#eadccf] bg-white shadow-sm">
+          <div className="border-b border-[#eadccf] px-6 py-4">
+            <p className="text-[10px] font-extrabold uppercase tracking-wider text-[#a77d63]">Order history</p>
+          </div>
+          {detail.orderHistory?.length ? (
+            <div className="divide-y divide-[#f0e4d8]">
+              {detail.orderHistory.map((order: any) => (
+                <div key={order.id} className="flex items-center justify-between px-6 py-4">
+                  <div>
+                    <p className="text-sm font-bold text-[#382719]">{order.orderNumber}</p>
+                    <p className="mt-0.5 text-xs text-[#91725e]">
+                      {new Date(order.createdAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
+                    </p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-sm font-extrabold text-[#382719]">₹{((order.totalPaise ?? 0) / 100).toLocaleString("en-IN")}</p>
+                    <span className={`inline-block rounded-full px-2 py-0.5 text-[10px] font-extrabold ${
+                      order.status === "DELIVERED" ? "bg-green-50 text-green-700"
+                      : order.status === "CANCELLED" ? "bg-red-50 text-red-700"
+                      : "bg-amber-50 text-amber-700"
+                    }`}>
+                      {statusLabel[order.status] ?? order.status}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="px-6 py-8 text-center text-sm text-[#91725e]">No orders yet.</p>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-5">
+      <div className="flex items-center gap-3">
+        <div className="relative flex-1">
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#a77d63]" />
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search by name, phone, or email..."
+            className="h-11 w-full rounded-xl border border-[#ddc6b5] bg-white pl-10 pr-4 text-sm outline-none focus:ring-2 focus:ring-[#c84630]"
+          />
+        </div>
+      </div>
+
+      {customers.isLoading ? (
+        <div className="space-y-3">
+          {[1, 2, 3].map(i => (
+            <div key={i} className="h-16 animate-pulse rounded-xl bg-[#eadfd4]" />
+          ))}
+        </div>
+      ) : list.length === 0 ? (
+        <div className="rounded-2xl border border-dashed border-[#dbc3b0] bg-[#fff9f3] p-10 text-center">
+          <Users className="mx-auto h-8 w-8 text-[#c84630]" />
+          <p className="mt-3 font-display text-xl text-[#593f2d]">No customers yet</p>
+          <p className="mt-1 text-sm text-[#91725e]">Customers will appear here once they place their first order.</p>
+        </div>
+      ) : (
+        <div className="overflow-hidden rounded-2xl border border-[#eadccf] bg-white shadow-sm">
+          <table className="w-full">
+            <thead>
+              <tr className="border-b border-[#eadccf] bg-[#faf5ef]">
+                <th className="px-5 py-3 text-left text-[10px] font-extrabold uppercase tracking-wider text-[#a77d63]">Customer</th>
+                <th className="px-5 py-3 text-left text-[10px] font-extrabold uppercase tracking-wider text-[#a77d63]">Phone</th>
+                <th className="px-5 py-3 text-left text-[10px] font-extrabold uppercase tracking-wider text-[#a77d63]">Orders</th>
+                <th className="px-5 py-3 text-left text-[10px] font-extrabold uppercase tracking-wider text-[#a77d63]">Lifetime value</th>
+                <th className="px-5 py-3 text-left text-[10px] font-extrabold uppercase tracking-wider text-[#a77d63]">Joined</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[#f0e4d8]">
+              {list.map((c: any) => (
+                <tr
+                  key={c.id}
+                  onClick={() => {
+                    setSelectedId(c.id);
+                    setNotes("");
+                  }}
+                  className="cursor-pointer hover:bg-[#fff9f3] transition-colors"
+                >
+                  <td className="px-5 py-4">
+                    <p className="text-sm font-bold text-[#382719]">{c.userName || c.preferredName || "Guest"}</p>
+                    <p className="mt-0.5 text-xs text-[#91725e]">{c.userEmail ?? "—"}</p>
+                  </td>
+                  <td className="px-5 py-4 text-sm text-[#553d2c]">{c.mobileNumber ?? "—"}</td>
+                  <td className="px-5 py-4 text-sm font-bold text-[#382719]">{c.totalOrders ?? 0}</td>
+                  <td className="px-5 py-4 text-sm font-extrabold text-[#382719]">₹{((c.totalSpentPaise ?? 0) / 100).toLocaleString("en-IN")}</td>
+                  <td className="px-5 py-4 text-xs text-[#91725e]">
+                    {c.createdAt ? new Date(c.createdAt).toLocaleDateString("en-IN") : "—"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }

@@ -142,7 +142,22 @@ export default function OrderingApp() {
     flatHouse?: string; building?: string; street?: string;
     landmark?: string; area?: string; city?: string; postalCode?: string;
   }>({});
-  const [customerPhone, setCustomerPhone] = useState("");
+  const [customerPhone, setCustomerPhone] = useState(() => localStorage.getItem("ck_phone") ?? "");
+
+  // Customer auth state
+  const [authOpen, setAuthOpen] = useState(false);
+  const [otpStep, setOtpStep] = useState<"phone" | "verify">("phone");
+  const [otpPhone, setOtpPhone] = useState("");
+  const [otpCode, setOtpCode] = useState("");
+  const [otpLoading, setOtpLoading] = useState(false);
+  const [otpError, setOtpError] = useState("");
+  const sendOtp = trpc.storefront.sendOtp.useMutation();
+  const verifyOtp = trpc.storefront.verifyOtp.useMutation();
+  const customerMe = trpc.storefront.customerMe.useQuery(
+    { userId: parseInt(localStorage.getItem("ck_userId") ?? "0") },
+    { enabled: !!localStorage.getItem("ck_userId") }
+  );
+  const loggedInPhone = customerMe.data?.phone ?? null;
 
   // Pricing (server-side will validate on checkout)
   const itemTotal = cart.reduce(
@@ -244,6 +259,58 @@ export default function OrderingApp() {
     ]);
     toast.success(`${selected.name} added to your order`);
     setSelected(null);
+  };
+
+  // --- Customer Auth Handlers ---
+  const handleSendOtp = async () => {
+    const phone = otpPhone.replace(/[^\d]/g, "");
+    if (phone.length < 10) {
+      setOtpError("Enter a valid 10-digit phone number.");
+      return;
+    }
+    setOtpLoading(true);
+    setOtpError("");
+    try {
+      await sendOtp.mutateAsync({ phone });
+      setOtpStep("verify");
+    } catch (err) {
+      setOtpError(err instanceof Error ? err.message : "Failed to send code.");
+    } finally {
+      setOtpLoading(false);
+    }
+  };
+
+  const handleVerifyOtp = async () => {
+    if (otpCode.length !== 6) {
+      setOtpError("Enter the 6-digit code.");
+      return;
+    }
+    setOtpLoading(true);
+    setOtpError("");
+    try {
+      const result = await verifyOtp.mutateAsync({ phone: otpPhone, code: otpCode });
+      // Persist auth to localStorage
+      localStorage.setItem("ck_phone", otpPhone);
+      localStorage.setItem("ck_userId", String(result.userId));
+      setCustomerPhone(otpPhone);
+      setAuthOpen(false);
+      setOtpStep("phone");
+      setOtpPhone("");
+      setOtpCode("");
+      toast.success(result.isNewUser ? "Welcome! Your account is ready." : "Welcome back!");
+    } catch (err) {
+      setOtpError(err instanceof Error ? err.message : "Invalid code. Please try again.");
+    } finally {
+      setOtpLoading(false);
+    }
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem("ck_phone");
+    localStorage.removeItem("ck_userId");
+    setCustomerPhone("");
+    setAuthOpen(false);
+    toast.success("Logged out.");
   };
 
   const startSecurePayment = async () => {
@@ -367,6 +434,8 @@ export default function OrderingApp() {
           restaurantName={restaurant.name}
           itemCount={totalQuantity}
           onCart={() => {}}
+          onAccount={() => setAuthOpen(true)}
+          customerPhone={loggedInPhone ?? undefined}
         />
 
         {/* Hero Banner */}
@@ -659,6 +728,105 @@ export default function OrderingApp() {
 
       {/* Address Dialog */}
       <AddressDialog open={addressOpen} onOpenChange={setAddressOpen} />
+
+      {/* Customer Auth Drawer */}
+      <Drawer open={authOpen} onOpenChange={setAuthOpen}>
+        <DrawerContent className="max-h-[85vh]">
+          <DrawerHeader className="px-6 pb-2 text-left">
+            <DrawerTitle className="font-display text-2xl text-[#382719]">
+              {loggedInPhone ? "Your Account" : "Sign in to order"}
+            </DrawerTitle>
+            <DrawerDescription className="text-[#91725e]">
+              {loggedInPhone
+                ? `Logged in as ${loggedInPhone}`
+                : "Enter your phone number to get started"}
+            </DrawerDescription>
+          </DrawerHeader>
+          <div className="px-6 pb-6">
+            {loggedInPhone ? (
+              <div className="space-y-4">
+                {customerMe.data && (
+                  <div className="rounded-xl border border-[#eadccf] bg-[#fff9f3] p-4">
+                    <div className="grid grid-cols-2 gap-4 text-sm">
+                      <div>
+                        <p className="text-[10px] font-extrabold uppercase tracking-wider text-[#a77d63]">Phone</p>
+                        <p className="mt-1 font-bold text-[#382719]">{loggedInPhone}</p>
+                      </div>
+                      <div>
+                        <p className="text-[10px] font-extrabold uppercase tracking-wider text-[#a77d63]">Total Orders</p>
+                        <p className="mt-1 font-bold text-[#382719]">{customerMe.data.totalOrders}</p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                <Button
+                  onClick={handleLogout}
+                  variant="outline"
+                  className="w-full rounded-xl border-[#ddc6b5] text-[#c84630] font-extrabold"
+                >
+                  Sign out
+                </Button>
+              </div>
+            ) : otpStep === "phone" ? (
+              <div className="space-y-4">
+                <Input
+                  value={otpPhone}
+                  onChange={(e) => { setOtpPhone(e.target.value); setOtpError(""); }}
+                  placeholder="10-digit phone number"
+                  type="tel"
+                  inputMode="numeric"
+                  maxLength={15}
+                  className="h-12 rounded-xl border-[#ddc6b5] text-base"
+                />
+                {otpError && (
+                  <p className="text-sm font-bold text-[#c84630]">{otpError}</p>
+                )}
+                <Button
+                  onClick={handleSendOtp}
+                  disabled={otpLoading || otpPhone.replace(/[^\d]/g, "").length < 10}
+                  className="h-12 w-full rounded-xl bg-[#c84630] font-extrabold text-base hover:bg-[#ad3627]"
+                >
+                  {otpLoading ? "Sending..." : "Send verification code"}
+                </Button>
+                <p className="text-center text-xs text-[#a77d63]">
+                  We'll send a 6-digit code to verify your number.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <p className="text-sm text-[#76523e]">
+                  Enter the 6-digit code sent to {otpPhone}
+                </p>
+                <Input
+                  value={otpCode}
+                  onChange={(e) => { setOtpCode(e.target.value); setOtpError(""); }}
+                  placeholder="000000"
+                  type="text"
+                  inputMode="numeric"
+                  maxLength={6}
+                  className="h-12 rounded-xl border-[#ddc6b5] text-center text-2xl font-mono tracking-[0.3em]"
+                />
+                {otpError && (
+                  <p className="text-sm font-bold text-[#c84630]">{otpError}</p>
+                )}
+                <Button
+                  onClick={handleVerifyOtp}
+                  disabled={otpLoading || otpCode.length !== 6}
+                  className="h-12 w-full rounded-xl bg-[#c84630] font-extrabold text-base hover:bg-[#ad3627]"
+                >
+                  {otpLoading ? "Verifying..." : "Verify & continue"}
+                </Button>
+                <button
+                  onClick={() => { setOtpStep("phone"); setOtpCode(""); setOtpError(""); }}
+                  className="w-full text-center text-xs font-bold text-[#a77d63] underline"
+                >
+                  Change phone number
+                </button>
+              </div>
+            )}
+          </div>
+        </DrawerContent>
+      </Drawer>
     </>
   );
 }
@@ -671,10 +839,14 @@ function TopBar({
   restaurantName,
   itemCount,
   onCart,
+  onAccount,
+  customerPhone,
 }: {
   restaurantName: string;
   itemCount: number;
   onCart: () => void;
+  onAccount: () => void;
+  customerPhone?: string;
 }) {
   return (
     <header className="sticky top-0 z-40 border-b border-[#eadbce] bg-[#fffaf3]/95 backdrop-blur">
@@ -694,6 +866,14 @@ function TopBar({
           </span>
         </button>
         <nav className="flex items-center gap-1 sm:gap-2">
+          <button
+            onClick={onAccount}
+            className="flex items-center gap-1.5 rounded-xl border border-[#ddc6b5] bg-white px-3 py-2 text-xs font-extrabold text-[#553d2c] hover:bg-[#f9e6d9]"
+            aria-label="Account"
+          >
+            <UserRound className="h-4 w-4" />
+            <span className="hidden sm:inline">{customerPhone ?? "Login"}</span>
+          </button>
           <button
             onClick={onCart}
             className="relative grid h-10 w-10 place-items-center rounded-xl bg-[#382719] text-white hover:bg-[#c84630]"

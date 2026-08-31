@@ -81,6 +81,23 @@ export const users = pgTable("users", {
   lastSignedIn: timestamp("last_signed_in").defaultNow().notNull(),
 });
 
+// =============================================================================
+// Customer Phone Verification (OTP)
+// =============================================================================
+
+export const otpVerifications = pgTable("otp_verifications", {
+  id: serial("id").primaryKey(),
+  phone: varchar("phone", { length: 15 }).notNull(),
+  code: varchar("code", { length: 6 }).notNull(),
+  purpose: varchar("purpose", { length: 32 }).notNull().default("login"),
+  expiresAt: timestamp("expires_at").notNull(),
+  usedAt: timestamp("used_at"),
+  attempts: smallint("attempts").default(0).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  index("otp_phone_idx").on(table.phone),
+]);
+
 export const adminRoles = pgTable("admin_roles", {
   id: varchar("id", { length: 36 }).primaryKey(),
   name: varchar("name", { length: 64 }).notNull().unique(),

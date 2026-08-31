@@ -64,6 +64,58 @@ export const storefrontRouter = router({
   paymentConfig: publicProcedure.query(() => getRazorpayConfig()),
 
   // =========================================================================
+  // Customer Phone Auth
+  // =========================================================================
+  sendOtp: publicProcedure
+    .input(z.object({ phone: z.string().min(10).max(15) }))
+    .mutation(async ({ input }) => {
+      const { createOtp } = await import("../db");
+      const result = await createOtp(input.phone);
+      // In production, send via SMS provider. For MVP, log to console.
+      console.log(`[OTP] Phone ${input.phone}: code = ${result.code}`);
+      return { success: true, expiresIn: 600 };
+    }),
+
+  verifyOtp: publicProcedure
+    .input(z.object({
+      phone: z.string().min(10).max(15),
+      code: z.string().length(6),
+    }))
+    .mutation(async ({ input }) => {
+      const { verifyOtp } = await import("../db");
+      const result = await verifyOtp(input.phone, input.code);
+      if (!result) {
+        throw new Error("Invalid or expired verification code.");
+      }
+      return {
+        success: true,
+        userId: result.userId,
+        isNewUser: result.isNewUser,
+        phone: input.phone.replace(/(\d{2})\d+(\d{2})/, "$1****$2"),
+      };
+    }),
+
+  customerMe: publicProcedure
+    .input(z.object({ userId: z.number().int().positive() }))
+    .query(async ({ input }) => {
+      const db = await import("../db").then(m => m.getDb());
+      if (!db) return null;
+      const { users, customerProfiles } = await import("../../drizzle/schema");
+      const { eq } = await import("drizzle-orm");
+      const user = (await db.select().from(users).where(eq(users.id, input.userId)).limit(1))[0];
+      if (!user) return null;
+      const profile = (await db.select().from(customerProfiles).where(eq(customerProfiles.userId, user.id)).limit(1))[0];
+      return {
+        id: user.id,
+        name: user.name,
+        phone: user.mobile?.replace(/(\d{2})\d+(\d{2})/, "$1****$2") ?? null,
+        profileId: profile?.id ?? null,
+        totalOrders: profile?.totalOrders ?? 0,
+        totalSpentPaise: profile?.totalSpentPaise ?? 0,
+      };
+    }),
+
+  // =========================================================================
   // Search
   // =========================================================================
   search: publicProcedure

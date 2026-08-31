@@ -37,6 +37,7 @@ import {
   webhookEvents,
   auditLogs,
   settings,
+  otpVerifications,
   type InsertUser,
   type OrderStatus,
   type MenuItemRow,
@@ -874,6 +875,97 @@ export async function getOrCreateGuestUser(phone: string): Promise<number> {
     role: "user",
   });
   return userId;
+}
+
+// =============================================================================
+// Customer Phone Auth (OTP)
+// =============================================================================
+
+/** Generate a 6-digit OTP code */
+export function generateOtpCode(): string {
+  return String(Math.floor(100000 + Math.random() * 900000));
+}
+
+/** Create and store an OTP for phone verification */
+export async function createOtp(phone: string): Promise<{ code: string; expiresAt: Date }> {
+  const db = await requireDb();
+  const normalizedPhone = phone.replace(/[^\d]/g, "");
+  const code = generateOtpCode();
+  const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+
+  // Invalidate any existing OTPs for this phone
+  await db.update(otpVerifications)
+    .set({ usedAt: new Date() })
+    .where(and(
+      eq(otpVerifications.phone, normalizedPhone),
+      eq(otpVerifications.purpose, "login"),
+    ));
+
+  // Insert new OTP
+  await db.insert(otpVerifications).values({
+    phone: normalizedPhone,
+    code,
+    purpose: "login",
+    expiresAt,
+    attempts: 0,
+  });
+
+  return { code, expiresAt };
+}
+
+/** Verify an OTP code and return the user if valid */
+export async function verifyOtp(phone: string, code: string): Promise<{ userId: number; isNewUser: boolean } | null> {
+  const db = await requireDb();
+  const normalizedPhone = phone.replace(/[^\d]/g, "");
+
+  const record = (await db.select().from(otpVerifications)
+    .where(and(
+      eq(otpVerifications.phone, normalizedPhone),
+      eq(otpVerifications.code, code),
+      eq(otpVerifications.purpose, "login"),
+    ))
+    .orderBy(desc(otpVerifications.createdAt))
+    .limit(1))[0];
+
+  if (!record) return null;
+  if (record.usedAt) return null; // already used
+  if (new Date() > record.expiresAt) return null; // expired
+  if ((record.attempts ?? 0) >= 5) return null; // too many attempts
+
+  // Mark OTP as used
+  await db.update(otpVerifications)
+    .set({ usedAt: new Date(), attempts: (record.attempts ?? 0) + 1 })
+    .where(eq(otpVerifications.id, record.id));
+
+  // Find or create user
+  const openId = `customer_${normalizedPhone}`;
+  const existingUser = (await db.select().from(users).where(eq(users.openId, openId)).limit(1))[0];
+
+  if (existingUser) {
+    // Update last sign in
+    await db.update(users).set({ lastSignedIn: new Date() }).where(eq(users.id, existingUser.id));
+    return { userId: existingUser.id, isNewUser: false };
+  }
+
+  // Create new customer user
+  const userId = Math.floor(Math.random() * 900000000) + 100000000;
+  await db.insert(users).values({
+    id: userId,
+    openId,
+    name: null,
+    mobile: normalizedPhone,
+    role: "user",
+  });
+
+  // Create customer profile
+  const profileId = `cust_${nanoid(12)}`;
+  await db.insert(customerProfiles).values({
+    id: profileId,
+    userId,
+    mobileNumber: normalizedPhone,
+  });
+
+  return { userId, isNewUser: true };
 }
 
 // =============================================================================
