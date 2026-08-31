@@ -18,6 +18,11 @@ type StorefrontPayload = {
     address: string | null;
     preparationMinutes: number;
     tempClosureMessage: string | null;
+    primaryColor: string;
+    accentColor: string | null;
+    fontFamily: string | null;
+    bodyFontFamily: string | null;
+    faviconUrl: string | null;
   };
   outlet: {
     id: string;
@@ -107,7 +112,7 @@ export function adaptStorefront(data: StorefrontPayload) {
     restaurant: {
       id: data.restaurant.id,
       name: data.restaurant.name,
-      logo: data.restaurant.logoUrl ?? "/assets/spice-garden-logo.png",
+      logo: data.restaurant.logoUrl ?? "",
       bannerImage: data.restaurant.bannerImageUrl ?? "",
       cuisines: data.restaurant.cuisineSummary.split("•").map(v => v.trim()).filter(Boolean),
       eta,
@@ -143,5 +148,13 @@ export function adaptStorefront(data: StorefrontPayload) {
       discountValue: o.discountValue,
       minOrderPaise: o.minOrderPaise,
     })),
+    theme: {
+      primaryColor: data.restaurant.primaryColor ?? "#38271F",
+      accentColor: data.restaurant.accentColor ?? data.restaurant.primaryColor ?? "#38271F",
+      fontFamily: data.restaurant.fontFamily ? `'${data.restaurant.fontFamily}', serif` : "'Playfair Display', serif",
+      bodyFontFamily: data.restaurant.bodyFontFamily ? `'${data.restaurant.bodyFontFamily}', sans-serif` : "'Inter', sans-serif",
+      logoUrl: data.restaurant.logoUrl ?? "",
+      faviconUrl: data.restaurant.faviconUrl ?? null,
+    },
   };
 }

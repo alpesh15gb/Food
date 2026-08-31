@@ -7,6 +7,7 @@
  * Issue 17: Integration secret key whitelist per provider.
  */
 import { z } from "zod";
+import { TRPCError } from "@trpc/server";
 import { adminProcedure, requirePermission, router } from "../_core/trpc";
 import {
   createMenuItem,
@@ -108,6 +109,7 @@ export const adminRouter = router({
         targetType: "order",
         targetId: input.orderId,
         afterData: { status: input.status, note: input.note },
+        restaurantId: ctx.restaurantId ?? undefined,
       });
       return { success: true } as const;
     }),
@@ -143,6 +145,7 @@ export const adminRouter = router({
         targetType: "restaurant",
         targetId: input.id,
         afterData: { name: input.name, isOpen: input.isOpen },
+        restaurantId: ctx.restaurantId ?? undefined,
       });
       return { success: true } as const;
     }),
@@ -171,6 +174,7 @@ export const adminRouter = router({
         targetType: "menuItem",
         targetId: item.id,
         afterData: { name: input.name, pricePaise: input.pricePaise },
+        restaurantId: ctx.restaurantId ?? undefined,
       });
       return item;
     }),
@@ -188,11 +192,14 @@ export const adminRouter = router({
     isOpen: z.boolean().optional(),
     sortOrder: z.number().int().optional(),
     stock: z.number().int().nullish(),
+    imageUrl: z.string().nullish(),
   }))
     .mutation(async ({ ctx, input }) => {
-      const { itemId, ...updates } = input;
+      const { itemId, imageUrl, ...rest } = input;
+      const updates: Record<string, unknown> = { ...rest };
+      if (imageUrl !== null && imageUrl !== undefined) updates.imageUrl = imageUrl;
       const before = await getItemById(itemId);
-      await updateMenuItem(itemId, updates);
+      await updateMenuItem(itemId, updates as any);
       await logAudit({
         actorId: ctx.user.id,
         actorName: ctx.user.name ?? undefined,
@@ -201,6 +208,7 @@ export const adminRouter = router({
         targetId: itemId,
         beforeData: before ? { name: before.name, pricePaise: before.pricePaise, isOpen: before.isOpen } : undefined,
         afterData: updates,
+        restaurantId: ctx.restaurantId ?? undefined,
       });
       return { success: true } as const;
     }),
@@ -218,6 +226,7 @@ export const adminRouter = router({
         action: `Item availability changed to ${input.availability}`,
         targetType: "menuItem",
         targetId: input.itemId,
+        restaurantId: ctx.restaurantId ?? undefined,
       });
       return { success: true } as const;
     }),
@@ -231,8 +240,75 @@ export const adminRouter = router({
         action: `Item ${input.isOpen ? "enabled" : "disabled"}`,
         targetType: "menuItem",
         targetId: input.itemId,
+        restaurantId: ctx.restaurantId ?? undefined,
       });
       return { success: true } as const;
+    }),
+
+  uploadMenuImage: requirePermission("menu:write").input(z.object({
+    data: z.string().min(1),
+    filename: z.string().min(1).max(255),
+    contentType: z.enum(["image/jpeg", "image/png", "image/webp"]),
+  }))
+    .mutation(async ({ input }) => {
+      const maxSize = 2 * 1024 * 1024;
+      const buffer = Buffer.from(input.data, "base64");
+      if (buffer.length > maxSize) {
+        throw new Error("Image must be under 2 MB.");
+      }
+      const fs = await import("fs/promises");
+      const path = await import("path");
+      const { fileURLToPath } = await import("url");
+      const __dirname = path.dirname(fileURLToPath(import.meta.url));
+      const menuDir = path.resolve(__dirname, "../../images/menu");
+      await fs.mkdir(menuDir, { recursive: true });
+      const ext = input.filename.split(".").pop() ?? "jpg";
+      const rand = Math.random().toString(36).slice(2, 8);
+      const filename = `${Date.now()}_${rand}.${ext}`;
+      await fs.writeFile(path.join(menuDir, filename), buffer);
+      return { url: `/images/menu/${filename}` };
+    }),
+
+  deleteMenuItem: requirePermission("menu:write").input(z.object({
+    itemId: z.string().min(4),
+  }))
+    .mutation(async ({ ctx, input }) => {
+      await updateMenuItem(input.itemId, { isOpen: false });
+      await updateMenuItemAvailability(input.itemId, "DISABLED");
+      await logAudit({
+        actorId: ctx.user.id,
+        actorName: ctx.user.name ?? undefined,
+        action: "Menu item deleted (soft)",
+        targetType: "menuItem",
+        targetId: input.itemId,
+        restaurantId: ctx.restaurantId ?? undefined,
+      });
+      return { success: true } as const;
+    }),
+
+  bulkUpdateMenuItems: requirePermission("menu:write").input(z.object({
+    itemIds: z.array(z.string().min(4)).min(1).max(100),
+    isOpen: z.boolean().optional(),
+    availability: z.enum(["AVAILABLE", "SOLD_OUT", "SCHEDULED_UNAVAILABLE", "OUT_OF_STOCK", "DISABLED"]).optional(),
+  }))
+    .mutation(async ({ ctx, input }) => {
+      for (const itemId of input.itemIds) {
+        if (input.isOpen !== undefined) {
+          await updateMenuItem(itemId, { isOpen: input.isOpen });
+        }
+        if (input.availability !== undefined) {
+          await updateMenuItemAvailability(itemId, input.availability);
+        }
+      }
+      await logAudit({
+        actorId: ctx.user.id,
+        actorName: ctx.user.name ?? undefined,
+        action: `Bulk updated ${input.itemIds.length} menu items`,
+        targetType: "menuItem",
+        afterData: { count: input.itemIds.length, isOpen: input.isOpen, availability: input.availability },
+        restaurantId: ctx.restaurantId ?? undefined,
+      });
+      return { success: true, updated: input.itemIds.length } as const;
     }),
 
   // =========================================================================
@@ -332,7 +408,9 @@ export const adminRouter = router({
   // =========================================================================
   // Integration Status & Settings — Issue 8: requires integrations:read
   // =========================================================================
-  integrationStatus: requirePermission("integrations:read").query(() => getIntegrationStatus()),
+  integrationStatus: requirePermission("integrations:read").input(z.object({
+    restaurantId: z.string().min(4),
+  })).query(({ input }) => getIntegrationStatus(input.restaurantId)),
 
   // Issue 17: Integration secret save with key whitelist
   saveIntegrationSecret: requirePermission("integrations:write").input(z.object({
@@ -355,7 +433,7 @@ export const adminRouter = router({
         action: `Integration secret saved for ${input.provider}/${input.keyName}`,
         targetType: "integration",
         targetId: input.restaurantId,
-        // Issue 17: Never log secret values
+        restaurantId: input.restaurantId,
       });
       return { success: true } as const;
     }),
@@ -384,6 +462,7 @@ export const adminRouter = router({
         action: `Menu import: ${result.created} created, ${result.updated} updated`,
         targetType: "restaurant",
         targetId: input.restaurantId,
+        restaurantId: input.restaurantId,
       });
       return result;
     }),
@@ -417,6 +496,7 @@ export const adminRouter = router({
         targetType: "delivery",
         targetId: input.orderId,
         afterData: { riderName: input.riderName, riderPhone: input.riderPhone },
+        restaurantId: ctx.restaurantId ?? undefined,
       });
       return result;
     }),
@@ -575,6 +655,7 @@ export const adminRouter = router({
         targetType: "delivery",
         targetId: order.id,
         afterData: { providerDeliveryId: result.deliveryId, trackingId: result.trackingId },
+        restaurantId: ctx.restaurantId ?? undefined,
       });
 
       return {
@@ -608,6 +689,7 @@ export const adminRouter = router({
         targetType: "order",
         targetId: input.orderId,
         afterData: { refundId: result.refundId, amountPaise: input.amountPaise },
+        restaurantId: ctx.restaurantId ?? undefined,
       });
       return result;
     }),
@@ -618,15 +700,18 @@ export const adminRouter = router({
   auditLogs: requirePermission("audit:read").input(z.object({
     targetType: z.string().optional(),
     targetId: z.string().optional(),
+    restaurantId: z.string().optional(),
     limit: z.number().int().min(1).max(100).default(50),
   }))
-    .query(async ({ input }) => {
+    .query(async ({ ctx, input }) => {
       const db = await import("../db").then(m => m.getDb());
       if (!db) return [];
       const { auditLogs } = await import("../../drizzle/schema");
       const { eq, and, desc } = await import("drizzle-orm");
 
+      const rid = input.restaurantId ?? ctx.restaurantId;
       const conditions = [];
+      if (rid) conditions.push(eq(auditLogs.restaurantId, rid));
       if (input.targetType) conditions.push(eq(auditLogs.targetType, input.targetType));
       if (input.targetId) conditions.push(eq(auditLogs.targetId, input.targetId));
 
@@ -648,4 +733,478 @@ export const adminRouter = router({
     category: z.string().default("general"),
   }))
     .mutation(({ ctx, input }) => setSetting(input.key, input.value, input.category, ctx.user.id)),
+
+  // =========================================================================
+  // Custom Domain Management
+  // =========================================================================
+  listDomains: requirePermission("settings:write").input(z.object({ restaurantId: z.string().min(4) }))
+    .query(async ({ input }) => {
+      const db = await import("../db").then(m => m.getDb());
+      if (!db) return [];
+      const { customDomains } = await import("../../drizzle/schema");
+      const { eq, desc } = await import("drizzle-orm");
+      return db.select().from(customDomains)
+        .where(eq(customDomains.restaurantId, input.restaurantId))
+        .orderBy(desc(customDomains.createdAt));
+    }),
+
+  addDomain: requirePermission("settings:write").input(z.object({
+    restaurantId: z.string().min(4),
+    domain: z.string().min(4).max(253).regex(/^[a-z0-9][a-z0-9.-]*[a-z0-9]$/),
+  }))
+    .mutation(async ({ input }) => {
+      const db = await import("../db").then(m => m.getDb());
+      if (!db) throw new Error("Database unavailable");
+      const { customDomains } = await import("../../drizzle/schema");
+      const { eq } = await import("drizzle-orm");
+      const { nanoid } = await import("nanoid");
+
+      const existing = await db.select({ id: customDomains.id }).from(customDomains)
+        .where(eq(customDomains.domain, input.domain)).limit(1);
+      if (existing[0]) throw new Error("This domain is already registered.");
+
+      await db.insert(customDomains).values({
+        id: nanoid(18),
+        restaurantId: input.restaurantId,
+        domain: input.domain,
+        isVerified: false,
+        sslStatus: "pending",
+      });
+
+      return { cnameTarget: "cname.9housekitchen.com" };
+    }),
+
+  verifyDomain: requirePermission("settings:write").input(z.object({ domainId: z.string().min(4) }))
+    .mutation(async ({ input }) => {
+      const db = await import("../db").then(m => m.getDb());
+      if (!db) throw new Error("Database unavailable");
+      const { customDomains } = await import("../../drizzle/schema");
+      const { eq } = await import("drizzle-orm");
+      const dns = await import("node:dns");
+      const { promisify } = await import("node:util");
+      const resolveCname = promisify(dns.resolveCname);
+
+      const [domain] = await db.select().from(customDomains)
+        .where(eq(customDomains.id, input.domainId)).limit(1);
+      if (!domain) throw new Error("Domain not found.");
+
+      try {
+        const records = await resolveCname(domain.domain);
+        const verified = records.some(r => r.includes("9housekitchen.com"));
+        if (verified) {
+          await db.update(customDomains)
+            .set({ isVerified: true, verifiedAt: new Date(), sslStatus: "active" })
+            .where(eq(customDomains.id, input.domainId));
+          return { verified: true };
+        }
+        return { verified: false, message: "CNAME record not pointing to cname.9housekitchen.com" };
+      } catch {
+        return { verified: false, message: "DNS lookup failed. Ensure the CNAME record is configured." };
+      }
+    }),
+
+  removeDomain: requirePermission("settings:write").input(z.object({ domainId: z.string().min(4) }))
+    .mutation(async ({ input }) => {
+      const db = await import("../db").then(m => m.getDb());
+      if (!db) throw new Error("Database unavailable");
+      const { customDomains } = await import("../../drizzle/schema");
+      const { eq } = await import("drizzle-orm");
+      await db.delete(customDomains).where(eq(customDomains.id, input.domainId));
+      return { success: true };
+    }),
+
+  setPrimaryDomain: requirePermission("settings:write").input(z.object({ domainId: z.string().min(4), restaurantId: z.string().min(4) }))
+    .mutation(async ({ input }) => {
+      const db = await import("../db").then(m => m.getDb());
+      if (!db) throw new Error("Database unavailable");
+      const { customDomains } = await import("../../drizzle/schema");
+      const { eq } = await import("drizzle-orm");
+
+      await db.update(customDomains)
+        .set({ isPrimary: false })
+        .where(eq(customDomains.restaurantId, input.restaurantId));
+      await db.update(customDomains)
+        .set({ isPrimary: true })
+        .where(eq(customDomains.id, input.domainId));
+
+      return { success: true };
+    }),
+
+  // =========================================================================
+  // Staff / Team Management
+  // =========================================================================
+  listMembers: requirePermission("settings:write").input(z.object({ restaurantId: z.string().min(4) }))
+    .query(async ({ input }) => {
+      const db = await import("../db").then(m => m.getDb());
+      if (!db) return [];
+      const { restaurantMembers, users } = await import("../../drizzle/schema");
+      const { eq } = await import("drizzle-orm");
+      return db.select({
+        id: restaurantMembers.id,
+        userId: restaurantMembers.userId,
+        role: restaurantMembers.role,
+        isActive: restaurantMembers.isActive,
+        joinedAt: restaurantMembers.joinedAt,
+        userName: users.name,
+        userEmail: users.email,
+      })
+        .from(restaurantMembers)
+        .innerJoin(users, eq(restaurantMembers.userId, users.id))
+        .where(eq(restaurantMembers.restaurantId, input.restaurantId));
+    }),
+
+  inviteMember: requirePermission("settings:write").input(z.object({
+    restaurantId: z.string().min(4),
+    email: z.string().email(),
+    role: z.enum(["owner", "admin", "manager", "staff", "kitchen"]),
+  }))
+    .mutation(async ({ ctx, input }) => {
+      const db = await import("../db").then(m => m.getDb());
+      if (!db) throw new Error("Database unavailable");
+      const { users, restaurantMembers } = await import("../../drizzle/schema");
+      const { eq, and } = await import("drizzle-orm");
+      const { nanoid } = await import("nanoid");
+
+      let [user] = await db.select().from(users).where(eq(users.email, input.email)).limit(1);
+      if (!user) {
+        const openId = `self_${nanoid(16)}`;
+        await db.insert(users).values({
+          openId,
+          email: input.email,
+          loginMethod: "email",
+          role: "admin",
+          lastSignedIn: new Date(),
+        });
+        [user] = await db.select().from(users).where(eq(users.email, input.email)).limit(1);
+      }
+
+      const [existing] = await db.select().from(restaurantMembers)
+        .where(and(
+          eq(restaurantMembers.userId, user.id),
+          eq(restaurantMembers.restaurantId, input.restaurantId),
+        )).limit(1);
+
+      if (existing) {
+        await db.update(restaurantMembers)
+          .set({ role: input.role, isActive: true })
+          .where(eq(restaurantMembers.id, existing.id));
+      } else {
+        await db.insert(restaurantMembers).values({
+          id: nanoid(18),
+          userId: user.id,
+          restaurantId: input.restaurantId,
+          role: input.role,
+          invitedByUserId: ctx.user.id,
+          isActive: true,
+        });
+      }
+
+      return { success: true };
+    }),
+
+  updateMemberRole: requirePermission("settings:write").input(z.object({
+    memberId: z.string().min(4),
+    role: z.enum(["owner", "admin", "manager", "staff", "kitchen"]),
+  }))
+    .mutation(async ({ input }) => {
+      const db = await import("../db").then(m => m.getDb());
+      if (!db) throw new Error("Database unavailable");
+      const { restaurantMembers } = await import("../../drizzle/schema");
+      const { eq } = await import("drizzle-orm");
+      await db.update(restaurantMembers).set({ role: input.role }).where(eq(restaurantMembers.id, input.memberId));
+      return { success: true };
+    }),
+
+  deactivateMember: requirePermission("settings:write").input(z.object({ memberId: z.string().min(4) }))
+    .mutation(async ({ input }) => {
+      const db = await import("../db").then(m => m.getDb());
+      if (!db) throw new Error("Database unavailable");
+      const { restaurantMembers } = await import("../../drizzle/schema");
+      const { eq } = await import("drizzle-orm");
+      await db.update(restaurantMembers).set({ isActive: false }).where(eq(restaurantMembers.id, input.memberId));
+      return { success: true };
+    }),
+
+  // =========================================================================
+  // Notification Settings
+  // =========================================================================
+  getNotificationSettings: requirePermission("settings:read").input(z.object({ restaurantId: z.string().min(4) }))
+    .query(async ({ input }) => {
+      const db = await import("../db").then(m => m.getDb());
+      if (!db) return [];
+      const { settings } = await import("../../drizzle/schema");
+      const { eq, like, and } = await import("drizzle-orm");
+      return db.select().from(settings)
+        .where(and(like(settings.key, "notifications_%"), eq(settings.restaurantId, input.restaurantId)));
+    }),
+
+  updateNotificationSetting: requirePermission("settings:write").input(z.object({
+    restaurantId: z.string().min(4),
+    key: z.string().min(1),
+    value: z.string(),
+  }))
+    .mutation(async ({ input }) => {
+      const db = await import("../db").then(m => m.getDb());
+      if (!db) throw new Error("Database unavailable");
+      const { settings } = await import("../../drizzle/schema");
+      const { eq, and } = await import("drizzle-orm");
+      const { nanoid } = await import("nanoid");
+
+      const existing = (await db.select().from(settings)
+        .where(and(eq(settings.key, input.key), eq(settings.restaurantId, input.restaurantId)))
+        .limit(1))[0];
+
+      if (existing) {
+        await db.update(settings).set({ value: input.value, updatedAt: new Date() })
+          .where(and(eq(settings.key, input.key), eq(settings.restaurantId, input.restaurantId)));
+      } else {
+        await db.insert(settings).values({
+          id: nanoid(),
+          key: input.key,
+          value: input.value,
+          category: "notifications",
+          restaurantId: input.restaurantId,
+        });
+      }
+      return { success: true };
+    }),
+
+  // =========================================================================
+  // GST Invoice Generation
+  // =========================================================================
+  generateInvoice: requirePermission("orders:read").input(z.object({ orderId: z.string().min(4) }))
+    .query(async ({ input }) => {
+      const db = await import("../db").then(m => m.getDb());
+      if (!db) throw new Error("Database unavailable");
+      const { orders, orderItems, restaurants } = await import("../../drizzle/schema");
+      const { eq } = await import("drizzle-orm");
+      const { generateInvoiceHtml } = await import("../domain/invoiceGenerator");
+
+      const order = (await db.select().from(orders).where(eq(orders.id, input.orderId)).limit(1))[0];
+      if (!order) throw new TRPCError({ code: "NOT_FOUND", message: "Order not found" });
+
+      const items = await db.select().from(orderItems).where(eq(orderItems.orderId, input.orderId));
+      const restaurant = (await db.select().from(restaurants).where(eq(restaurants.id, order.restaurantId)).limit(1))[0];
+      if (!restaurant) throw new TRPCError({ code: "NOT_FOUND", message: "Restaurant not found" });
+
+      const subtotalPaise = items.reduce((sum, it) => sum + it.unitPricePaise * it.quantity, 0);
+      const cgstPaise = Math.round(subtotalPaise * 0.025);
+      const sgstPaise = Math.round(subtotalPaise * 0.025);
+
+      const addrSnap = order.addressSnapshot as Record<string, unknown> | null;
+      const deliveryAddress = [addrSnap?.address, addrSnap?.city, addrSnap?.pincode].filter(Boolean).join(", ") || "";
+
+      const html = generateInvoiceHtml({
+        restaurantName: restaurant.name,
+        restaurantAddress: restaurant.address || "",
+        restaurantPhone: restaurant.contactPhone || "",
+        restaurantGst: (restaurant as any).gstNumber || "",
+        logoUrl: restaurant.logoUrl || undefined,
+        invoiceNumber: `INV-${order.orderNumber}`,
+        orderNumber: order.orderNumber,
+        orderDate: order.createdAt.toLocaleDateString("en-IN", { year: "numeric", month: "long", day: "numeric" }),
+        customerName: order.customerName || "",
+        customerPhone: order.customerPhone || "",
+        deliveryAddress,
+        items: items.map(it => ({
+          name: it.itemNameSnapshot,
+          quantity: it.quantity,
+          unitPricePaise: it.unitPricePaise,
+          totalPricePaise: it.unitPricePaise * it.quantity,
+        })),
+        subtotalPaise,
+        discountPaise: order.discountPaise ?? 0,
+        packagingFeePaise: order.packagingFeePaise ?? 0,
+        deliveryFeePaise: order.deliveryFeePaise ?? 0,
+        cgstPaise,
+        sgstPaise,
+        totalPaise: order.totalPaise,
+        paymentMethod: order.fulfillmentType || "-",
+        paymentStatus: order.paymentStatus || "PENDING",
+      });
+
+      return { html, invoiceNumber: `INV-${order.orderNumber}` };
+    }),
+
+  listInvoices: requirePermission("reports:read").input(z.object({
+    restaurantId: z.string().min(4),
+    startDate: z.string().optional(),
+    endDate: z.string().optional(),
+    limit: z.number().min(1).max(100).default(50),
+    offset: z.number().min(0).default(0),
+  }))
+    .query(async ({ input }) => {
+      const db = await import("../db").then(m => m.getDb());
+      if (!db) return [];
+      const { orders } = await import("../../drizzle/schema");
+      const { eq, and, gte, lte, desc, inArray } = await import("drizzle-orm");
+
+      const conditions = [
+        eq(orders.restaurantId, input.restaurantId),
+        inArray(orders.status, ["DELIVERED", "READY_FOR_PICKUP"]),
+      ];
+      if (input.startDate) conditions.push(gte(orders.createdAt, new Date(input.startDate)));
+      if (input.endDate) conditions.push(lte(orders.createdAt, new Date(input.endDate)));
+
+      return db.select({
+        id: orders.id,
+        orderNumber: orders.orderNumber,
+        totalPaise: orders.totalPaise,
+        status: orders.status,
+        paymentStatus: orders.paymentStatus,
+        createdAt: orders.createdAt,
+        customerName: orders.customerName,
+      }).from(orders)
+        .where(and(...conditions))
+        .orderBy(desc(orders.createdAt))
+        .limit(input.limit)
+        .offset(input.offset);
+    }),
+
+  // =========================================================================
+  // Manual Aggregator Order Entry
+  // =========================================================================
+  createManualOrder: requirePermission("orders:write").input(z.object({
+    restaurantId: z.string().min(4),
+    outletId: z.string().min(4),
+    source: z.enum(["ZOMATO", "SWIGGY", "PHONE", "WALK_IN"]),
+    customerName: z.string().optional(),
+    customerPhone: z.string().optional(),
+    items: z.array(z.object({
+      name: z.string().min(1),
+      quantity: z.number().int().min(1),
+      unitPricePaise: z.number().int().min(0),
+    })).min(1),
+    totalPaise: z.number().int().min(0),
+    paymentStatus: z.enum(["PAID", "COD"]).default("PAID"),
+    notes: z.string().optional(),
+  }))
+    .mutation(async ({ input, ctx }) => {
+      const db = await import("../db").then(m => m.getDb());
+      if (!db) throw new Error("Database unavailable");
+      const { orders, orderItems } = await import("../../drizzle/schema");
+      const { nanoid } = await import("nanoid");
+
+      const orderId = nanoid();
+      const orderNumber = `AGG-${Date.now().toString(36).toUpperCase()}`;
+
+      await db.insert(orders).values({
+        id: orderId,
+        orderNumber,
+        trackingToken: nanoid(),
+        restaurantId: input.restaurantId,
+        outletId: input.outletId,
+        status: "PLACED",
+        paymentStatus: input.paymentStatus === "PAID" ? "PAID" : "PENDING",
+        fulfillmentType: "DELIVERY",
+        orderSource: input.source,
+        customerName: input.customerName || null,
+        customerPhone: input.customerPhone || null,
+        addressSnapshot: { source: input.source, note: "Manual aggregator entry" },
+        itemTotalPaise: input.totalPaise,
+        discountPaise: 0,
+        packagingFeePaise: 0,
+        deliveryFeePaise: 0,
+        taxPaise: 0,
+        totalPaise: input.totalPaise,
+        specialInstructions: input.notes || null,
+      });
+
+      for (const item of input.items) {
+        await db.insert(orderItems).values({
+          id: nanoid(),
+          orderId,
+          itemNameSnapshot: item.name,
+          unitPricePaise: item.unitPricePaise,
+          quantity: item.quantity,
+          selectedModifiers: [],
+        });
+      }
+
+      return { orderId, orderNumber };
+    }),
+
+  // =========================================================================
+  // Outlet Management
+  // =========================================================================
+  listOutlets: requirePermission("restaurant:write").input(z.object({ restaurantId: z.string().min(4) }))
+    .query(async ({ input }) => {
+      const db = await import("../db").then(m => m.getDb());
+      if (!db) return [];
+      const { outlets } = await import("../../drizzle/schema");
+      const { eq, desc } = await import("drizzle-orm");
+      return db.select().from(outlets)
+        .where(eq(outlets.restaurantId, input.restaurantId))
+        .orderBy(desc(outlets.createdAt));
+    }),
+
+  createOutlet: requirePermission("restaurant:write").input(z.object({
+    restaurantId: z.string().min(4),
+    name: z.string().min(1).max(180),
+    address: z.string().min(1),
+    city: z.string().min(1).max(120),
+    phone: z.string().optional(),
+    preparationMinutes: z.number().int().min(1).default(25),
+    deliveryRadiusKm: z.string().default("5"),
+  }))
+    .mutation(async ({ input }) => {
+      const db = await import("../db").then(m => m.getDb());
+      if (!db) throw new Error("Database unavailable");
+      const { outlets } = await import("../../drizzle/schema");
+      const { nanoid } = await import("nanoid");
+
+      const id = nanoid();
+      await db.insert(outlets).values({
+        id,
+        restaurantId: input.restaurantId,
+        name: input.name,
+        address: input.address,
+        city: input.city,
+        phone: input.phone || null,
+        preparationMinutes: input.preparationMinutes,
+        deliveryRadiusKm: input.deliveryRadiusKm,
+      });
+      return { id };
+    }),
+
+  updateOutlet: requirePermission("restaurant:write").input(z.object({
+    outletId: z.string().min(4),
+    restaurantId: z.string().min(4),
+    name: z.string().min(1).max(180),
+    address: z.string().min(1),
+    city: z.string().min(1).max(120),
+    phone: z.string().optional(),
+    preparationMinutes: z.number().int().min(1),
+    deliveryRadiusKm: z.string(),
+  }))
+    .mutation(async ({ input }) => {
+      const db = await import("../db").then(m => m.getDb());
+      if (!db) throw new Error("Database unavailable");
+      const { outlets } = await import("../../drizzle/schema");
+      const { eq } = await import("drizzle-orm");
+
+      await db.update(outlets).set({
+        name: input.name,
+        address: input.address,
+        city: input.city,
+        phone: input.phone || null,
+        preparationMinutes: input.preparationMinutes,
+        deliveryRadiusKm: input.deliveryRadiusKm,
+      }).where(eq(outlets.id, input.outletId));
+      return { success: true };
+    }),
+
+  toggleOutletActive: requirePermission("restaurant:write").input(z.object({
+    outletId: z.string().min(4),
+    isActive: z.boolean(),
+  }))
+    .mutation(async ({ input }) => {
+      const db = await import("../db").then(m => m.getDb());
+      if (!db) throw new Error("Database unavailable");
+      const { outlets } = await import("../../drizzle/schema");
+      const { eq } = await import("drizzle-orm");
+
+      await db.update(outlets).set({ isActive: input.isActive }).where(eq(outlets.id, input.outletId));
+      return { success: true };
+    }),
 });

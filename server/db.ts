@@ -39,6 +39,7 @@ import {
   auditLogs,
   settings,
   otpVerifications,
+  restaurantMembers,
   type InsertUser,
   type OrderStatus,
   type MenuItemRow,
@@ -151,20 +152,108 @@ export async function getAllRestaurants() {
 }
 
 export async function createRestaurant(input: {
-  slug: string;
   name: string;
+  slug: string;
   description?: string;
-  cuisineSummary: string;
+  cuisineSummary?: string;
+  logoUrl?: string;
+  bannerImageUrl?: string;
   contactPhone?: string;
+  address?: string;
+  latitude?: string;
+  longitude?: string;
+  deliveryFeePaise?: number;
+  packagingFeePaise?: number;
+  minOrderPaise?: number;
+  preparationMinutes?: number;
+  primaryColor?: string;
+  accentColor?: string;
+  fontFamily?: string;
+  bodyFontFamily?: string;
+  ownerUserId?: number;
 }) {
   const db = await requireDb();
-  const restaurantId = `rest_${nano(12)}`;
+  const restaurantId = id();
+  const outletId = id();
+
   await db.insert(restaurants).values({
     id: restaurantId,
-    ...input,
+    slug: input.slug,
+    name: input.name,
+    description: input.description ?? "",
+    cuisineSummary: input.cuisineSummary ?? "",
+    logoUrl: input.logoUrl,
+    bannerImageUrl: input.bannerImageUrl,
+    contactPhone: input.contactPhone,
+    address: input.address ?? "",
+    latitude: input.latitude,
+    longitude: input.longitude,
+    deliveryFeePaise: input.deliveryFeePaise ?? 3000,
+    packagingFeePaise: input.packagingFeePaise ?? 1500,
+    minOrderPaise: input.minOrderPaise ?? 19900,
     isOpen: false,
     allowScheduledOrders: true,
+    preparationMinutes: input.preparationMinutes ?? 25,
+    accentColor: input.accentColor ?? input.primaryColor ?? "#38271F",
+    fontFamily: input.fontFamily ?? "Playfair Display",
+    bodyFontFamily: input.bodyFontFamily ?? "Inter",
   });
+
+  if (input.address) {
+    await db.insert(outlets).values({
+      id: outletId,
+      restaurantId,
+      name: `${input.name} Kitchen`,
+      address: input.address,
+      city: "",
+      postalCode: "",
+      latitude: input.latitude,
+      longitude: input.longitude,
+      preparationMinutes: input.preparationMinutes ?? 25,
+      isActive: true,
+      isOpen: false,
+    });
+  }
+
+  const daysOfWeek = [0, 1, 2, 3, 4, 5, 6];
+  await db.insert(restaurantSchedules).values(
+    daysOfWeek.map(day => ({
+      id: id(),
+      restaurantId,
+      dayOfWeek: day,
+      openTime: "09:00",
+      closeTime: "23:00",
+      isActive: true,
+    }))
+  );
+
+  const defaultCategories = [
+    { name: "Starters", slug: "starters", sortOrder: 1 },
+    { name: "Main Course", slug: "main-course", sortOrder: 2 },
+    { name: "Desserts", slug: "desserts", sortOrder: 3 },
+    { name: "Beverages", slug: "beverages", sortOrder: 4 },
+  ];
+
+  for (const cat of defaultCategories) {
+    await db.insert(menuCategories).values({
+      id: id(),
+      restaurantId,
+      ...cat,
+      isVisible: true,
+      isOpen: true,
+    });
+  }
+
+  if (input.ownerUserId) {
+    await db.insert(restaurantMembers).values({
+      id: id(),
+      userId: input.ownerUserId,
+      restaurantId,
+      role: "owner",
+      isActive: true,
+    });
+  }
+
   return restaurantId;
 }
 
@@ -788,6 +877,75 @@ export async function updateOrderStatus(
       `);
     }
   });
+
+  // Fire notification async — never blocks order update
+  const STATUS_TO_NOTIFICATION: Record<string, string> = {
+    RESTAURANT_ACCEPTED: "order_confirmed",
+    PREPARING: "preparing",
+    OUT_FOR_DELIVERY: "out_for_delivery",
+    DELIVERED: "delivered",
+    CANCELLED: "cancelled",
+    REJECTED: "cancelled",
+  };
+  const notificationType = STATUS_TO_NOTIFICATION[status];
+  if (notificationType && order.customerPhone) {
+    fireAndForgetNotification(notificationType, order).catch((err) => {
+      console.error(`[notification] Failed to send ${notificationType} for order ${orderId}:`, err);
+    });
+  }
+}
+
+async function fireAndForgetNotification(
+  type: string,
+  order: typeof orders.$inferSelect
+) {
+  if (!order.customerPhone) return;
+
+  const { buildNotificationMessage } = await import("./integrations/whatsapp");
+
+  const db = await requireDb();
+  const restaurant = (await db.select({ slug: restaurants.slug, name: restaurants.name })
+    .from(restaurants)
+    .where(eq(restaurants.id, order.restaurantId))
+    .limit(1))[0];
+
+  const baseUrl = process.env.PUBLIC_URL || "https://order.9house.kitchen";
+  const trackUrl = restaurant
+    ? `${baseUrl}/${restaurant.slug}/track/${order.id}`
+    : `${baseUrl}/track/${order.id}`;
+
+  const message = buildNotificationMessage(type, {
+    orderNumber: order.orderNumber,
+    trackUrl,
+    rateUrl: trackUrl,
+    restaurantName: restaurant?.name || "Restaurant",
+  });
+
+  if (!message) return;
+
+  // Check if notifications are enabled for this restaurant
+  const settingsRow = (await db.select().from(settings)
+    .where(and(eq(settings.key, `notifications_${type}`), eq(settings.restaurantId, order.restaurantId)))
+    .limit(1))[0];
+  if (settingsRow && settingsRow.value === "false") return;
+
+  // Try WhatsApp first, fall back to SMS
+  const waToken = process.env.WHATSAPP_ACCESS_TOKEN;
+  const waPhoneId = process.env.WHATSAPP_PHONE_NUMBER_ID;
+  const smsKey = process.env.MSG91_AUTH_KEY;
+
+  if (waToken && waPhoneId) {
+    const { WhatsAppCloudAdapter } = await import("./integrations/whatsapp");
+    const provider = new WhatsAppCloudAdapter(waToken, waPhoneId);
+    const result = await provider.sendText(order.customerPhone, message);
+    if (!result.success && smsKey) {
+      const { SmsFallbackAdapter } = await import("./integrations/whatsapp");
+      await new SmsFallbackAdapter(smsKey).sendText(order.customerPhone, message);
+    }
+  } else if (smsKey) {
+    const { SmsFallbackAdapter } = await import("./integrations/whatsapp");
+    await new SmsFallbackAdapter(smsKey).sendText(order.customerPhone, message);
+  }
 }
 
 export async function getOrders(
@@ -1145,7 +1303,7 @@ export async function getAdminDashboard(restaurantId: string) {
 // Customer Management
 // =============================================================================
 
-export async function getCustomerList(filters?: { search?: string }, limit = 50, offset = 0) {
+export async function getCustomerList(filters?: { search?: string; restaurantId?: string }, limit = 50, offset = 0) {
   const db = await requireDb();
 
   let query = db.select({
@@ -1162,21 +1320,32 @@ export async function getCustomerList(filters?: { search?: string }, limit = 50,
     .from(customerProfiles)
     .innerJoin(users, eq(customerProfiles.userId, users.id));
 
+  const conditions = [];
   if (filters?.search) {
     const searchPattern = `%${filters.search}%`;
-    query = query.where(
+    conditions.push(
       or(
         like(users.name, searchPattern),
         like(users.email, searchPattern),
         like(customerProfiles.mobileNumber, searchPattern),
       )
-    ) as any;
+    );
+  }
+  if (filters?.restaurantId) {
+    const { inArray } = await import("drizzle-orm");
+    const customerIds = db.select({ customerId: orders.customerId })
+      .from(orders)
+      .where(eq(orders.restaurantId, filters.restaurantId));
+    conditions.push(inArray(customerProfiles.id, customerIds));
+  }
+  if (conditions.length > 0) {
+    query = query.where(and(...conditions.filter(Boolean)) as any) as any;
   }
 
   return query.orderBy(desc(customerProfiles.createdAt)).limit(limit).offset(offset);
 }
 
-export async function getCustomerById(customerId: string) {
+export async function getCustomerById(customerId: string, restaurantId?: string) {
   const db = await requireDb();
   const profile = (await db.select({
     id: customerProfiles.id,
@@ -1199,8 +1368,11 @@ export async function getCustomerById(customerId: string) {
 
   const addresses = await db.select().from(customerAddresses)
     .where(eq(customerAddresses.customerId, customerId));
+  const orderCondition = restaurantId
+    ? and(eq(orders.customerId, customerId), eq(orders.restaurantId, restaurantId))
+    : eq(orders.customerId, customerId);
   const orderHistory = await db.select().from(orders)
-    .where(eq(orders.customerId, customerId))
+    .where(orderCondition)
     .orderBy(desc(orders.createdAt))
     .limit(50);
 
@@ -1259,6 +1431,7 @@ export async function logAudit(args: {
   beforeData?: Record<string, unknown>;
   afterData?: Record<string, unknown>;
   ipAddress?: string;
+  restaurantId?: string;
 }) {
   const db = await requireDb();
   await db.insert(auditLogs).values({

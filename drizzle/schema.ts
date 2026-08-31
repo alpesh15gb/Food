@@ -45,6 +45,7 @@ export const paymentProviderStatusEnum = pgEnum("payment_provider_status", [
 ]);
 
 export const fulfillmentTypeEnum = pgEnum("fulfillment_type", ["DELIVERY", "PICKUP"]);
+export const orderSourceEnum = pgEnum("order_source", ["DIRECT", "ZOMATO", "SWIGGY", "PHONE", "WALK_IN"]);
 
 export const dietaryTypeEnum = pgEnum("dietary_type", ["veg", "nonveg", "egg"]);
 
@@ -63,6 +64,8 @@ export const refundStatusEnum = pgEnum("refund_status", ["PENDING", "PROCESSED",
 export const importJobStatusEnum = pgEnum("import_job_status", ["PENDING", "PROCESSING", "COMPLETED", "FAILED"]);
 
 export const importJobTypeEnum = pgEnum("import_job_type", ["products", "coupons", "categories"]);
+export const restaurantMemberRoleEnum = pgEnum("restaurant_member_role", ["owner", "admin", "manager", "staff", "kitchen"]);
+export const sslStatusEnum = pgEnum("ssl_status", ["pending", "active", "expired", "failed"]);
 
 // =============================================================================
 // AUTHENTICATION & RBAC
@@ -75,6 +78,7 @@ export const users = pgTable("users", {
   email: varchar("email", { length: 320 }),
   mobile: varchar("mobile", { length: 24 }),
   loginMethod: varchar("login_method", { length: 64 }),
+  passwordHash: varchar("password_hash", { length: 256 }),
   role: userRoleEnum("role").default("user").notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
@@ -175,6 +179,10 @@ export const restaurants = pgTable("restaurants", {
   bannerImageUrl: text("banner_image_url"),
   primaryColor: varchar("primary_color", { length: 16 }).notNull().default("#C84630"),
   secondaryColor: varchar("secondary_color", { length: 16 }).notNull().default("#F7E4D3"),
+  accentColor: varchar("accent_color", { length: 16 }).default("#38271F"),
+  fontFamily: varchar("font_family", { length: 120 }).default("Playfair Display"),
+  bodyFontFamily: varchar("body_font_family", { length: 120 }).default("Inter"),
+  faviconUrl: text("favicon_url"),
   contactPhone: varchar("contact_phone", { length: 32 }),
   contactEmail: varchar("contact_email", { length: 320 }),
   address: text("address"),
@@ -407,6 +415,7 @@ export const orders = pgTable("orders", {
   status: orderStatusEnum("status").notNull().default("PENDING_PAYMENT"),
   paymentStatus: paymentStatusEnum("payment_status").notNull().default("PENDING"),
   fulfillmentType: fulfillmentTypeEnum("fulfillment_type").notNull().default("DELIVERY"),
+  orderSource: orderSourceEnum("order_source").notNull().default("DIRECT"),
   customerName: varchar("customer_name", { length: 180 }),
   customerPhone: varchar("customer_phone", { length: 24 }),
   customerEmail: varchar("customer_email", { length: 320 }),
@@ -611,11 +620,12 @@ export const auditLogs = pgTable("audit_logs", {
   action: varchar("action", { length: 120 }).notNull(),
   targetType: varchar("target_type", { length: 64 }).notNull(),
   targetId: varchar("target_id", { length: 64 }),
+  restaurantId: varchar("restaurant_id", { length: 36 }).references(() => restaurants.id),
   beforeData: jsonb("before_data").$type<Record<string, unknown>>(),
   afterData: jsonb("after_data").$type<Record<string, unknown>>(),
   ipAddress: varchar("ip_address", { length: 64 }),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-}, (t) => [index("audit_actor_idx").on(t.actorId), index("audit_target_idx").on(t.targetType, t.targetId)]);
+}, (t) => [index("audit_actor_idx").on(t.actorId), index("audit_target_idx").on(t.targetType, t.targetId), index("audit_restaurant_idx").on(t.restaurantId)]);
 
 // =============================================================================
 // SETTINGS
@@ -623,14 +633,15 @@ export const auditLogs = pgTable("audit_logs", {
 
 export const settings = pgTable("settings", {
   id: varchar("id", { length: 36 }).primaryKey(),
-  key: varchar("key", { length: 120 }).notNull().unique(),
+  key: varchar("key", { length: 120 }).notNull(),
   value: text("value"),
   category: varchar("category", { length: 64 }).notNull().default("general"),
   description: varchar("description", { length: 500 }),
+  restaurantId: varchar("restaurant_id", { length: 36 }).references(() => restaurants.id),
   updatedBy: integer("updated_by").references(() => users.id),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
-});
+}, (t) => [uniqueIndex("settings_key_restaurant_idx").on(t.key, t.restaurantId)]);
 
 // =============================================================================
 // INTEGRATION SECRETS (encrypted)
@@ -648,6 +659,192 @@ export const integrationSecrets = pgTable("integration_secrets", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (t) => [uniqueIndex("integration_secret_key_idx").on(t.restaurantId, t.provider, t.keyName)]);
+
+// =============================================================================
+// MULTI-TENANT: Restaurant Members & Custom Domains
+// =============================================================================
+
+export const restaurantMembers = pgTable("restaurant_members", {
+  id: varchar("id", { length: 36 }).primaryKey(),
+  userId: integer("user_id").notNull().references(() => users.id),
+  restaurantId: varchar("restaurant_id", { length: 36 }).notNull().references(() => restaurants.id),
+  role: restaurantMemberRoleEnum("role").notNull().default("staff"),
+  invitedByUserId: integer("invited_by_user_id").references(() => users.id),
+  isActive: boolean("is_active").notNull().default(true),
+  joinedAt: timestamp("joined_at").defaultNow().notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  uniqueIndex("restaurant_member_user_idx").on(t.userId, t.restaurantId),
+  index("restaurant_member_restaurant_idx").on(t.restaurantId),
+]);
+
+export const customDomains = pgTable("custom_domains", {
+  id: varchar("id", { length: 36 }).primaryKey(),
+  restaurantId: varchar("restaurant_id", { length: 36 }).notNull().references(() => restaurants.id),
+  domain: varchar("domain", { length: 253 }).notNull().unique(),
+  isVerified: boolean("is_verified").notNull().default(false),
+  verifiedAt: timestamp("verified_at"),
+  sslStatus: sslStatusEnum("ssl_status").notNull().default("pending"),
+  isPrimary: boolean("is_primary").notNull().default(false),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("custom_domain_restaurant_idx").on(t.restaurantId),
+]);
+
+// =============================================================================
+// BILLING / SUBSCRIPTIONS
+// =============================================================================
+
+export const subscriptionPlanEnum = pgEnum("subscription_plan", ["free", "pro", "enterprise"]);
+export const subscriptionStatusEnum = pgEnum("subscription_status", ["active", "trialing", "past_due", "cancelled", "expired"]);
+
+export const subscriptionPlans = pgTable("subscription_plans", {
+  id: varchar("id", { length: 36 }).primaryKey(),
+  name: varchar("name", { length: 120 }).notNull(),
+  tier: subscriptionPlanEnum("tier").notNull(),
+  pricePaiseMonthly: integer("price_paise_monthly").notNull().default(0),
+  features: jsonb("features").$type<string[]>().notNull().default([]),
+  maxOutlets: integer("max_outlets").notNull().default(1),
+  maxMenuItems: integer("max_menu_items").notNull().default(50),
+  isActive: boolean("is_active").notNull().default(true),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const restaurantSubscriptions = pgTable("restaurant_subscriptions", {
+  id: varchar("id", { length: 36 }).primaryKey(),
+  restaurantId: varchar("restaurant_id", { length: 36 }).notNull().references(() => restaurants.id),
+  planId: varchar("plan_id", { length: 36 }).notNull().references(() => subscriptionPlans.id),
+  status: subscriptionStatusEnum("status").notNull().default("trialing"),
+  trialEndsAt: timestamp("trial_ends_at"),
+  currentPeriodStart: timestamp("current_period_start").notNull(),
+  currentPeriodEnd: timestamp("current_period_end").notNull(),
+  paymentProviderId: varchar("payment_provider_id", { length: 120 }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("restaurant_subscription_idx").on(t.restaurantId),
+]);
+
+// =============================================================================
+// INVENTORY & RECIPE MANAGEMENT
+// =============================================================================
+
+export const stockMovementTypeEnum = pgEnum("stock_movement_type", ["IN", "OUT", "WASTAGE", "ADJUSTMENT"]);
+export const stockReferenceTypeEnum = pgEnum("stock_reference_type", ["PURCHASE", "SALE", "WASTAGE", "MANUAL"]);
+export const purchaseOrderStatusEnum = pgEnum("purchase_order_status", ["DRAFT", "SENT", "RECEIVED", "CANCELLED"]);
+
+export const suppliers = pgTable("suppliers", {
+  id: varchar("id", { length: 36 }).primaryKey(),
+  restaurantId: varchar("restaurant_id", { length: 36 }).notNull().references(() => restaurants.id),
+  name: varchar("name", { length: 180 }).notNull(),
+  phone: varchar("phone", { length: 24 }),
+  email: varchar("email", { length: 320 }),
+  address: text("address"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [index("supplier_restaurant_idx").on(t.restaurantId)]);
+
+export const rawMaterials = pgTable("raw_materials", {
+  id: varchar("id", { length: 36 }).primaryKey(),
+  restaurantId: varchar("restaurant_id", { length: 36 }).notNull().references(() => restaurants.id),
+  name: varchar("name", { length: 180 }).notNull(),
+  unit: varchar("unit", { length: 16 }).notNull(),
+  currentStock: numeric("current_stock", { precision: 12, scale: 3 }).notNull().default("0"),
+  minStock: numeric("min_stock", { precision: 12, scale: 3 }).notNull().default("0"),
+  costPerUnitPaise: integer("cost_per_unit_paise").notNull().default(0),
+  supplierId: varchar("supplier_id", { length: 36 }).references(() => suppliers.id),
+  category: varchar("category", { length: 64 }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [index("raw_material_restaurant_idx").on(t.restaurantId)]);
+
+export const recipes = pgTable("recipes", {
+  id: varchar("id", { length: 36 }).primaryKey(),
+  menuItemId: varchar("menu_item_id", { length: 36 }).notNull().references(() => menuItems.id),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const recipeIngredients = pgTable("recipe_ingredients", {
+  id: varchar("id", { length: 36 }).primaryKey(),
+  recipeId: varchar("recipe_id", { length: 36 }).notNull().references(() => recipes.id),
+  rawMaterialId: varchar("raw_material_id", { length: 36 }).notNull().references(() => rawMaterials.id),
+  quantityPerServing: numeric("quantity_per_serving", { precision: 12, scale: 3 }).notNull(),
+  unit: varchar("unit", { length: 16 }).notNull(),
+});
+
+export const stockMovements = pgTable("stock_movements", {
+  id: varchar("id", { length: 36 }).primaryKey(),
+  restaurantId: varchar("restaurant_id", { length: 36 }).notNull().references(() => restaurants.id),
+  rawMaterialId: varchar("raw_material_id", { length: 36 }).notNull().references(() => rawMaterials.id),
+  type: stockMovementTypeEnum("type").notNull(),
+  quantity: numeric("quantity", { precision: 12, scale: 3 }).notNull(),
+  referenceType: stockReferenceTypeEnum("reference_type").notNull(),
+  referenceId: varchar("reference_id", { length: 64 }),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("stock_movement_restaurant_idx").on(t.restaurantId),
+  index("stock_movement_material_idx").on(t.rawMaterialId),
+]);
+
+export const purchaseOrders = pgTable("purchase_orders", {
+  id: varchar("id", { length: 36 }).primaryKey(),
+  restaurantId: varchar("restaurant_id", { length: 36 }).notNull().references(() => restaurants.id),
+  supplierId: varchar("supplier_id", { length: 36 }).references(() => suppliers.id),
+  status: purchaseOrderStatusEnum("status").notNull().default("DRAFT"),
+  totalPaise: integer("total_paise").notNull().default(0),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  receivedAt: timestamp("received_at"),
+}, (t) => [index("po_restaurant_idx").on(t.restaurantId)]);
+
+export const purchaseOrderItems = pgTable("purchase_order_items", {
+  id: varchar("id", { length: 36 }).primaryKey(),
+  purchaseOrderId: varchar("purchase_order_id", { length: 36 }).notNull().references(() => purchaseOrders.id),
+  rawMaterialId: varchar("raw_material_id", { length: 36 }).notNull().references(() => rawMaterials.id),
+  quantity: numeric("quantity", { precision: 12, scale: 3 }).notNull(),
+  unitCostPaise: integer("unit_cost_paise").notNull(),
+});
+
+// =============================================================================
+// LOYALTY PROGRAM
+// =============================================================================
+
+export const loyaltyTransactionTypeEnum = pgEnum("loyalty_transaction_type", ["EARN", "REDEEM", "EXPIRE"]);
+
+export const loyaltyPrograms = pgTable("loyalty_programs", {
+  id: varchar("id", { length: 36 }).primaryKey(),
+  restaurantId: varchar("restaurant_id", { length: 36 }).notNull().references(() => restaurants.id),
+  name: varchar("name", { length: 120 }).notNull().default("Rewards"),
+  pointsPerRupee: numeric("points_per_rupee", { precision: 5, scale: 2 }).notNull().default("1"),
+  redemptionRatePaise: integer("redemption_rate_paise").notNull().default(100),
+  maxRedemptionPercent: integer("max_redemption_percent").notNull().default(50),
+  pointsExpiryDays: integer("points_expiry_days").notNull().default(365),
+  isActive: boolean("is_active").notNull().default(true),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [uniqueIndex("loyalty_program_restaurant_idx").on(t.restaurantId)]);
+
+export const loyaltyBalances = pgTable("loyalty_balances", {
+  id: varchar("id", { length: 36 }).primaryKey(),
+  customerId: varchar("customer_id", { length: 36 }).notNull().references(() => customerProfiles.id),
+  restaurantId: varchar("restaurant_id", { length: 36 }).notNull().references(() => restaurants.id),
+  points: integer("points").notNull().default(0),
+  lifetimePoints: integer("lifetime_points").notNull().default(0),
+  tier: varchar("tier", { length: 32 }).notNull().default("bronze"),
+  lastEarnedAt: timestamp("last_earned_at"),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [uniqueIndex("loyalty_balance_customer_restaurant_idx").on(t.customerId, t.restaurantId)]);
+
+export const loyaltyTransactions = pgTable("loyalty_transactions", {
+  id: varchar("id", { length: 36 }).primaryKey(),
+  customerId: varchar("customer_id", { length: 36 }).notNull().references(() => customerProfiles.id),
+  restaurantId: varchar("restaurant_id", { length: 36 }).notNull().references(() => restaurants.id),
+  type: loyaltyTransactionTypeEnum("type").notNull(),
+  points: integer("points").notNull(),
+  orderId: varchar("order_id", { length: 36 }),
+  description: varchar("description", { length: 300 }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [index("loyalty_txn_customer_idx").on(t.customerId, t.restaurantId)]);
 
 // =============================================================================
 // TYPE EXPORTS

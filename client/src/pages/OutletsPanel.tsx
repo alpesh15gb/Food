@@ -1,0 +1,163 @@
+import { trpc } from "@/lib/trpc";
+import { MapPin, Loader2, Plus, Store, ToggleLeft, ToggleRight } from "lucide-react";
+import { useState } from "react";
+
+export default function OutletsPanel({ restaurantId }: { restaurantId: string }) {
+  const { data: outlets, isLoading, refetch } = trpc.admin.listOutlets.useQuery({ restaurantId });
+  const createMutation = trpc.admin.createOutlet.useMutation({ onSuccess: () => { refetch(); setShowForm(false); resetForm(); } });
+  const updateMutation = trpc.admin.updateOutlet.useMutation({ onSuccess: () => refetch() });
+  const toggleActiveMutation = trpc.admin.toggleOutletActive.useMutation({ onSuccess: () => refetch() });
+
+  const [showForm, setShowForm] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [form, setForm] = useState({ name: "", address: "", city: "", phone: "", preparationMinutes: "25", deliveryRadiusKm: "5" });
+
+  const resetForm = () => {
+    setForm({ name: "", address: "", city: "", phone: "", preparationMinutes: "25", deliveryRadiusKm: "5" });
+    setEditingId(null);
+  };
+
+  const handleEdit = (outlet: any) => {
+    setForm({
+      name: outlet.name,
+      address: outlet.address,
+      city: outlet.city,
+      phone: outlet.phone || "",
+      preparationMinutes: String(outlet.preparationMinutes),
+      deliveryRadiusKm: String(outlet.deliveryRadiusKm || "5"),
+    });
+    setEditingId(outlet.id);
+    setShowForm(true);
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const payload = {
+      restaurantId,
+      name: form.name,
+      address: form.address,
+      city: form.city,
+      phone: form.phone || undefined,
+      preparationMinutes: parseInt(form.preparationMinutes) || 25,
+      deliveryRadiusKm: form.deliveryRadiusKm,
+    };
+    if (editingId) {
+      await updateMutation.mutateAsync({ outletId: editingId, ...payload });
+    } else {
+      await createMutation.mutateAsync(payload);
+    }
+  };
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-8 p-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">Outlets</h1>
+          <p className="mt-1 text-sm text-muted-foreground">Manage your restaurant locations and their settings</p>
+        </div>
+        {!showForm && (
+          <button
+            onClick={() => { resetForm(); setShowForm(true); }}
+            className="flex items-center gap-2 rounded-lg bg-[#9d3727] px-4 py-2 text-sm font-bold text-white hover:bg-[#7c2b1e]"
+          >
+            <Plus className="h-4 w-4" />
+            Add Outlet
+          </button>
+        )}
+      </div>
+
+      {showForm && (
+        <form onSubmit={handleSubmit} className="rounded-xl border bg-card p-6 space-y-4">
+          <h2 className="font-semibold">{editingId ? "Edit Outlet" : "New Outlet"}</h2>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <label className="block text-xs font-medium text-muted-foreground mb-1">Outlet Name</label>
+              <input required value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} className="w-full rounded-md border px-3 py-2 text-sm" placeholder="e.g., Main Kitchen" />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-muted-foreground mb-1">City</label>
+              <input required value={form.city} onChange={e => setForm(f => ({ ...f, city: e.target.value }))} className="w-full rounded-md border px-3 py-2 text-sm" placeholder="e.g., Hyderabad" />
+            </div>
+            <div className="sm:col-span-2">
+              <label className="block text-xs font-medium text-muted-foreground mb-1">Address</label>
+              <input required value={form.address} onChange={e => setForm(f => ({ ...f, address: e.target.value }))} className="w-full rounded-md border px-3 py-2 text-sm" placeholder="Full address" />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-muted-foreground mb-1">Phone</label>
+              <input value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} className="w-full rounded-md border px-3 py-2 text-sm" placeholder="+91..." />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-muted-foreground mb-1">Prep Time (min)</label>
+              <input type="number" min="1" value={form.preparationMinutes} onChange={e => setForm(f => ({ ...f, preparationMinutes: e.target.value }))} className="w-full rounded-md border px-3 py-2 text-sm" />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-muted-foreground mb-1">Delivery Radius (km)</label>
+              <input value={form.deliveryRadiusKm} onChange={e => setForm(f => ({ ...f, deliveryRadiusKm: e.target.value }))} className="w-full rounded-md border px-3 py-2 text-sm" />
+            </div>
+          </div>
+          <div className="flex gap-3 pt-2">
+            <button type="submit" disabled={createMutation.isPending || updateMutation.isPending} className="rounded-lg bg-[#9d3727] px-4 py-2 text-sm font-bold text-white hover:bg-[#7c2b1e] disabled:opacity-50">
+              {editingId ? "Update" : "Create"} Outlet
+            </button>
+            <button type="button" onClick={() => setShowForm(false)} className="rounded-lg border px-4 py-2 text-sm font-medium text-muted-foreground hover:bg-muted">Cancel</button>
+          </div>
+        </form>
+      )}
+
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {(outlets ?? []).map((outlet: any) => (
+          <div key={outlet.id} className={`rounded-xl border bg-card p-5 transition-all ${!outlet.isActive ? "opacity-60" : ""}`}>
+            <div className="flex items-start justify-between">
+              <div className="flex items-center gap-3">
+                <div className={`flex h-10 w-10 items-center justify-center rounded-lg ${outlet.isActive ? "bg-green-100 text-green-700" : "bg-muted text-muted-foreground"}`}>
+                  <Store className="h-5 w-5" />
+                </div>
+                <div>
+                  <h3 className="font-semibold">{outlet.name}</h3>
+                  <p className="text-xs text-muted-foreground">{outlet.city}</p>
+                </div>
+              </div>
+              <button
+                onClick={() => toggleActiveMutation.mutate({ outletId: outlet.id, isActive: !outlet.isActive })}
+                className="text-muted-foreground hover:text-foreground"
+                title={outlet.isActive ? "Deactivate" : "Activate"}
+              >
+                {outlet.isActive ? <ToggleRight className="h-6 w-6 text-green-600" /> : <ToggleLeft className="h-6 w-6" />}
+              </button>
+            </div>
+
+            <div className="mt-4 space-y-2 text-sm">
+              <div className="flex items-start gap-2">
+                <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                <p className="text-muted-foreground line-clamp-2">{outlet.address}</p>
+              </div>
+              {outlet.phone && <p className="text-muted-foreground">{outlet.phone}</p>}
+            </div>
+
+            <div className="mt-4 flex items-center gap-4 border-t pt-3 text-xs text-muted-foreground">
+              <span>Prep: {outlet.preparationMinutes}min</span>
+              <span>Radius: {outlet.deliveryRadiusKm}km</span>
+              <button onClick={() => handleEdit(outlet)} className="ml-auto font-medium text-[#9d3727] hover:underline">Edit</button>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {(!outlets || outlets.length === 0) && !showForm && (
+        <div className="rounded-xl border border-dashed p-8 text-center">
+          <Store className="mx-auto h-8 w-8 text-muted-foreground" />
+          <p className="mt-3 font-medium">No outlets yet</p>
+          <p className="text-sm text-muted-foreground">Add your first outlet to start accepting orders.</p>
+        </div>
+      )}
+    </div>
+  );
+}

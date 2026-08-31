@@ -1,13 +1,11 @@
 /** Provider readiness is built from encrypted server-side configuration. */
 import { hasIntegrationSecrets } from "./security/secretVault";
 
-const RESTAURANT_ID = "rest_spice_garden";
-
-export async function getIntegrationStatus() {
+export async function getIntegrationStatus(restaurantId: string) {
   const [razorpayStored, otpStored, deliveryStored] = await Promise.all([
-    hasIntegrationSecrets(RESTAURANT_ID, "razorpay", ["RAZORPAY_KEY_ID", "RAZORPAY_KEY_SECRET"]),
-    hasIntegrationSecrets(RESTAURANT_ID, "otp", ["OTP_PROVIDER_API_KEY"]),
-    hasIntegrationSecrets(RESTAURANT_ID, "delivery", ["SHADOWFAX_API_KEY", "SHADOWFAX_MERCHANT_ID"]),
+    hasIntegrationSecrets(restaurantId, "razorpay", ["RAZORPAY_KEY_ID", "RAZORPAY_KEY_SECRET"]),
+    hasIntegrationSecrets(restaurantId, "otp", ["OTP_PROVIDER_API_KEY"]),
+    hasIntegrationSecrets(restaurantId, "delivery", ["SHADOWFAX_API_KEY", "SHADOWFAX_MERCHANT_ID"]),
   ]);
 
   return {

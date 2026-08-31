@@ -98,9 +98,9 @@ function Quantity({
   );
 }
 
-export default function OrderingApp() {
+export default function OrderingApp({ slug }: { slug?: string }) {
   const [, navigate] = useLocation();
-  const storefrontSlug = "spice-garden";
+  const storefrontSlug = slug || "spice-garden";
   const storefrontQuery = trpc.storefront.get.useQuery({ slug: storefrontSlug });
   const paymentConfig = trpc.storefront.paymentConfig.useQuery();
   const localAdminMode = trpc.auth.localAdminEnabled.useQuery();
@@ -114,6 +114,27 @@ export default function OrderingApp() {
   const liveMenu = storefront?.menu ?? [];
   const collections = storefront?.collections ?? [];
   const offers = storefront?.offers ?? [];
+
+  useEffect(() => {
+    if (!storefront?.theme) return;
+    const root = document.documentElement;
+    const t = storefront.theme;
+    root.style.setProperty("--color-primary", t.primaryColor);
+    root.style.setProperty("--color-accent", t.accentColor);
+    root.style.setProperty("--font-display", t.fontFamily);
+    root.style.setProperty("--font-body", t.bodyFontFamily);
+    if (t.faviconUrl) {
+      let link = document.querySelector<HTMLLinkElement>("link[rel~='icon']");
+      if (!link) { link = document.createElement("link"); link.rel = "icon"; document.head.appendChild(link); }
+      link.href = t.faviconUrl;
+    }
+    return () => {
+      root.style.removeProperty("--color-primary");
+      root.style.removeProperty("--color-accent");
+      root.style.removeProperty("--font-display");
+      root.style.removeProperty("--font-body");
+    };
+  }, [storefront?.theme]);
 
   const path = window.location.pathname;
   const screen = path.includes("/cart")

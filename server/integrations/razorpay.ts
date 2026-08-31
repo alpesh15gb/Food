@@ -33,12 +33,10 @@ type RazorpayRefund = {
   status: string;
 };
 
-const RESTAURANT_ID = "rest_9house_kitchen";
-
-async function credentials() {
-  const keyId = (await readIntegrationSecret(RESTAURANT_ID, "razorpay", "RAZORPAY_KEY_ID"))
+async function credentials(restaurantId?: string) {
+  const keyId = (restaurantId ? await readIntegrationSecret(restaurantId, "razorpay", "RAZORPAY_KEY_ID") : null)
     ?? process.env.RAZORPAY_KEY_ID;
-  const keySecret = (await readIntegrationSecret(RESTAURANT_ID, "razorpay", "RAZORPAY_KEY_SECRET"))
+  const keySecret = (restaurantId ? await readIntegrationSecret(restaurantId, "razorpay", "RAZORPAY_KEY_SECRET") : null)
     ?? process.env.RAZORPAY_KEY_SECRET;
   if (!keyId || !keySecret) {
     throw new Error("Razorpay is not configured. Add RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET.");
@@ -46,10 +44,10 @@ async function credentials() {
   return { keyId, keySecret };
 }
 
-export async function getRazorpayConfig() {
+export async function getRazorpayConfig(restaurantId?: string) {
   const [storedKeyId, storedKeySecret] = await Promise.all([
-    readIntegrationSecret(RESTAURANT_ID, "razorpay", "RAZORPAY_KEY_ID"),
-    readIntegrationSecret(RESTAURANT_ID, "razorpay", "RAZORPAY_KEY_SECRET"),
+    restaurantId ? readIntegrationSecret(restaurantId, "razorpay", "RAZORPAY_KEY_ID") : Promise.resolve(null),
+    restaurantId ? readIntegrationSecret(restaurantId, "razorpay", "RAZORPAY_KEY_SECRET") : Promise.resolve(null),
   ]);
   const keyId = storedKeyId ?? process.env.RAZORPAY_KEY_ID ?? null;
   return {

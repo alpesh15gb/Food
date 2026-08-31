@@ -3,7 +3,7 @@
  * Includes: overview, order management, menu management, restaurant settings,
  * customer management, and integration settings.
  */
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useLocation } from "wouter";
 import { toast } from "sonner";
 import {
@@ -18,6 +18,15 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { trpc } from "@/lib/trpc";
 import IntegrationPanel from "@/components/IntegrationPanel";
+import DomainsPanel from "@/pages/DomainsPanel";
+import KDSPage from "@/pages/KDS";
+import InventoryPanel from "@/pages/InventoryPanel";
+import StaffPanel from "@/pages/StaffPanel";
+import NotificationsPanel from "@/pages/NotificationsPanel";
+import AnalyticsPanel from "@/pages/AnalyticsPanel";
+import OutletsPanel from "@/pages/OutletsPanel";
+import LoyaltyPanel from "@/pages/LoyaltyPanel";
+import ComboBuilderPanel from "@/pages/ComboBuilderPanel";
 import MenuImportPanel from "@/components/MenuImportPanel";
 
 const money = (paise: number) =>
@@ -59,10 +68,23 @@ const statusColor: Record<string, string> = {
   REFUNDED: "bg-gray-50 text-gray-700",
 };
 
+const ADMIN_SECTIONS = new Set(["import","menu","orders","categories","coupons","customers","restaurant","integrations","domains","kds","inventory","staff","notifications","analytics","outlets","loyalty","combos","overview"]);
+
 export default function Admin() {
   const { user, loading } = useAuth();
   const [location] = useLocation();
-  const section = location.split("/")[2] ?? "overview";
+  const parts = location.split("/").filter(Boolean); // ["admin", ...]
+  let restaurantSlug: string | undefined;
+  let section: string;
+  if (parts.length >= 3 && !ADMIN_SECTIONS.has(parts[1])) {
+    // /admin/:slug/:section
+    restaurantSlug = parts[1];
+    section = parts[2];
+  } else {
+    // /admin or /admin/:section (backward compat)
+    restaurantSlug = undefined;
+    section = parts[1] ?? "overview";
+  }
 
   if (loading)
     return <div className="min-h-screen bg-[#f7f2eb]" />;
@@ -71,9 +93,9 @@ export default function Admin() {
   return (
     <DashboardLayout>
       {section === "import" ? (
-        <MenuImportWorkspace />
+        <MenuImportWorkspace slug={restaurantSlug} />
       ) : (
-        <AdminWorkspace section={section} />
+        <AdminWorkspace section={section} slug={restaurantSlug} />
       )}
     </DashboardLayout>
   );
@@ -158,8 +180,8 @@ function AdminAccess() {
 // Menu Import Workspace
 // =============================================================================
 
-function MenuImportWorkspace() {
-  const dashboard = trpc.admin.dashboard.useQuery({ slug: "spice-garden" });
+function MenuImportWorkspace({ slug }: { slug?: string }) {
+  const dashboard = trpc.admin.dashboard.useQuery({ slug: slug || "spice-garden" });
   if (dashboard.isLoading) return <AdminLoading />;
   if (dashboard.isError || !dashboard.data)
     return (
@@ -194,9 +216,9 @@ function MenuImportWorkspace() {
 // Main Admin Workspace
 // =============================================================================
 
-function AdminWorkspace({ section }: { section: string }) {
+function AdminWorkspace({ section, slug }: { section: string; slug?: string }) {
   const utils = trpc.useUtils();
-  const dashboard = trpc.admin.dashboard.useQuery({ slug: "spice-garden" });
+  const dashboard = trpc.admin.dashboard.useQuery({ slug: slug || "spice-garden" });
   const [itemForm, setItemForm] = useState({
     name: "",
     price: "",
@@ -238,6 +260,34 @@ function AdminWorkspace({ section }: { section: string }) {
     },
   });
   const toggleItem = trpc.admin.toggleItemOpen.useMutation({
+    onSuccess: () => utils.admin.dashboard.invalidate(),
+  });
+  const uploadImage = trpc.admin.uploadMenuImage.useMutation();
+  const deleteItem = trpc.admin.deleteMenuItem.useMutation({
+    onSuccess: () => {
+      utils.admin.dashboard.invalidate();
+      toast.success("Item removed from menu");
+    },
+  });
+  const bulkUpdate = trpc.admin.bulkUpdateMenuItems.useMutation({
+    onSuccess: (d) => {
+      utils.admin.dashboard.invalidate();
+      toast.success(`${d.updated} items updated`);
+    },
+  });
+  const updateItem = trpc.admin.updateMenuItem.useMutation({
+    onSuccess: () => {
+      utils.admin.dashboard.invalidate();
+      toast.success("Item updated");
+    },
+  });
+  const createCat = trpc.admin.createCategory.useMutation({
+    onSuccess: () => {
+      utils.admin.dashboard.invalidate();
+      toast.success("Category created");
+    },
+  });
+  const updateCat = trpc.admin.updateCategory.useMutation({
     onSuccess: () => utils.admin.dashboard.invalidate(),
   });
 
@@ -294,6 +344,8 @@ function AdminWorkspace({ section }: { section: string }) {
                 ? "Order queue"
                 : section === "menu"
                 ? "Menu studio"
+                : section === "categories"
+                ? "Category manager"
                 : section === "coupons"
                 ? "Offers desk"
                 : section === "customers"
@@ -337,6 +389,16 @@ function AdminWorkspace({ section }: { section: string }) {
             onToggle={(itemId, isOpen) =>
               toggleItem.mutate({ itemId, isOpen })
             }
+            onUploadImage={uploadImage}
+            onDelete={(itemId) => deleteItem.mutate({ itemId })}
+            onUpdateItem={(input) => updateItem.mutate(input)}
+            onBulkUpdate={(input) => bulkUpdate.mutate(input)}
+          />
+        ) : section === "categories" ? (
+          <CategoriesPanel
+            data={data}
+            onCreateCategory={(input) => createCat.mutate(input)}
+            onUpdateCategory={(input) => updateCat.mutate(input)}
           />
         ) : section === "coupons" ? (
           <CouponsPanel
@@ -354,6 +416,24 @@ function AdminWorkspace({ section }: { section: string }) {
           />
         ) : section === "integrations" ? (
           <IntegrationPanel />
+        ) : section === "domains" ? (
+          <DomainsPanel restaurantId={data.restaurant.id} />
+        ) : section === "kds" ? (
+          <KDSPage slug={slug} />
+        ) : section === "inventory" ? (
+          <InventoryPanel restaurantId={data.restaurant.id} />
+        ) : section === "staff" ? (
+          <StaffPanel restaurantId={data.restaurant.id} />
+        ) : section === "notifications" ? (
+          <NotificationsPanel restaurantId={data.restaurant.id} />
+        ) : section === "analytics" ? (
+          <AnalyticsPanel restaurantId={data.restaurant.id} />
+        ) : section === "outlets" ? (
+          <OutletsPanel restaurantId={data.restaurant.id} />
+        ) : section === "loyalty" ? (
+          <LoyaltyPanel restaurantId={data.restaurant.id} />
+        ) : section === "combos" ? (
+          <ComboBuilderPanel restaurantId={data.restaurant.id} />
         ) : (
           <OverviewPanel data={data} />
         )}
@@ -682,12 +762,24 @@ function OrdersPanel({
                 <tr key={order.id} className="border-t border-[#f0e4d9]">
                   <td className="px-5 py-4">
                     <p className="font-extrabold">{order.orderNumber}</p>
-                    <p className="mt-1 text-xs text-[#8c6d58]">
-                      {new Date(order.createdAt).toLocaleString("en-IN", {
-                        dateStyle: "medium",
-                        timeStyle: "short",
-                      })}
-                    </p>
+                    <div className="mt-1 flex items-center gap-2">
+                      <p className="text-xs text-[#8c6d58]">
+                        {new Date(order.createdAt).toLocaleString("en-IN", {
+                          dateStyle: "medium",
+                          timeStyle: "short",
+                        })}
+                      </p>
+                      {order.orderSource && order.orderSource !== "DIRECT" && (
+                        <span className={`rounded px-1.5 py-0.5 text-[9px] font-bold uppercase ${
+                          order.orderSource === "ZOMATO" ? "bg-red-100 text-red-700" :
+                          order.orderSource === "SWIGGY" ? "bg-orange-100 text-orange-700" :
+                          order.orderSource === "PHONE" ? "bg-blue-100 text-blue-700" :
+                          "bg-green-100 text-green-700"
+                        }`}>
+                          {order.orderSource}
+                        </span>
+                      )}
+                    </div>
                   </td>
                   <td className="px-5 py-4">
                     <p className="text-sm font-bold">{order.customerName || "Guest"}</p>
@@ -719,22 +811,27 @@ function OrdersPanel({
                     </span>
                   </td>
                   <td className="px-5 py-4">
-                    <select
-                      disabled={busy}
-                      value={order.status}
-                      onChange={(e) => onStatus(order.id, e.target.value)}
-                      className="rounded-lg border border-[#ddc6b5] bg-white px-2 py-2 text-xs font-bold outline-none focus:ring-2 focus:ring-[#c84630]"
-                    >
-                      <option value="PLACED">New order</option>
-                      <option value="RESTAURANT_ACCEPTED">Accept</option>
-                      <option value="PREPARING">Preparing</option>
-                      <option value="READY_FOR_PICKUP">Ready</option>
-                      <option value="DELIVERY_REQUESTED">Request delivery</option>
-                      <option value="OUT_FOR_DELIVERY">Out for delivery</option>
-                      <option value="DELIVERED">Delivered</option>
-                      <option value="REJECTED">Reject</option>
-                      <option value="CANCELLED">Cancel</option>
-                    </select>
+                    <div className="flex flex-col gap-2">
+                      <select
+                        disabled={busy}
+                        value={order.status}
+                        onChange={(e) => onStatus(order.id, e.target.value)}
+                        className="rounded-lg border border-[#ddc6b5] bg-white px-2 py-2 text-xs font-bold outline-none focus:ring-2 focus:ring-[#c84630]"
+                      >
+                        <option value="PLACED">New order</option>
+                        <option value="RESTAURANT_ACCEPTED">Accept</option>
+                        <option value="PREPARING">Preparing</option>
+                        <option value="READY_FOR_PICKUP">Ready</option>
+                        <option value="DELIVERY_REQUESTED">Request delivery</option>
+                        <option value="OUT_FOR_DELIVERY">Out for delivery</option>
+                        <option value="DELIVERED">Delivered</option>
+                        <option value="REJECTED">Reject</option>
+                        <option value="CANCELLED">Cancel</option>
+                      </select>
+                      {(order.status === "DELIVERED" || order.status === "READY_FOR_PICKUP") && (
+                        <InvoiceButton orderId={order.id} />
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -761,6 +858,10 @@ function MenuPanel({
   onCreate,
   onAvailability,
   onToggle,
+  onUploadImage,
+  onDelete,
+  onUpdateItem,
+  onBulkUpdate,
 }: {
   data: any;
   itemForm: any;
@@ -768,11 +869,97 @@ function MenuPanel({
   onCreate: () => void;
   onAvailability: (id: string, status: string) => void;
   onToggle: (id: string, isOpen: boolean) => void;
+  onUploadImage: any;
+  onDelete: (id: string) => void;
+  onUpdateItem: (input: any) => void;
+  onBulkUpdate: (input: any) => void;
 }) {
   const [search, setSearch] = useState("");
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editForm, setEditForm] = useState<any>({});
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+
   const items = (data.items ?? []).filter((item: any) =>
     search ? item.name.toLowerCase().includes(search.toLowerCase()) : true
   );
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+
+  const toggleAll = () => {
+    if (selectedIds.size === items.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(items.map((i: any) => i.id)));
+    }
+  };
+
+  const handleImageUpload = async (file: File, target: "create" | "edit") => {
+    if (file.size > 2 * 1024 * 1024) return toast.error("Image must be under 2 MB.");
+    setUploading(true);
+    try {
+      const reader = new FileReader();
+      reader.onloadend = async () => {
+        const base64 = (reader.result as string).split(",")[1];
+        try {
+          const result = await onUploadImage.mutateAsync({
+            data: base64,
+            filename: file.name,
+            contentType: file.type as "image/jpeg" | "image/png" | "image/webp",
+          });
+          if (target === "create") {
+            setItemForm({ ...itemForm, imageUrl: result.url });
+            setImagePreview(result.url);
+          } else {
+            setEditForm({ ...editForm, imageUrl: result.url });
+          }
+        } catch {
+          toast.error("Image upload failed.");
+        }
+        setUploading(false);
+      };
+      reader.readAsDataURL(file);
+    } catch {
+      setUploading(false);
+      toast.error("Could not read image file.");
+    }
+  };
+
+  const startEdit = (item: any) => {
+    setEditingId(item.id);
+    setEditForm({
+      itemId: item.id,
+      name: item.name,
+      description: item.description ?? "",
+      pricePaise: item.pricePaise,
+      offerPricePaise: item.offerPricePaise,
+      dietaryType: item.dietaryType,
+      isBestseller: item.isBestseller,
+      imageUrl: item.imageUrl,
+    });
+  };
+
+  const saveEdit = () => {
+    if (!editingId) return;
+    onUpdateItem({
+      itemId: editingId,
+      name: editForm.name,
+      description: editForm.description || undefined,
+      pricePaise: editForm.pricePaise,
+      offerPricePaise: editForm.offerPricePaise || undefined,
+      dietaryType: editForm.dietaryType,
+      isBestseller: editForm.isBestseller,
+      imageUrl: editForm.imageUrl || undefined,
+    });
+    setEditingId(null);
+  };
 
   return (
     <div className="grid gap-5 xl:grid-cols-[0.72fr_1.28fr]">
@@ -783,11 +970,34 @@ function MenuPanel({
         </p>
         <h2 className="font-display mt-2 text-3xl">Make the menu yours</h2>
         <div className="mt-6 space-y-3">
+          {/* Image upload */}
+          <div className="flex items-center gap-3">
+            {imagePreview ? (
+              <div className="relative h-16 w-16 shrink-0 overflow-hidden rounded-xl border border-white/20">
+                <img src={imagePreview} alt="Preview" className="h-full w-full object-cover" />
+                <button onClick={() => { setImagePreview(null); setItemForm({ ...itemForm, imageUrl: undefined }); }} className="absolute -right-1 -top-1 grid h-5 w-5 place-items-center rounded-full bg-red-500 text-white"><X className="h-3 w-3" /></button>
+              </div>
+            ) : (
+              <label className="flex h-16 w-16 cursor-pointer items-center justify-center rounded-xl border-2 border-dashed border-white/30 hover:border-white/60">
+                {uploading ? <RefreshCw className="h-5 w-5 animate-spin" /> : <Plus className="h-5 w-5 text-white/50" />}
+                <input type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={(e) => e.target.files?.[0] && handleImageUpload(e.target.files[0], "create")} />
+              </label>
+            )}
+            <span className="text-xs text-white/50">{imagePreview ? "Image ready" : "Tap to add photo"}</span>
+          </div>
+
           <Input
             value={itemForm.name}
             onChange={(e) => setItemForm({ ...itemForm, name: e.target.value })}
             placeholder="Dish name"
             className="h-11 border-white/20 bg-white/10 text-white placeholder:text-white/50"
+          />
+          <textarea
+            value={itemForm.description ?? ""}
+            onChange={(e) => setItemForm({ ...itemForm, description: e.target.value })}
+            placeholder="Short description"
+            rows={2}
+            className="w-full rounded-xl border border-white/20 bg-white/10 px-3 py-2 text-sm text-white placeholder:text-white/50 resize-none"
           />
           <Input
             value={itemForm.price}
@@ -834,6 +1044,7 @@ function MenuPanel({
           </select>
           <Button
             onClick={onCreate}
+            disabled={uploading}
             className="h-11 w-full rounded-xl bg-[#f7e4d3] font-extrabold text-[#40291c] hover:bg-white"
           >
             <Plus className="mr-2 h-4 w-4" />
@@ -856,79 +1067,257 @@ function MenuPanel({
               {(data.items ?? []).length} dishes
             </span>
           </div>
-          <div className="mt-3 relative">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#a37d64]" />
-            <Input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search menu items..."
-              className="h-10 rounded-xl border-[#e8d6c5] pl-9 text-sm"
-            />
+          <div className="mt-3 flex gap-2">
+            <div className="relative flex-1">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#a37d64]" />
+              <Input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search menu items..."
+                className="h-10 rounded-xl border-[#e8d6c5] pl-9 text-sm"
+              />
+            </div>
+            {items.length > 0 && (
+              <label className="flex cursor-pointer items-center gap-2 rounded-xl border border-[#e8d6c5] bg-white px-3 text-xs font-bold text-[#856652]">
+                <input type="checkbox" checked={selectedIds.size === items.length && items.length > 0} onChange={toggleAll} className="accent-[#c84630]" />
+                All
+              </label>
+            )}
           </div>
+
+          {/* Bulk action bar */}
+          {selectedIds.size > 0 && (
+            <div className="mt-3 flex flex-wrap items-center gap-2 rounded-xl bg-[#38271f] px-4 py-2.5">
+              <span className="text-xs font-bold text-white">{selectedIds.size} selected</span>
+              <button onClick={() => onBulkUpdate({ itemIds: Array.from(selectedIds), availability: "AVAILABLE" })} className="rounded-lg bg-white/10 px-2.5 py-1 text-[10px] font-bold text-white hover:bg-white/20">Set available</button>
+              <button onClick={() => onBulkUpdate({ itemIds: Array.from(selectedIds), availability: "SOLD_OUT" })} className="rounded-lg bg-white/10 px-2.5 py-1 text-[10px] font-bold text-white hover:bg-white/20">Sold out</button>
+              <button onClick={() => onBulkUpdate({ itemIds: Array.from(selectedIds), isOpen: false, availability: "DISABLED" })} className="rounded-lg bg-white/10 px-2.5 py-1 text-[10px] font-bold text-white hover:bg-white/20">Disable</button>
+              <button onClick={() => { setSelectedIds(new Set()); }} className="ml-auto text-[10px] font-bold text-white/60 hover:text-white">Clear</button>
+            </div>
+          )}
         </div>
         <div className="divide-y divide-[#f0e4d9]">
           {items.map((item: any) => (
-            <article key={item.id} className="flex items-center gap-4 p-4">
-              <div
-                className={`grid h-10 w-10 shrink-0 place-items-center rounded-xl text-xs font-extrabold ${
-                  item.dietaryType === "veg"
-                    ? "bg-green-50 text-green-700"
-                    : item.dietaryType === "egg"
-                    ? "bg-amber-50 text-amber-700"
-                    : "bg-red-50 text-red-700"
-                }`}
-              >
-                {item.dietaryType === "veg"
-                  ? "V"
-                  : item.dietaryType === "egg"
-                  ? "E"
-                  : "NV"}
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2">
-                  <p className="text-sm font-extrabold">{item.name}</p>
-                  {item.isBestseller && (
-                    <span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[9px] font-extrabold text-amber-700">
-                      BESTSELLER
-                    </span>
-                  )}
+            <article key={item.id} className="p-4">
+              {editingId === item.id ? (
+                /* Inline Edit Form */
+                <div className="space-y-3 rounded-xl border border-[#d9b89e] bg-[#fff4e9] p-4">
+                  <div className="flex items-start gap-3">
+                    {editForm.imageUrl ? (
+                      <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-lg border border-[#dfcbb9]">
+                        <img src={editForm.imageUrl} alt="" className="h-full w-full object-cover" />
+                      </div>
+                    ) : (
+                      <label className="flex h-14 w-14 shrink-0 cursor-pointer items-center justify-center rounded-lg border-2 border-dashed border-[#d9b89e] hover:border-[#c84630]">
+                        <Plus className="h-4 w-4 text-[#a37d64]" />
+                        <input type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={(e) => e.target.files?.[0] && handleImageUpload(e.target.files[0], "edit")} />
+                      </label>
+                    )}
+                    <div className="flex-1 space-y-2">
+                      <Input value={editForm.name ?? ""} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} placeholder="Name" className="h-9 rounded-lg border-[#dfcbb9] text-sm" />
+                      <textarea value={editForm.description ?? ""} onChange={(e) => setEditForm({ ...editForm, description: e.target.value })} placeholder="Description" rows={2} className="w-full rounded-lg border border-[#dfcbb9] px-3 py-1.5 text-sm resize-none" />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2">
+                    <Input value={editForm.pricePaise != null ? (editForm.pricePaise / 100).toFixed(2) : ""} onChange={(e) => setEditForm({ ...editForm, pricePaise: Math.round(Number(e.target.value) * 100) })} placeholder="Price ₹" inputMode="numeric" className="h-9 rounded-lg border-[#dfcbb9] text-sm" />
+                    <Input value={editForm.offerPricePaise != null ? (editForm.offerPricePaise / 100).toFixed(2) : ""} onChange={(e) => setEditForm({ ...editForm, offerPricePaise: e.target.value ? Math.round(Number(e.target.value) * 100) : null })} placeholder="Offer ₹" inputMode="numeric" className="h-9 rounded-lg border-[#dfcbb9] text-sm" />
+                    <select value={editForm.dietaryType ?? "veg"} onChange={(e) => setEditForm({ ...editForm, dietaryType: e.target.value })} className="h-9 rounded-lg border border-[#dfcbb9] px-2 text-sm">
+                      <option value="veg">Veg</option>
+                      <option value="nonveg">Non-veg</option>
+                      <option value="egg">Egg</option>
+                    </select>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <label className="flex items-center gap-1.5 text-xs font-bold text-[#5c4332]">
+                      <input type="checkbox" checked={editForm.isBestseller ?? false} onChange={(e) => setEditForm({ ...editForm, isBestseller: e.target.checked })} className="accent-[#c84630]" />
+                      Bestseller
+                    </label>
+                    <div className="ml-auto flex gap-2">
+                      <Button onClick={() => setEditingId(null)} variant="outline" className="h-8 rounded-lg border-[#dfcbb9] text-xs font-bold">Cancel</Button>
+                      <Button onClick={saveEdit} className="h-8 rounded-lg bg-[#C84630] text-xs font-bold text-white">Save</Button>
+                    </div>
+                  </div>
                 </div>
-                <p className="mt-1 truncate text-xs text-[#8b6b57]">
-                  {item.description}
-                </p>
-                <div className="mt-1 flex items-center gap-2 text-xs font-bold">
-                  <span>{money(item.pricePaise)}</span>
-                  {item.offerPricePaise && (
-                    <span className="text-green-600">
-                      Offer: {money(item.offerPricePaise)}
-                    </span>
+              ) : (
+                /* Normal Row */
+                <div className="flex items-center gap-4">
+                  <input type="checkbox" checked={selectedIds.has(item.id)} onChange={() => toggleSelect(item.id)} className="shrink-0 accent-[#c84630]" />
+                  {item.imageUrl ? (
+                    <img src={item.imageUrl} alt="" className="h-10 w-10 shrink-0 rounded-lg object-cover border border-[#eadccf]" />
+                  ) : (
+                    <div className={`grid h-10 w-10 shrink-0 place-items-center rounded-xl text-xs font-extrabold ${
+                      item.dietaryType === "veg" ? "bg-green-50 text-green-700" : item.dietaryType === "egg" ? "bg-amber-50 text-amber-700" : "bg-red-50 text-red-700"
+                    }`}>
+                      {item.dietaryType === "veg" ? "V" : item.dietaryType === "egg" ? "E" : "NV"}
+                    </div>
                   )}
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm font-extrabold">{item.name}</p>
+                      {item.isBestseller && (
+                        <span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[9px] font-extrabold text-amber-700">BESTSELLER</span>
+                      )}
+                    </div>
+                    <p className="mt-0.5 truncate text-xs text-[#8b6b57]">{item.description}</p>
+                    <div className="mt-0.5 flex items-center gap-2 text-xs font-bold">
+                      <span>{money(item.pricePaise)}</span>
+                      {item.offerPricePaise && <span className="text-green-600">Offer: {money(item.offerPricePaise)}</span>}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button onClick={() => startEdit(item)} className="rounded-lg border border-[#ddc6b5] bg-white px-2 py-1.5 text-[10px] font-bold text-[#5c4332] hover:bg-[#fff4e9]">Edit</button>
+                    <button onClick={() => onDelete(item.id)} className="rounded-lg border border-red-200 bg-white px-2 py-1.5 text-[10px] font-bold text-red-600 hover:bg-red-50">Delete</button>
+                    <label className="relative inline-flex cursor-pointer items-center">
+                      <input type="checkbox" checked={item.isOpen} onChange={(e) => onToggle(item.id, e.target.checked)} className="peer sr-only" />
+                      <div className="h-6 w-11 rounded-full bg-gray-200 after:absolute after:left-[2px] after:top-[2px] after:h-5 after:w-5 after:rounded-full after:bg-white after:transition-all peer-checked:bg-[#c84630] after:peer-checked:translate-x-full" />
+                    </label>
+                    <select
+                      value={item.availability}
+                      onChange={(e) => onAvailability(item.id, e.target.value)}
+                      className="rounded-lg border border-[#ddc6b5] bg-white px-2 py-2 text-xs font-extrabold"
+                    >
+                      <option value="AVAILABLE">Available</option>
+                      <option value="SOLD_OUT">Sold out</option>
+                      <option value="SCHEDULED_UNAVAILABLE">Later</option>
+                      <option value="OUT_OF_STOCK">Out of stock</option>
+                      <option value="DISABLED">Hidden</option>
+                    </select>
+                  </div>
                 </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <label className="relative inline-flex cursor-pointer items-center">
-                  <input
-                    type="checkbox"
-                    checked={item.isOpen}
-                    onChange={(e) => onToggle(item.id, e.target.checked)}
-                    className="peer sr-only"
-                  />
-                  <div className="h-6 w-11 rounded-full bg-gray-200 after:absolute after:left-[2px] after:top-[2px] after:h-5 after:w-5 after:rounded-full after:bg-white after:transition-all peer-checked:bg-[#c84630] after:peer-checked:translate-x-full" />
-                </label>
-                <select
-                  value={item.availability}
-                  onChange={(e) => onAvailability(item.id, e.target.value)}
-                  className="rounded-lg border border-[#ddc6b5] bg-white px-2 py-2 text-xs font-extrabold"
-                >
-                  <option value="AVAILABLE">Available</option>
-                  <option value="SOLD_OUT">Sold out</option>
-                  <option value="SCHEDULED_UNAVAILABLE">Later</option>
-                  <option value="OUT_OF_STOCK">Out of stock</option>
-                  <option value="DISABLED">Hidden</option>
-                </select>
-              </div>
+              )}
             </article>
           ))}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+// =============================================================================
+// Categories Panel
+// =============================================================================
+
+function CategoriesPanel({
+  data,
+  onCreateCategory,
+  onUpdateCategory,
+}: {
+  data: any;
+  onCreateCategory: (input: { restaurantId: string; name: string; description?: string }) => void;
+  onUpdateCategory: (input: { categoryId: string; isVisible?: boolean; isOpen?: boolean; name?: string; sortOrder?: number }) => void;
+}) {
+  const [newName, setNewName] = useState("");
+  const [newDesc, setNewDesc] = useState("");
+
+  const categories = data.categories ?? [];
+  const items = data.items ?? [];
+
+  const handleCreate = () => {
+    if (!newName.trim()) return;
+    onCreateCategory({
+      restaurantId: data.restaurant.id,
+      name: newName.trim(),
+      description: newDesc.trim() || undefined,
+    });
+    setNewName("");
+    setNewDesc("");
+  };
+
+  return (
+    <div className="grid gap-5 lg:grid-cols-[0.7fr_1.3fr]">
+      {/* Create Category */}
+      <aside className="rounded-2xl bg-[#38271f] p-5 text-white shadow-sm">
+        <p className="text-[10px] font-extrabold uppercase tracking-[0.16em] text-[#e7b99d]">
+          New category
+        </p>
+        <h2 className="font-display mt-2 text-3xl">Organise your menu</h2>
+        <div className="mt-6 space-y-3">
+          <Input
+            value={newName}
+            onChange={(e) => setNewName(e.target.value)}
+            placeholder="Category name"
+            className="h-11 border-white/20 bg-white/10 text-white placeholder:text-white/50"
+          />
+          <textarea
+            value={newDesc}
+            onChange={(e) => setNewDesc(e.target.value)}
+            placeholder="Short description (optional)"
+            rows={2}
+            className="w-full rounded-xl border border-white/20 bg-white/10 px-3 py-2 text-sm text-white placeholder:text-white/50 resize-none"
+          />
+          <Button
+            onClick={handleCreate}
+            disabled={!newName.trim()}
+            className="h-11 w-full rounded-xl bg-[#f7e4d3] font-extrabold text-[#40291c] hover:bg-white"
+          >
+            <Plus className="mr-2 h-4 w-4" />
+            Add category
+          </Button>
+        </div>
+      </aside>
+
+      {/* Category List */}
+      <section className="overflow-hidden rounded-2xl bg-[#fffdf9] shadow-sm">
+        <div className="border-b border-[#eadccf] p-5">
+          <p className="text-[10px] font-extrabold uppercase tracking-[0.16em] text-[#9e765e]">
+            All categories
+          </p>
+          <h2 className="font-display mt-1 text-2xl">Visibility & availability</h2>
+          <span className="mt-1 block text-sm font-bold text-[#856652]">
+            {categories.length} categories · {items.length} items total
+          </span>
+        </div>
+        <div className="divide-y divide-[#f0e4d9]">
+          {categories.length === 0 ? (
+            <div className="p-10 text-center">
+              <p className="text-sm font-extrabold text-[#593f2d]">No categories yet</p>
+              <p className="mt-1 text-xs text-[#91725e]">Create a category to start organising your menu.</p>
+            </div>
+          ) : (
+            categories.map((cat: any) => {
+              const catItems = items.filter((i: any) => i.categoryId === cat.id);
+              return (
+                <article key={cat.id} className="flex items-center gap-4 p-4">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-extrabold text-[#382719]">{cat.name}</p>
+                    {cat.description && (
+                      <p className="mt-0.5 truncate text-xs text-[#8b6b57]">{cat.description}</p>
+                    )}
+                    <p className="mt-0.5 text-[10px] font-bold text-[#a37d64]">
+                      {catItems.length} {catItems.length === 1 ? "item" : "items"}
+                      {cat.sortOrder != null ? ` · Order ${cat.sortOrder}` : ""}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <label className="flex flex-col items-center gap-1">
+                      <span className="text-[9px] font-extrabold uppercase text-[#a37d64]">Visible</span>
+                      <label className="relative inline-flex cursor-pointer items-center">
+                        <input
+                          type="checkbox"
+                          checked={cat.isVisible !== false}
+                          onChange={(e) => onUpdateCategory({ categoryId: cat.id, isVisible: e.target.checked })}
+                          className="peer sr-only"
+                        />
+                        <div className="h-6 w-11 rounded-full bg-gray-200 after:absolute after:left-[2px] after:top-[2px] after:h-5 after:w-5 after:rounded-full after:bg-white after:transition-all peer-checked:bg-[#c84630] after:peer-checked:translate-x-full" />
+                      </label>
+                    </label>
+                    <label className="flex flex-col items-center gap-1">
+                      <span className="text-[9px] font-extrabold uppercase text-[#a37d64]">Open</span>
+                      <label className="relative inline-flex cursor-pointer items-center">
+                        <input
+                          type="checkbox"
+                          checked={cat.isOpen !== false}
+                          onChange={(e) => onUpdateCategory({ categoryId: cat.id, isOpen: e.target.checked })}
+                          className="peer sr-only"
+                        />
+                        <div className="h-6 w-11 rounded-full bg-gray-200 after:absolute after:left-[2px] after:top-[2px] after:h-5 after:w-5 after:rounded-full after:bg-white after:transition-all peer-checked:bg-green-600 after:peer-checked:translate-x-full" />
+                      </label>
+                    </label>
+                  </div>
+                </article>
+              );
+            })
+          )}
         </div>
       </section>
     </div>
@@ -1417,6 +1806,40 @@ function Toggle({
         className="h-4 w-4 accent-[#c84630]"
       />
     </label>
+  );
+}
+
+function InvoiceButton({ orderId }: { orderId: string }) {
+  const [open, setOpen] = useState(false);
+  const { data, isLoading } = trpc.admin.generateInvoice.useQuery(
+    { orderId },
+    { enabled: open }
+  );
+
+  const handlePrint = () => {
+    setOpen(true);
+  };
+
+  useEffect(() => {
+    if (data?.html && open) {
+      const win = window.open("", "_blank", "width=800,height=600");
+      if (win) {
+        win.document.write(data.html);
+        win.document.close();
+        win.focus();
+      }
+      setOpen(false);
+    }
+  }, [data, open]);
+
+  return (
+    <button
+      onClick={handlePrint}
+      disabled={isLoading}
+      className="rounded-lg border border-[#ddc6b5] bg-white px-2 py-1.5 text-[10px] font-bold text-[#9d3727] hover:bg-[#fdf5ef] disabled:opacity-50"
+    >
+      {isLoading ? "Loading..." : "Invoice"}
+    </button>
   );
 }
 

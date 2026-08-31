@@ -103,11 +103,14 @@ const SHADOWFAX_API_BASE = process.env.SHADOWFAX_API_URL || "https://api.shadowf
 
 class ShadowfaxProductionAdapter implements DeliveryProvider {
   name = "shadowfax";
+  private restaurantId?: string;
+
+  setRestaurantId(id: string) { this.restaurantId = id; }
 
   private async getCredentials() {
-    const merchantId = (await readIntegrationSecret("rest_9house_kitchen", "shadowfax", "SHADOWFAX_MERCHANT_ID"))
+    const merchantId = (this.restaurantId ? await readIntegrationSecret(this.restaurantId, "shadowfax", "SHADOWFAX_MERCHANT_ID") : null)
       ?? process.env.SHADOWFAX_MERCHANT_ID;
-    const apiKey = (await readIntegrationSecret("rest_9house_kitchen", "shadowfax", "SHADOWFAX_API_KEY"))
+    const apiKey = (this.restaurantId ? await readIntegrationSecret(this.restaurantId, "shadowfax", "SHADOWFAX_API_KEY") : null)
       ?? process.env.SHADOWFAX_API_KEY;
     if (!merchantId || !apiKey) {
       throw new Error("Shadowfax credentials not configured. Add SHADOWFAX_MERCHANT_ID and SHADOWFAX_API_KEY.");

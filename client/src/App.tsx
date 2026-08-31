@@ -6,15 +6,18 @@ import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import Home from "./pages/Home";
 import Admin from "./pages/Admin";
+import SignupPage from "./pages/Signup";
 
 function Router() {
-  // make sure to consider if you need authentication for certain routes
   return (
     <Switch>
+      <Route path="/signup" component={SignupPage} />
       <Route path="/admin" component={Admin} />
-      <Route path="/admin/:section" component={Admin} />
+      <Route path="/admin/:restaurantSlug" component={Admin} />
+      <Route path="/admin/:restaurantSlug/:section" component={Admin} />
       <Route path="/" component={Home} />
-      <Route path="/burger-district/:rest*" component={Home} />
+      <Route path="/:slug" component={Home} />
+      <Route path="/:slug/:rest*" component={Home} />
       <Route component={Home} />
     </Switch>
   );

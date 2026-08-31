@@ -21,7 +21,7 @@ import {
 } from "@/components/ui/sidebar";
 import { startLogin } from "@/const";
 import { useIsMobile } from "@/hooks/useMobile";
-import { FileUp, LayoutDashboard, LogOut, Menu, PanelLeft, PlugZap, ReceiptText, Settings2, Tag, UtensilsCrossed, Users } from "lucide-react";
+import { Award, BarChart3, Bell, Box, ChefHat, FileUp, Globe, Grid3X3, LayoutDashboard, LogOut, Menu, PanelLeft, PlugZap, ReceiptText, Settings2, ShieldCheck, Store, Tag, UtensilsCrossed, Users } from "lucide-react";
 import { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { DashboardLayoutSkeleton } from './DashboardLayoutSkeleton';
@@ -30,12 +30,22 @@ import { Button } from "./ui/button";
 const menuItems = [
   { icon: LayoutDashboard, label: "Overview", path: "/admin" },
   { icon: ReceiptText, label: "Orders", path: "/admin/orders" },
+  { icon: ChefHat, label: "KDS", path: "/admin/kds" },
+  { icon: Box, label: "Inventory", path: "/admin/inventory" },
   { icon: UtensilsCrossed, label: "Menu", path: "/admin/menu" },
+  { icon: Grid3X3, label: "Categories", path: "/admin/categories" },
   { icon: FileUp, label: "Import menu", path: "/admin/import" },
   { icon: Tag, label: "Coupons", path: "/admin/coupons" },
   { icon: Users, label: "Customers", path: "/admin/customers" },
   { icon: Settings2, label: "Restaurant", path: "/admin/restaurant" },
   { icon: PlugZap, label: "Integrations", path: "/admin/integrations" },
+  { icon: Globe, label: "Domains", path: "/admin/domains" },
+  { icon: ShieldCheck, label: "Team", path: "/admin/staff" },
+  { icon: Bell, label: "Notifications", path: "/admin/notifications" },
+  { icon: BarChart3, label: "Analytics", path: "/admin/analytics" },
+  { icon: Store, label: "Outlets", path: "/admin/outlets" },
+  { icon: Award, label: "Loyalty", path: "/admin/loyalty" },
+  { icon: UtensilsCrossed, label: "Combos", path: "/admin/combos" },
 ];
 const mobilePrimaryItems = menuItems.slice(0, 3);
 
