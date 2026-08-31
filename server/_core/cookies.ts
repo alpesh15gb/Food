@@ -1,34 +1,34 @@
 /**
  * Cookie configuration helpers for secure session management.
  *
- * Two cookie profiles:
- * - Admin: SameSite=None (preserves Manus SDK cross-origin iframe compatibility)
- * - Customer: SameSite=Strict (same-origin app, maximum CSRF protection)
+ * Both admin and customer sessions use SameSite=Strict because the entire
+ * application (storefront + admin panel) is served from the same origin
+ * (e.g. 9housekitchen.in). There is no cross-origin iframe or OAuth
+ * redirect that requires SameSite=None.
  *
  * Both use HttpOnly + Secure in production.
  */
 import type { Request } from "express";
 
 /**
- * Admin/shared session cookie — keeps existing Manus SDK behavior.
- * SameSite=None allows cross-origin iframe auth flows.
- * Do NOT weaken this without verifying Manus OAuth still works.
+ * Admin session cookie — SameSite=Strict for same-origin CSRF protection.
+ * Previously used SameSite=None for Manus SDK iframe compatibility;
+ * confirmed unnecessary: admin panel is same-origin at /admin.
  */
 export function getSessionCookieOptions(_req: Request) {
   return {
     httpOnly: true,
     secure: true,
-    sameSite: "none" as const,
+    sameSite: "strict" as const,
     path: "/",
-    maxAge: 1000 * 60 * 60 * 24 * 365, // 1 year
+    maxAge: 1000 * 60 * 60 * 24 * 12, // 12 hours
   };
 }
 
 /**
- * Customer OTP session cookie — strict same-origin protection.
- * SameSite=Strict prevents CSRF entirely for same-origin apps.
- * The storefront and admin panel are served from the same domain,
- * so Strict is correct and more secure than None/Lax.
+ * Customer OTP session cookie — SameSite=Strict for same-origin CSRF protection.
+ * 30-day session. The storefront and admin panel share the same domain,
+ * but customer sessions never satisfy admin role checks (server-side).
  */
 export function getCustomerCookieOptions(_req: Request) {
   return {

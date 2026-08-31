@@ -529,7 +529,7 @@ export async function createOrderFromValidatedCart(args: {
   // --- Issue 3: Guest checkout — create guest user if needed ---
   let effectiveUserId = args.userId;
   if (!effectiveUserId || effectiveUserId === 0) {
-    effectiveUserId = await getOrCreateGuestUser(phone);
+    effectiveUserId = await getOrCreateGuestUser();
   }
 
   // Ensure customer profile exists
@@ -858,26 +858,34 @@ export async function getOrderForTracking(orderNumber: string, trackingToken: st
 }
 
 /**
- * Issue 3: Guest checkout — create or find a guest user by phone.
+ * Issue 1: Guest checkout — create a cryptographically random guest identity.
+ *
+ * SAFETY: Guest openId is NEVER derived from an unverified phone number.
+ * An unverified phone typed during checkout is only contact information;
+ * it does NOT create identity linkage. Two guests typing the same phone
+ * receive completely independent guest identities.
+ *
+ * When a guest later verifies their phone via OTP, their *session* becomes
+ * authenticated — but their historical guest orders are NOT automatically
+ * transferred to their verified account. A verified phone proves ownership
+ * of the phone NOW; it does not prove the customer created past orders
+ * where someone typed that phone number.
  */
-export async function getOrCreateGuestUser(phone: string): Promise<number> {
+export async function getOrCreateGuestUser(): Promise<number> {
   const db = await requireDb();
-  const normalizedPhone = normalizePhone(phone);
-  const guestOpenId = `guest_${normalizedPhone}`;
 
-  const existing = (await db.select().from(users).where(eq(users.openId, guestOpenId)).limit(1))[0];
-  if (existing) return existing.id;
+  // Cryptographically random guest identity — not derivable from any PII
+  const guestId = randomInt(100_000_000, 999_999_999);
+  const guestOpenId = `guest_${nanoid(24)}`;
 
-  // Create guest user
-  const userId = Math.floor(Math.random() * 900000000) + 100000000;
   await db.insert(users).values({
-    id: userId,
+    id: guestId,
     openId: guestOpenId,
     name: null,
-    mobile: normalizedPhone,
+    mobile: null,
     role: "user",
   });
-  return userId;
+  return guestId;
 }
 
 // =============================================================================
@@ -991,47 +999,27 @@ export async function verifyOtp(phone: string, code: string): Promise<{
   // (Drizzle doesn't return rowCount directly, but the update succeeds;
   //  the subsequent user lookup will handle consistency)
 
-  // --- Guest-to-verified account merging (fully transactional) ---
+  // --- SAFETY: No automatic guest-to-verified merging ---
+  //
+  // Design rule: A verified phone proves ownership of the phone NOW.
+  // It does NOT prove the customer created every past order where
+  // someone typed that phone number. Attacker-checkout attacks are
+  // prevented by never merging guest data automatically.
+  //
+  // Guest orders remain under their random guest_<nanoid> identity.
+  // If needed later, guest orders can be claimed via the order
+  // tracking token — not by phone matching.
+  //
+  // The current session (which may have guest_*) will simply become
+  // an authenticated customer_<phone> session going forward.
+
   const verifiedOpenId = `customer_${normalizedPhone}`;
-  const guestOpenId = `guest_${normalizedPhone}`;
 
   // Check for existing verified customer
   const existingVerified = (await db.select().from(users).where(eq(users.openId, verifiedOpenId)).limit(1))[0];
 
   if (existingVerified) {
-    // Wrap entire merge in transaction — all-or-nothing
-    await db.transaction(async (tx) => {
-      await tx.update(users).set({ lastSignedIn: new Date() }).where(eq(users.id, existingVerified.id));
-
-      const verifiedProfile = (await tx.select().from(customerProfiles).where(eq(customerProfiles.userId, existingVerified.id)).limit(1))[0];
-      const guestUser = (await tx.select().from(users).where(eq(users.openId, guestOpenId)).limit(1))[0];
-
-      if (guestUser && verifiedProfile) {
-        const guestProfile = (await tx.select().from(customerProfiles).where(eq(customerProfiles.userId, guestUser.id)).limit(1))[0];
-        if (guestProfile) {
-          // Transfer ALL child records — conflict rule: verified profile wins
-          await tx.update(orders).set({ customerId: verifiedProfile.id })
-            .where(eq(orders.customerId, guestProfile.id));
-          await tx.update(customerAddresses).set({ customerId: verifiedProfile.id })
-            .where(eq(customerAddresses.customerId, guestProfile.id));
-          await tx.update(couponUsage).set({ customerId: verifiedProfile.id })
-            .where(eq(couponUsage.customerId, guestProfile.id));
-          // Recompute aggregates from canonical order data
-          const orderStats = (await tx.select({
-            count: sql<number>`count(*)::int`,
-            total: sql<number>`coalesce(sum(${orders.totalPaise}), 0)::int`,
-          }).from(orders).where(eq(orders.customerId, verifiedProfile.id)))[0];
-          await tx.update(customerProfiles).set({
-            totalOrders: orderStats.count,
-            totalSpentPaise: orderStats.total,
-          }).where(eq(customerProfiles.id, verifiedProfile.id));
-          // Clean up guest (profile first, then user — FK order)
-          await tx.delete(customerProfiles).where(eq(customerProfiles.id, guestProfile.id));
-          await tx.delete(users).where(eq(users.id, guestUser.id));
-        }
-      }
-    });
-
+    await db.update(users).set({ lastSignedIn: new Date() }).where(eq(users.id, existingVerified.id));
     return { openId: verifiedOpenId, userId: existingVerified.id, isNewUser: false, phone: normalizedPhone };
   }
 
@@ -1040,7 +1028,7 @@ export async function verifyOtp(phone: string, code: string): Promise<{
   let profileId: string;
 
   await db.transaction(async (tx) => {
-    userId = randomInt(100000000, 999999999);
+    userId = randomInt(100_000_000, 999_999_999);
     await tx.insert(users).values({
       id: userId,
       openId: verifiedOpenId,
@@ -1055,22 +1043,7 @@ export async function verifyOtp(phone: string, code: string): Promise<{
       userId,
       mobileNumber: normalizedPhone, // Only set here — verified via OTP
     });
-
-    // Merge guest data
-    const guestUser = (await tx.select().from(users).where(eq(users.openId, guestOpenId)).limit(1))[0];
-    if (guestUser) {
-      const guestProfile = (await tx.select().from(customerProfiles).where(eq(customerProfiles.userId, guestUser.id)).limit(1))[0];
-      if (guestProfile) {
-        await tx.update(orders).set({ customerId: profileId })
-          .where(eq(orders.customerId, guestProfile.id));
-        await tx.update(customerAddresses).set({ customerId: profileId })
-          .where(eq(customerAddresses.customerId, guestProfile.id));
-        await tx.update(couponUsage).set({ customerId: profileId })
-          .where(eq(couponUsage.customerId, guestProfile.id));
-        await tx.delete(customerProfiles).where(eq(customerProfiles.id, guestProfile.id));
-      }
-      await tx.delete(users).where(eq(users.id, guestUser.id));
-    }
+    // NO guest order merge — see safety comment above.
   });
 
   return { openId: verifiedOpenId, userId: userId!, isNewUser: true, phone: normalizedPhone };

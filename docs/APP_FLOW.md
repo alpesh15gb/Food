@@ -998,22 +998,73 @@ Tap "Integrations" in sidebar
 └─────────────────────────────────────────────────────────┘
 ```
 
-### 5.2 Customer Checkout (Guest)
+### 5.2 Customer OTP Phone Login
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  CUSTOMER OTP LOGIN FLOW                                  │
+│                                                          │
+│  1. Customer taps "Login" in header                      │
+│       │                                                  │
+│       ▼                                                  │
+│  2. Enter 10-digit phone → "Send code"                  │
+│       │                                                  │
+│       ├── Phone valid?                                   │
+│       │   ├── Yes → check rate limits:                   │
+│       │   │   ├── Phone send limit (3/10min)?            │
+│       │   │   ├── IP send limit (20/10min)?             │
+│       │   │   └── Resend cooldown (60s)?                 │
+│       │   │       ├── All clear → sendOtp:              │
+│       │   │       │   ├── Generate 6-digit code          │
+│       │   │       │   │   (crypto.randomInt)             │
+│       │   │       │   ├── Hash with HMAC-SHA256          │
+│       │   │       │   │   (OTP_HMAC_SECRET)             │
+│       │   │       │   ├── Store hash in DB              │
+│       │   │       │   └── Log code (dev only)           │
+│       │   │       └── Cooldown active → error            │
+│       │   └── No → validation error                     │
+│       │                                                  │
+│       ▼                                                  │
+│  3. Enter 6-digit code → "Verify"                       │
+│       │                                                  │
+│       ├── Check phone verify limit (10/10min)            │
+│       ├── Check IP verify limit (20/10min)              │
+│       ├── Find active OTP (HMAC comparison)              │
+│       ├── Check: not used, not expired, attempts < 5     │
+│       ├── Atomic: mark used + increment attempts         │
+│       │                                                  │
+│       ├── OTP valid?                                     │
+│       │   ├── Yes → create/update verified customer      │
+│       │   │   ├── Set SameSite=Strict session cookie     │
+│       │   │   ├── 30-day session                         │
+│       │   │   └── Return {success, isNewUser}            │
+│       │   └── No → "Invalid or expired code"            │
+│       │                                                  │
+│  4. Authenticated session persists via HttpOnly cookie   │
+│     (localStorage is NOT used for auth state)            │
+│                                                          │
+│  Logout:                                                 │
+│  customerLogout → clear cookie → return success          │
+└─────────────────────────────────────────────────────────┘
+```
+
+### 5.3 Guest Checkout (No Login Required)
 
 ```
 ┌─────────────────────────────────────────────────────────┐
 │  GUEST CHECKOUT FLOW                                     │
 │                                                          │
-│  Current implementation:                                 │
-│  - No customer sign-in required                          │
-│  - Address is hardcoded ("To be confirmed")              │
-│  - Payment is the only validation gate                   │
-│                                                          │
-│  Future (planned):                                       │
-│  - OTP-based phone verification                          │
-│  - Saved address book                                    │
-│  - Customer profile auto-creation                        │
-│  - Loyalty tracking                                      │
+│  - Customer enters delivery phone + address              │
+│  - Phone is stored as CONTACT INFO on the order          │
+│  - Guest identity is cryptographically random            │
+│    (guest_<nanoid>) — NOT derived from phone             │
+│  - Two guests entering the same phone get               │
+│    completely independent identities                     │
+│  - Guest orders are NEVER auto-merged into               │
+│    verified customer accounts                            │
+│  - Guest can later verify phone via OTP;                 │
+│    only future orders attach to verified profile         │
+│  - Past guest orders claimable via tracking token        │
 └─────────────────────────────────────────────────────────┘
 ```
 

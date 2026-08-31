@@ -68,7 +68,7 @@ export const storefrontRouter = router({
   // =========================================================================
   sendOtp: publicProcedure
     .input(z.object({ phone: z.string().min(10).max(15) }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
       const { createOtp } = await import("../db");
       const { normalizePhone, isValidIndianPhone } = await import("../security/phoneValidation");
       const { checkPhoneSendLimit, checkIpOtpLimit } = await import("../security/rateLimit");
@@ -76,9 +76,17 @@ export const storefrontRouter = router({
       if (!isValidIndianPhone(phone)) {
         throw new Error("Please enter a valid 10-digit Indian mobile number.");
       }
-      // --- Fix 4: Rate limiting ---
-      // (IP limit is checked via Nginx; phone-specific limit enforced server-side)
-      // --- Fix 5: OTP_DEV_LOG_ENABLED — NEVER in production ---
+      // --- Fix 2: Phone-specific rate limit for OTP sends ---
+      const sendLimit = checkPhoneSendLimit(phone);
+      if (!sendLimit.allowed) {
+        throw new Error(`Please wait ${sendLimit.retryAfterSeconds} seconds before requesting a new code.`);
+      }
+      // --- IP-level rate limit for OTP sends (protects against SMS bombing) ---
+      const clientIp = (ctx.req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || "unknown";
+      const ipLimit = checkIpOtpLimit(clientIp);
+      if (!ipLimit.allowed) {
+        throw new Error(`Too many requests. Please try again in ${ipLimit.retryAfterSeconds} seconds.`);
+      }
       const result = await createOtp(phone);
       if (process.env.OTP_DEV_LOG_ENABLED === "true" && process.env.NODE_ENV !== "production") {
         console.log(`[OTP-DEV] Phone ${phone}: code = ${result.code}`);
@@ -99,10 +107,17 @@ export const storefrontRouter = router({
       if (!isValidIndianPhone(phone)) {
         throw new Error("Invalid phone number.");
       }
-      // --- Fix 4: Verify rate limit ---
+      // --- Per-phone verify rate limit ---
       const verifyLimit = checkPhoneVerifyLimit(phone);
       if (!verifyLimit.allowed) {
         throw new Error(`Too many verification attempts. Please try again in ${verifyLimit.retryAfterSeconds} seconds.`);
+      }
+      // --- Per-IP verify rate limit (protects brute-force across phones) ---
+      const clientIp = (ctx.req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || "unknown";
+      const { checkIpOtpLimit } = await import("../security/rateLimit");
+      const ipVerifyLimit = checkIpOtpLimit(`verify:${clientIp}`);
+      if (!ipVerifyLimit.allowed) {
+        throw new Error(`Too many verification attempts. Please try again in ${ipVerifyLimit.retryAfterSeconds} seconds.`);
       }
       const result = await verifyOtp(phone, input.code);
       if (!result) {

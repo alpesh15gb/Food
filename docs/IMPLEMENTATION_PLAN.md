@@ -125,24 +125,32 @@ Aug 2026     Sep 2026     Oct 2026     Nov 2026     Dec 2026     2027
 | 1.1 | Database seeded with real data | P0 | Done | DevOps | ✅ |
 | 1.2 | Deploy to 9housekitchen.in | P0 | Done | DevOps | ✅ |
 | 1.3 | Fix admin panel bugs | P0 | Done | Dev | ✅ |
-| 1.4 | Razorpay LIVE key configuration | P0 | 1 day | Owner | ⬜ |
-| 1.5 | Real food photography (35+ items) | P0 | 3-5 days | Owner | ⬜ |
-| 1.6 | Restaurant hours verified | P0 | 1 hour | Owner | ⬜ |
-| 1.7 | Delivery area/pincode configured | P0 | 1 hour | Owner | ⬜ |
-| 1.8 | End-to-end test order | P0 | 1 hour | Owner+Dev | ⬜ |
-| 1.9 | Razorpay webhook URL configured | P0 | 30 min | Owner | ⬜ |
-| 1.10 | Customer feedback collection | P1 | 1 day | Owner | ⬜ |
+| 1.4 | Customer OTP phone login | P0 | Done | Dev | ✅ |
+| 1.5 | Guest checkout with random identity | P0 | Done | Dev | ✅ |
+| 1.6 | OTP security (HMAC, rate limits, cooldown) | P0 | Done | Dev | ✅ |
+| 1.7 | SameSite=Strict cookies (admin + customer) | P0 | Done | Dev | ✅ |
+| 1.8 | Razorpay LIVE key configuration | P0 | 1 day | Owner | ⬜ |
+| 1.9 | SMS provider setup (MSG91/Twilio) | P0 | 2 hours | Owner | ⬜ |
+| 1.10 | Real food photography (35+ items) | P0 | 3-5 days | Owner | ⬜ |
+| 1.11 | Restaurant hours verified | P0 | 1 hour | Owner | ⬜ |
+| 1.12 | Delivery area/pincode configured | P0 | 1 hour | Owner | ⬜ |
+| 1.13 | End-to-end test order | P0 | 1 hour | Owner+Dev | ⬜ |
+| 1.14 | Razorpay webhook URL configured | P0 | 30 min | Owner | ⬜ |
+| 1.15 | Customer feedback collection | P1 | 1 day | Owner | ⬜ |
 
 ### Acceptance Criteria
 
 - [ ] Customer can browse full menu with real food photos
 - [ ] Customer can add items, customize, and checkout
+- [ ] Customer can login via OTP phone verification
+- [ ] Guest checkout works without authentication
 - [ ] Razorpay payment processes successfully (LIVE mode)
 - [ ] Order appears in admin panel with correct details
 - [ ] Admin can accept, prepare, and mark order as ready
 - [ ] No critical bugs on mobile or desktop
 - [ ] Restaurant hours correctly prevent orders outside business hours
 - [ ] Minimum order validation works correctly
+- [ ] OTP SMS delivery works in production (requires SMS provider)
 
 ---
 

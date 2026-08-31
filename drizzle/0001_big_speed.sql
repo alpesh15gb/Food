@@ -77,3 +77,23 @@ BEGIN
     CREATE UNIQUE INDEX "customer_phone_unique" ON "customer_profiles" ("mobile_number");
   END IF;
 END $$;
+
+-- 7. Invalidate legacy plaintext OTP rows.
+--    After switching to HMAC-SHA256, any old 6-digit plaintext codes stored
+--    in otp_verifications.code will never match HMAC verification.
+--    Expire them NOW by setting used_at so they are never used again.
+--    We identify legacy rows by length(code) <= 8 (plausible for a 6-digit OTP
+--    with optional whitespace, vs 64-char hex HMAC hash).
+UPDATE "otp_verifications"
+SET "used_at" = NOW()
+WHERE "used_at" IS NULL
+  AND LENGTH("code") <= 8;
+
+-- 8. Guest identity no longer uses phone-derived openId.
+--    Existing 'guest_+91XXXXXXXXXX' or 'guest_XXXXXXXXXX' rows will
+--    become orphaned (no orders reference them via customer_profiles).
+--    This is safe: they contain no verified identity.
+--    Optionally clean them up (commented out — manual review preferred):
+-- DELETE FROM customer_profiles WHERE customer_profiles.user_id IN
+--   (SELECT id FROM users WHERE open_id LIKE 'guest_%');
+-- DELETE FROM users WHERE open_id LIKE 'guest_%';

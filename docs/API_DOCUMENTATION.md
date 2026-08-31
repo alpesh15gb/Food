@@ -29,11 +29,36 @@
 
 | Mechanism | Details |
 |-----------|---------|
-| Cookie name | `app_session_id` |
+| Cookie name | `app_session_id` (shared for admin + customer) |
 | Cookie type | HttpOnly, Secure, SameSite=Strict |
 | Token format | JWT signed with `JWT_SECRET` |
-| Session duration | 12 hours |
+| Admin session duration | 12 hours |
+| Customer session duration | 30 days |
 | Signing | HMAC-SHA256 via SDK `signSession()` |
+
+### Customer OTP Phone Login
+
+| Parameter | Value |
+|-----------|-------|
+| OTP length | 6 digits (cryptographically generated via `crypto.randomInt`) |
+| OTP storage | HMAC-SHA256 hash (never plaintext) |
+| OTP expiry | 10 minutes |
+| Max verification attempts | 5 per OTP |
+| Resend cooldown | 60 seconds per phone |
+| Phone rate limit (send) | 3 per 10 minutes per phone |
+| Phone rate limit (verify) | 10 per 10 minutes per phone |
+| IP rate limit (OTP endpoints) | 20 per 10 minutes per IP |
+| Session duration | 30 days |
+| SMS provider | Required for production (console log in dev only) |
+
+### Guest Checkout Identity
+
+| Aspect | Behavior |
+|--------|----------|
+| Guest identity | Cryptographically random (`guest_<nanoid>`) — not phone-derived |
+| Guest phone | Stored as contact info on order only, NOT as identity |
+| Guest → verified merge | **No automatic merging.** Guest orders remain independent |
+| Claiming past orders | Via order tracking token, not phone matching |
 
 ### Admin Login Flow
 

@@ -651,6 +651,72 @@ See [BACKEND_SCHEMA.md](./BACKEND_SCHEMA.md) for complete table definitions.
 }
 ```
 
+### Customer OTP Authentication
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  CUSTOMER PHONE LOGIN (OTP)                              │
+│                                                          │
+│  Storefront header → Login button → Enter phone          │
+│       │                                                  │
+│       ▼                                                  │
+│  storefront.sendOtp(phone)                              │
+│       ├── Validate: 10-digit Indian mobile               │
+│       ├── Rate limit: 3 sends/10min/phone                │
+│       ├── Rate limit: 20 OTP req/10min/IP               │
+│       ├── Cooldown: 60s between resend                   │
+│       ├── Generate: crypto.randomInt (6 digits)          │
+│       ├── Hash: HMAC-SHA256(secret, phone:purpose:code) │
+│       ├── Store hash in otp_verifications               │
+│       └── Log code (OTP_DEV_LOG_ENABLED only)           │
+│                                                          │
+│  Enter code → storefront.verifyOtp(phone, code)         │
+│       ├── Rate limit: 10 verifies/10min/phone            │
+│       ├── Rate limit: 20 OTP req/10min/IP               │
+│       ├── Find active OTP (HMAC comparison)              │
+│       ├── Check: not used, not expired, attempts < 5     │
+│       ├── Atomic SQL: mark used + increment attempts     │
+│       ├── Create/update verified customer profile        │
+│       ├── Set SameSite=Strict cookie (30 days)           │
+│       └── Return success                                │
+│                                                          │
+│  customerMe: reads identity from session cookie only     │
+│  customerLogout: clears session cookie                   │
+└─────────────────────────────────────────────────────────┘
+```
+
+### Guest Checkout Identity Model
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  GUEST IDENTITY                                          │
+│                                                          │
+│  - Guest openId: guest_<nanoid> (random, 24 chars)      │
+│  - NOT derived from phone number                         │
+│  - Two guests with same phone = two independent accounts │
+│  - Guest phone stored on order as contact info only      │
+│                                                          │
+│  GUEST → VERIFIED: NO automatic merge                    │
+│  - Verifying phone creates customer_<phone> identity     │
+│  - Guest orders stay under guest_<nanoid>                │
+│  - Past orders claimable via order tracking token        │
+│  - Prevents attacker-checkout injection attacks          │
+│                                                          │
+│  WHY: A verified phone proves ownership of the phone     │
+│  NOW. It does NOT prove the customer created every       │
+│  past order where someone typed that phone number.       │
+└─────────────────────────────────────────────────────────┘
+```
+
+### Session Configuration
+
+| Session | Cookie | SameSite | Max Age | Purpose |
+|---------|--------|----------|---------|----------|
+| Admin | `app_session_id` | Strict | 12 hours | Admin panel |
+| Customer | `app_session_id` | Strict | 30 days | Storefront |
+
+Both use the same cookie name. Admin sessions require `role: "admin"` in the JWT. Customer sessions have `role: "user"`. The server-side middleware enforces this separation — a customer session cannot call admin procedures.
+
 ### Security Layers
 
 | Layer | Implementation |
@@ -658,6 +724,9 @@ See [BACKEND_SCHEMA.md](./BACKEND_SCHEMA.md) for complete table definitions.
 | **Transport** | HTTPS via Let's Encrypt SSL (nginx) |
 | **Cookie** | HttpOnly, Secure, SameSite=Strict |
 | **Auth** | JWT with timing-safe comparison |
+| **OTP Hashing** | HMAC-SHA256 with env-only secret |
+| **Rate Limiting** | Per-phone + per-IP in-memory + Nginx |
+| **Guest Identity** | Cryptographically random, not phone-derived |
 | **RBAC** | Role-based access control (admin only currently) |
 | **Input** | Zod validation on all tRPC inputs |
 | **SQL** | Drizzle ORM parameterized queries |

@@ -243,6 +243,32 @@ Links users to roles (many-to-many).
 
 ## 4. Customer Management
 
+### `otp_verifications`
+
+OTP codes for phone-based customer login. Codes are HMAC-SHA256 hashed — never stored in plaintext.
+
+| Column | Type | Nullable | Default | Description |
+|--------|------|----------|---------|-------------|
+| `id` | `serial` PK | No | — | OTP record ID |
+| `phone` | `varchar(15)` | No | — | Normalized phone |
+| `code` | `varchar(64)` | No | — | HMAC-SHA256 hash of phone:purpose:code |
+| `purpose` | `varchar(32)` | No | `'login'` | OTP purpose |
+| `expires_at` | `timestamp` | No | — | Expiry (10 min) |
+| `used_at` | `timestamp` | Yes | — | Consumption timestamp |
+| `attempts` | `smallint` | No | `0` | Verification attempts (max 5) |
+| `created_at` | `timestamp` | No | `now()` | Creation timestamp |
+
+**Indexes:** `(phone)`, `(phone, purpose, used_at)` composite for active OTP lookup.
+
+**Security rules:**
+- OTP HMAC secret comes from `OTP_HMAC_SECRET` env var (not stored in DB)
+- Resend cooldown: 60 seconds per phone
+- Phone send rate: 3 per 10 minutes
+- Phone verify rate: 10 per 10 minutes
+- IP OTP rate: 20 per 10 minutes
+- Expired/used/exhausted OTPs rejected atomically via SQL WHERE guards
+- Legacy plaintext OTPs invalidated by migration (`LENGTH(code) <= 8`)
+
 ### `customer_profiles`
 
 Extended customer data linked to a user account.
