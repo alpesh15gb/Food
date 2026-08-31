@@ -488,7 +488,7 @@ function OverviewPanel({ data }: { data: any }) {
           </span>
         </div>
         <div className="mt-5 space-y-3">
-          {data.orders.slice(0, 8).map((order: any) => (
+          {(data.orders ?? []).slice(0, 8).map((order: any) => (
             <div
               key={order.id}
               className="flex items-center justify-between rounded-xl border border-[#eadccf] bg-[#fffaf5] p-3"
@@ -616,10 +616,10 @@ function OrdersPanel({
 
   const filtered =
     filter === "all"
-      ? data.orders
+      ? (data.orders ?? [])
       : filter === "active"
-      ? data.orders.filter((o: any) => activeStatuses.includes(o.status))
-      : data.orders.filter((o: any) => o.status === filter);
+      ? (data.orders ?? []).filter((o: any) => activeStatuses.includes(o.status))
+      : (data.orders ?? []).filter((o: any) => o.status === filter);
 
   return (
     <section className="overflow-hidden rounded-2xl bg-[#fffdf9] shadow-sm">
@@ -766,7 +766,7 @@ function MenuPanel({
   onToggle: (id: string, isOpen: boolean) => void;
 }) {
   const [search, setSearch] = useState("");
-  const items = data.items.filter((item: any) =>
+  const items = (data.items ?? []).filter((item: any) =>
     search ? item.name.toLowerCase().includes(search.toLowerCase()) : true
   );
 
@@ -802,7 +802,7 @@ function MenuPanel({
             <option className="text-black" value="">
               Choose category
             </option>
-            {data.categories.map((cat: any) => (
+            {(data.categories ?? []).map((cat: any) => (
               <option className="text-black" key={cat.id} value={cat.id}>
                 {cat.name}
               </option>
@@ -849,7 +849,7 @@ function MenuPanel({
               <h2 className="font-display mt-1 text-2xl">Availability controls</h2>
             </div>
             <span className="text-sm font-bold text-[#856652]">
-              {data.items.length} dishes
+              {(data.items ?? []).length} dishes
             </span>
           </div>
           <div className="mt-3 relative">
@@ -1012,8 +1012,8 @@ function CouponsPanel({
         </p>
         <h2 className="font-display mt-1 text-2xl">On the counter now</h2>
         <div className="mt-5 space-y-3">
-          {data.offers.length ? (
-            data.offers.map((coupon: any) => (
+          {(data.offers ?? []).length ? (
+            (data.offers ?? []).map((coupon: any) => (
               <article
                 key={coupon.id}
                 className="rounded-xl border border-[#eadccf] bg-[#fff9f3] p-4"

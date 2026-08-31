@@ -665,6 +665,7 @@ export async function getAdminDashboard(restaurantId: string) {
   const categories = await db.select().from(menuCategories).where(eq(menuCategories.restaurantId, restaurantId));
   const items = await db.select().from(menuItems).where(eq(menuItems.restaurantId, restaurantId));
   const allOrders = await db.select().from(orders).where(eq(orders.restaurantId, restaurantId)).orderBy(desc(orders.createdAt));
+  const offers = await db.select().from(coupons).where(eq(coupons.restaurantId, restaurantId));
 
   const activeStatuses = [
     "PLACED", "RESTAURANT_ACCEPTED", "PREPARING", "READY_FOR_PICKUP",
@@ -687,6 +688,7 @@ export async function getAdminDashboard(restaurantId: string) {
     outlet,
     categories,
     items,
+    offers,
     orders: allOrders.slice(0, 100),
     metrics: {
       todayOrders: todayOrders.length,
