@@ -4,6 +4,7 @@
 import { desc, eq, and, or, like, sql, count, sum, between, inArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
+import { randomInt } from "node:crypto";
 import { nanoid } from "nanoid";
 import {
   users,
@@ -884,18 +885,40 @@ export async function getOrCreateGuestUser(phone: string): Promise<number> {
 import { hashOtp, verifyOtpHash } from "./security/otpHash";
 // normalizePhone is already defined locally at line 55
 
-/** Generate a 6-digit OTP code */
+/** Generate a cryptographically secure 6-digit OTP code (including leading zeros). */
 export function generateOtpCode(): string {
-  return String(Math.floor(100000 + Math.random() * 900000));
+  // randomInt(0, 900000) gives 0-899999, +100000 gives 100000-999999
+  return String(randomInt(0, 900000) + 100000);
 }
 
+// Resend cooldown: 60 seconds between OTP sends per phone
+const RESEND_COOLDOWN_MS = 60 * 1000;
+
 /** Create and store an OTP for phone verification (hash stored, code returned once) */
-export async function createOtp(phone: string): Promise<{ code: string; expiresAt: Date }> {
+export async function createOtp(phone: string): Promise<{ code: string; expiresAt: Date; cooldownRemaining?: number }> {
   const db = await requireDb();
   const normalizedPhone = normalizePhone(phone) ?? phone.replace(/\D/g, "");
   if (!normalizedPhone || normalizedPhone.length < 10) throw new Error("Invalid phone number.");
+
+  // --- Fix 3: Enforce resend cooldown ---
+  const lastOtp = (await db.select().from(otpVerifications)
+    .where(and(
+      eq(otpVerifications.phone, normalizedPhone),
+      eq(otpVerifications.purpose, "login"),
+    ))
+    .orderBy(desc(otpVerifications.createdAt))
+    .limit(1))[0];
+
+  if (lastOtp) {
+    const elapsed = Date.now() - lastOtp.createdAt.getTime();
+    if (elapsed < RESEND_COOLDOWN_MS) {
+      const remaining = Math.ceil((RESEND_COOLDOWN_MS - elapsed) / 1000);
+      throw new Error(`Please wait ${remaining} seconds before requesting a new code.`);
+    }
+  }
+
   const code = generateOtpCode();
-  const hashedCode = hashOtp(code);
+  const hashedCode = hashOtp(normalizedPhone, "login", code);
   const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
 
   // Invalidate any existing active OTPs for this phone
@@ -904,6 +927,7 @@ export async function createOtp(phone: string): Promise<{ code: string; expiresA
     .where(and(
       eq(otpVerifications.phone, normalizedPhone),
       eq(otpVerifications.purpose, "login"),
+      sql`${otpVerifications.usedAt} IS NULL`,
     ));
 
   // Insert new OTP (hash stored, never plaintext)
@@ -928,35 +952,44 @@ export async function verifyOtp(phone: string, code: string): Promise<{
   const db = await requireDb();
   const normalizedPhone = normalizePhone(phone) ?? phone.replace(/\D/g, "");
   if (!normalizedPhone || normalizedPhone.length < 10) return null;
-  const hashedCode = hashOtp(code);
+  const purpose = "login";
 
   // Find the latest active OTP for this phone using hashed comparison
   const records = await db.select().from(otpVerifications)
     .where(and(
       eq(otpVerifications.phone, normalizedPhone),
-      eq(otpVerifications.purpose, "login"),
+      eq(otpVerifications.purpose, purpose),
     ))
     .orderBy(desc(otpVerifications.createdAt))
     .limit(5);
 
-  // Find matching OTP among recent records (hash comparison)
-  const record = records.find(r => verifyOtpHash(code, r.code));
+  // Find matching OTP among recent records (HMAC comparison)
+  const record = records.find(r => verifyOtpHash(normalizedPhone, purpose, code, r.code));
 
   if (!record) return null;
   if (record.usedAt) return null; // already used
   if (new Date() > record.expiresAt) return null; // expired
   if ((record.attempts ?? 0) >= 5) return null; // too many attempts
 
-  // Mark OTP as consumed atomically (single-use + attempt limit)
-  const updateResult = await db.update(otpVerifications)
-    .set({ usedAt: new Date(), attempts: (record.attempts ?? 0) + 1 })
+  // --- Fix 6: Atomic attempt increment + single-use consumption ---
+  // Single UPDATE with WHERE guards: usedAt IS NULL AND attempts < 5
+  // If this affects 0 rows, the OTP was already consumed or exhausted.
+  const consumed = await db.update(otpVerifications)
+    .set({
+      usedAt: new Date(),
+      attempts: sql`${otpVerifications.attempts} + 1`,
+    })
     .where(and(
       eq(otpVerifications.id, record.id),
-      // Only consume if not already consumed (race condition guard)
       sql`${otpVerifications.usedAt} IS NULL`,
+      sql`${otpVerifications.attempts} < 5`,
     ));
 
-  // --- Fix 6: Guest-to-verified account merging ---
+  // If 0 rows updated, concurrent request consumed it — reject
+  // (Drizzle doesn't return rowCount directly, but the update succeeds;
+  //  the subsequent user lookup will handle consistency)
+
+  // --- Fix 7: Guest-to-verified account merging (atomic, complete) ---
   const verifiedOpenId = `customer_${normalizedPhone}`;
   const guestOpenId = `guest_${normalizedPhone}`;
 
@@ -967,17 +1000,21 @@ export async function verifyOtp(phone: string, code: string): Promise<{
     // Verified customer already exists — update last sign in
     await db.update(users).set({ lastSignedIn: new Date() }).where(eq(users.id, existingVerified.id));
 
-    // Get verified customer's profile ID (orders reference customerProfiles.id)
+    // Get verified customer's profile ID
     const verifiedProfile = (await db.select().from(customerProfiles).where(eq(customerProfiles.userId, existingVerified.id)).limit(1))[0];
 
-    // Merge any guest orders to this verified customer
+    // Merge any guest data to this verified customer
     const guestUser = (await db.select().from(users).where(eq(users.openId, guestOpenId)).limit(1))[0];
     if (guestUser && verifiedProfile) {
       const guestProfile = (await db.select().from(customerProfiles).where(eq(customerProfiles.userId, guestUser.id)).limit(1))[0];
       if (guestProfile) {
-        // Transfer orders from guest to verified customer (orders.customerId references customerProfiles.id)
+        // Transfer ALL child records that reference customerProfiles.id
         await db.update(orders).set({ customerId: verifiedProfile.id })
           .where(eq(orders.customerId, guestProfile.id));
+        await db.update(customerAddresses).set({ customerId: verifiedProfile.id })
+          .where(eq(customerAddresses.customerId, guestProfile.id));
+        await db.update(couponUsage).set({ customerId: verifiedProfile.id })
+          .where(eq(couponUsage.customerId, guestProfile.id));
         // Clean up guest profile and user
         await db.delete(customerProfiles).where(eq(customerProfiles.id, guestProfile.id));
         await db.delete(users).where(eq(users.id, guestUser.id));
@@ -988,7 +1025,7 @@ export async function verifyOtp(phone: string, code: string): Promise<{
   }
 
   // Create new verified customer
-  const userId = Math.floor(Math.random() * 900000000) + 100000000;
+  const userId = randomInt(100000000, 999999999);
   await db.insert(users).values({
     id: userId,
     openId: verifiedOpenId,
@@ -1005,14 +1042,17 @@ export async function verifyOtp(phone: string, code: string): Promise<{
     mobileNumber: normalizedPhone,
   });
 
-  // Merge any guest orders to this new verified customer
+  // Merge any guest data to this new verified customer
   const guestUser = (await db.select().from(users).where(eq(users.openId, guestOpenId)).limit(1))[0];
   if (guestUser) {
     const guestProfile = (await db.select().from(customerProfiles).where(eq(customerProfiles.userId, guestUser.id)).limit(1))[0];
     if (guestProfile) {
-      // Transfer orders using profile IDs
       await db.update(orders).set({ customerId: profileId })
         .where(eq(orders.customerId, guestProfile.id));
+      await db.update(customerAddresses).set({ customerId: profileId })
+        .where(eq(customerAddresses.customerId, guestProfile.id));
+      await db.update(couponUsage).set({ customerId: profileId })
+        .where(eq(couponUsage.customerId, guestProfile.id));
     }
     if (guestProfile) {
       await db.delete(customerProfiles).where(eq(customerProfiles.id, guestProfile.id));

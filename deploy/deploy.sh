@@ -60,7 +60,9 @@ if [ ! -f "$ENV_FILE" ]; then
   sed -i "s|JWT_SECRET=.*|JWT_SECRET=${JWT_SECRET}|" "$ENV_FILE"
   sed -i "s|COOKIE_SECRET=.*|COOKIE_SECRET=${COOKIE_SECRET}|" "$ENV_FILE"
   sed -i "s|LOCAL_ADMIN_TOKEN=.*|LOCAL_ADMIN_TOKEN=${ADMIN_TOKEN}|" "$ENV_FILE"
+  OTP_SECRET=$(openssl rand -hex 32 2>/dev/null || head -c 64 /dev/urandom | xxd -p | tr -d '\n' | head -c 64)
   sed -i "s|SECRET_ENCRYPTION_KEY=.*|SECRET_ENCRYPTION_KEY=${SECRET_KEY}|" "$ENV_FILE"
+  sed -i "s|OTP_HMAC_SECRET=.*|OTP_HMAC_SECRET=${OTP_SECRET}|" "$ENV_FILE"
 
   echo "✅ Secrets generated and saved to $ENV_FILE"
   echo ""

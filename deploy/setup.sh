@@ -39,7 +39,9 @@ if [ ! -f deploy/config.env ]; then
   sed -i "s|JWT_SECRET=.*|JWT_SECRET=${JWT_SECRET}|" deploy/config.env
   sed -i "s|COOKIE_SECRET=.*|COOKIE_SECRET=${COOKIE_SECRET}|" deploy/config.env
   sed -i "s|LOCAL_ADMIN_TOKEN=.*|LOCAL_ADMIN_TOKEN=${ADMIN_TOKEN}|" deploy/config.env
+  OTP_SECRET=$(openssl rand -hex 32 2>/dev/null || head -c 64 /dev/urandom | xxd -p | tr -d '\n' | head -c 64)
   sed -i "s|SECRET_ENCRYPTION_KEY=.*|SECRET_ENCRYPTION_KEY=${SECRET_KEY}|" deploy/config.env
+  sed -i "s|OTP_HMAC_SECRET=.*|OTP_HMAC_SECRET=${OTP_SECRET}|" deploy/config.env
 
   echo "✅ Generated secure secrets in deploy/config.env"
   echo ""

@@ -134,7 +134,11 @@ export const customerProfiles = pgTable("customer_profiles", {
   totalSpentPaise: integer("total_spent_paise").notNull().default(0),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
-});
+}, (t) => [
+  // Prevent duplicate verified customer profiles per phone number
+  // PostgreSQL UNIQUE allows multiple NULLs, so guest profiles without phones are safe
+  uniqueIndex("customer_phone_unique").on(t.mobileNumber),
+]);
 
 export const customerAddresses = pgTable("customer_addresses", {
   id: varchar("id", { length: 36 }).primaryKey(),

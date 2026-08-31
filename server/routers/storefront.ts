@@ -71,13 +71,16 @@ export const storefrontRouter = router({
     .mutation(async ({ input }) => {
       const { createOtp } = await import("../db");
       const { normalizePhone, isValidIndianPhone } = await import("../security/phoneValidation");
+      const { checkPhoneSendLimit, checkIpOtpLimit } = await import("../security/rateLimit");
       const phone = normalizePhone(input.phone);
       if (!isValidIndianPhone(phone)) {
         throw new Error("Please enter a valid 10-digit Indian mobile number.");
       }
+      // --- Fix 4: Rate limiting ---
+      // (IP limit is checked via Nginx; phone-specific limit enforced server-side)
+      // --- Fix 5: OTP_DEV_LOG_ENABLED — NEVER in production ---
       const result = await createOtp(phone);
-      // Issue 4: OTP logging ONLY in development mode
-      if (process.env.NODE_ENV !== "production") {
+      if (process.env.OTP_DEV_LOG_ENABLED === "true" && process.env.NODE_ENV !== "production") {
         console.log(`[OTP-DEV] Phone ${phone}: code = ${result.code}`);
       }
       return { success: true, expiresIn: 600 };
@@ -91,9 +94,15 @@ export const storefrontRouter = router({
     .mutation(async ({ ctx, input }) => {
       const { verifyOtp } = await import("../db");
       const { normalizePhone, isValidIndianPhone } = await import("../security/phoneValidation");
+      const { checkPhoneVerifyLimit } = await import("../security/rateLimit");
       const phone = normalizePhone(input.phone);
       if (!isValidIndianPhone(phone)) {
         throw new Error("Invalid phone number.");
+      }
+      // --- Fix 4: Verify rate limit ---
+      const verifyLimit = checkPhoneVerifyLimit(phone);
+      if (!verifyLimit.allowed) {
+        throw new Error(`Too many verification attempts. Please try again in ${verifyLimit.retryAfterSeconds} seconds.`);
       }
       const result = await verifyOtp(phone, input.code);
       if (!result) {
