@@ -288,12 +288,30 @@ export const adminRouter = router({
     .query(({ input }) => getCustomerById(input.customerId)),
 
   updateCustomerNotes: requirePermission("customers:write").input(z.object({ customerId: z.string().min(4), notes: z.string().max(2000) }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
       const db = await import("../db").then(m => m.getDb());
       if (!db) throw new Error("Database unavailable");
-      const { customerProfiles } = await import("../../drizzle/schema");
+      const { customerProfiles, auditLogs } = await import("../../drizzle/schema");
       const { eq } = await import("drizzle-orm");
+      const { nanoid } = await import("nanoid");
+
+      // Fetch existing notes for audit
+      const existing = (await db.select({ adminNotes: customerProfiles.adminNotes })
+        .from(customerProfiles).where(eq(customerProfiles.id, input.customerId)).limit(1))[0];
+
       await db.update(customerProfiles).set({ adminNotes: input.notes }).where(eq(customerProfiles.id, input.customerId));
+
+      // Audit log with actor ID, customer ID, before/after (no sensitive data)
+      await db.insert(auditLogs).values({
+        id: nanoid(18),
+        actorId: ctx.user?.id ?? 0,
+        action: "customer.notes.updated",
+        targetType: "customer",
+        targetId: input.customerId,
+        beforeData: { hasNotes: !!existing?.adminNotes },
+        afterData: { hasNotes: !!input.notes },
+      });
+
       return { success: true } as const;
     }),
 

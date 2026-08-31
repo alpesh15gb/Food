@@ -859,7 +859,7 @@ export async function getOrderForTracking(orderNumber: string, trackingToken: st
  */
 export async function getOrCreateGuestUser(phone: string): Promise<number> {
   const db = await requireDb();
-  const normalizedPhone = phone.replace(/[^\d]/g, "");
+  const normalizedPhone = normalizePhone(phone);
   const guestOpenId = `guest_${normalizedPhone}`;
 
   const existing = (await db.select().from(users).where(eq(users.openId, guestOpenId)).limit(1))[0];
@@ -878,22 +878,27 @@ export async function getOrCreateGuestUser(phone: string): Promise<number> {
 }
 
 // =============================================================================
-// Customer Phone Auth (OTP)
+// Customer Phone Auth (OTP) — hashed OTP codes, guest merging, session-based
 // =============================================================================
+
+import { hashOtp, verifyOtpHash } from "./security/otpHash";
+// normalizePhone is already defined locally at line 55
 
 /** Generate a 6-digit OTP code */
 export function generateOtpCode(): string {
   return String(Math.floor(100000 + Math.random() * 900000));
 }
 
-/** Create and store an OTP for phone verification */
+/** Create and store an OTP for phone verification (hash stored, code returned once) */
 export async function createOtp(phone: string): Promise<{ code: string; expiresAt: Date }> {
   const db = await requireDb();
-  const normalizedPhone = phone.replace(/[^\d]/g, "");
+  const normalizedPhone = normalizePhone(phone) ?? phone.replace(/\D/g, "");
+  if (!normalizedPhone || normalizedPhone.length < 10) throw new Error("Invalid phone number.");
   const code = generateOtpCode();
+  const hashedCode = hashOtp(code);
   const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
 
-  // Invalidate any existing OTPs for this phone
+  // Invalidate any existing active OTPs for this phone
   await db.update(otpVerifications)
     .set({ usedAt: new Date() })
     .where(and(
@@ -901,10 +906,10 @@ export async function createOtp(phone: string): Promise<{ code: string; expiresA
       eq(otpVerifications.purpose, "login"),
     ));
 
-  // Insert new OTP
+  // Insert new OTP (hash stored, never plaintext)
   await db.insert(otpVerifications).values({
     phone: normalizedPhone,
-    code,
+    code: hashedCode,
     purpose: "login",
     expiresAt,
     attempts: 0,
@@ -913,45 +918,80 @@ export async function createOtp(phone: string): Promise<{ code: string; expiresA
   return { code, expiresAt };
 }
 
-/** Verify an OTP code and return the user if valid */
-export async function verifyOtp(phone: string, code: string): Promise<{ userId: number; isNewUser: boolean } | null> {
+/** Verify an OTP code — returns openId for session, handles guest merging */
+export async function verifyOtp(phone: string, code: string): Promise<{
+  openId: string;
+  userId: number;
+  isNewUser: boolean;
+  phone: string;
+} | null> {
   const db = await requireDb();
-  const normalizedPhone = phone.replace(/[^\d]/g, "");
+  const normalizedPhone = normalizePhone(phone) ?? phone.replace(/\D/g, "");
+  if (!normalizedPhone || normalizedPhone.length < 10) return null;
+  const hashedCode = hashOtp(code);
 
-  const record = (await db.select().from(otpVerifications)
+  // Find the latest active OTP for this phone using hashed comparison
+  const records = await db.select().from(otpVerifications)
     .where(and(
       eq(otpVerifications.phone, normalizedPhone),
-      eq(otpVerifications.code, code),
       eq(otpVerifications.purpose, "login"),
     ))
     .orderBy(desc(otpVerifications.createdAt))
-    .limit(1))[0];
+    .limit(5);
+
+  // Find matching OTP among recent records (hash comparison)
+  const record = records.find(r => verifyOtpHash(code, r.code));
 
   if (!record) return null;
   if (record.usedAt) return null; // already used
   if (new Date() > record.expiresAt) return null; // expired
   if ((record.attempts ?? 0) >= 5) return null; // too many attempts
 
-  // Mark OTP as used
-  await db.update(otpVerifications)
+  // Mark OTP as consumed atomically (single-use + attempt limit)
+  const updateResult = await db.update(otpVerifications)
     .set({ usedAt: new Date(), attempts: (record.attempts ?? 0) + 1 })
-    .where(eq(otpVerifications.id, record.id));
+    .where(and(
+      eq(otpVerifications.id, record.id),
+      // Only consume if not already consumed (race condition guard)
+      sql`${otpVerifications.usedAt} IS NULL`,
+    ));
 
-  // Find or create user
-  const openId = `customer_${normalizedPhone}`;
-  const existingUser = (await db.select().from(users).where(eq(users.openId, openId)).limit(1))[0];
+  // --- Fix 6: Guest-to-verified account merging ---
+  const verifiedOpenId = `customer_${normalizedPhone}`;
+  const guestOpenId = `guest_${normalizedPhone}`;
 
-  if (existingUser) {
-    // Update last sign in
-    await db.update(users).set({ lastSignedIn: new Date() }).where(eq(users.id, existingUser.id));
-    return { userId: existingUser.id, isNewUser: false };
+  // Check for existing verified customer
+  const existingVerified = (await db.select().from(users).where(eq(users.openId, verifiedOpenId)).limit(1))[0];
+
+  if (existingVerified) {
+    // Verified customer already exists — update last sign in
+    await db.update(users).set({ lastSignedIn: new Date() }).where(eq(users.id, existingVerified.id));
+
+    // Get verified customer's profile ID (orders reference customerProfiles.id)
+    const verifiedProfile = (await db.select().from(customerProfiles).where(eq(customerProfiles.userId, existingVerified.id)).limit(1))[0];
+
+    // Merge any guest orders to this verified customer
+    const guestUser = (await db.select().from(users).where(eq(users.openId, guestOpenId)).limit(1))[0];
+    if (guestUser && verifiedProfile) {
+      const guestProfile = (await db.select().from(customerProfiles).where(eq(customerProfiles.userId, guestUser.id)).limit(1))[0];
+      if (guestProfile) {
+        // Transfer orders from guest to verified customer (orders.customerId references customerProfiles.id)
+        await db.update(orders).set({ customerId: verifiedProfile.id })
+          .where(eq(orders.customerId, guestProfile.id));
+        // Clean up guest profile and user
+        await db.delete(customerProfiles).where(eq(customerProfiles.id, guestProfile.id));
+        await db.delete(users).where(eq(users.id, guestUser.id));
+      }
+    }
+
+    return { openId: verifiedOpenId, userId: existingVerified.id, isNewUser: false, phone: normalizedPhone };
   }
 
-  // Create new customer user
+  // Create new verified customer
   const userId = Math.floor(Math.random() * 900000000) + 100000000;
   await db.insert(users).values({
     id: userId,
-    openId,
+    openId: verifiedOpenId,
     name: null,
     mobile: normalizedPhone,
     role: "user",
@@ -965,7 +1005,22 @@ export async function verifyOtp(phone: string, code: string): Promise<{ userId: 
     mobileNumber: normalizedPhone,
   });
 
-  return { userId, isNewUser: true };
+  // Merge any guest orders to this new verified customer
+  const guestUser = (await db.select().from(users).where(eq(users.openId, guestOpenId)).limit(1))[0];
+  if (guestUser) {
+    const guestProfile = (await db.select().from(customerProfiles).where(eq(customerProfiles.userId, guestUser.id)).limit(1))[0];
+    if (guestProfile) {
+      // Transfer orders using profile IDs
+      await db.update(orders).set({ customerId: profileId })
+        .where(eq(orders.customerId, guestProfile.id));
+    }
+    if (guestProfile) {
+      await db.delete(customerProfiles).where(eq(customerProfiles.id, guestProfile.id));
+    }
+    await db.delete(users).where(eq(users.id, guestUser.id));
+  }
+
+  return { openId: verifiedOpenId, userId, isNewUser: true, phone: normalizedPhone };
 }
 
 // =============================================================================

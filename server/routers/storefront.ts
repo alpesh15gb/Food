@@ -64,15 +64,22 @@ export const storefrontRouter = router({
   paymentConfig: publicProcedure.query(() => getRazorpayConfig()),
 
   // =========================================================================
-  // Customer Phone Auth
+  // Customer Phone Auth — server-side session via HttpOnly cookie
   // =========================================================================
   sendOtp: publicProcedure
     .input(z.object({ phone: z.string().min(10).max(15) }))
     .mutation(async ({ input }) => {
       const { createOtp } = await import("../db");
-      const result = await createOtp(input.phone);
-      // In production, send via SMS provider. For MVP, log to console.
-      console.log(`[OTP] Phone ${input.phone}: code = ${result.code}`);
+      const { normalizePhone, isValidIndianPhone } = await import("../security/phoneValidation");
+      const phone = normalizePhone(input.phone);
+      if (!isValidIndianPhone(phone)) {
+        throw new Error("Please enter a valid 10-digit Indian mobile number.");
+      }
+      const result = await createOtp(phone);
+      // Issue 4: OTP logging ONLY in development mode
+      if (process.env.NODE_ENV !== "production") {
+        console.log(`[OTP-DEV] Phone ${phone}: code = ${result.code}`);
+      }
       return { success: true, expiresIn: 600 };
     }),
 
@@ -81,28 +88,52 @@ export const storefrontRouter = router({
       phone: z.string().min(10).max(15),
       code: z.string().length(6),
     }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
       const { verifyOtp } = await import("../db");
-      const result = await verifyOtp(input.phone, input.code);
+      const { normalizePhone, isValidIndianPhone } = await import("../security/phoneValidation");
+      const phone = normalizePhone(input.phone);
+      if (!isValidIndianPhone(phone)) {
+        throw new Error("Invalid phone number.");
+      }
+      const result = await verifyOtp(phone, input.code);
       if (!result) {
         throw new Error("Invalid or expired verification code.");
       }
+      // --- Fix 1: Set server-side session cookie ---
+      const { COOKIE_NAME } = await import("@shared/const");
+      const { getSessionCookieOptions } = await import("../_core/cookies");
+      const { sdk } = await import("../_core/sdk");
+      const sessionToken = await sdk.signSession(
+        { openId: result.openId, appId: "customer-phone", name: result.phone },
+        { expiresInMs: 1000 * 60 * 60 * 24 * 30 } // 30 days
+      );
+      ctx.res.cookie(COOKIE_NAME, sessionToken, {
+        ...getSessionCookieOptions(ctx.req),
+        maxAge: 1000 * 60 * 60 * 24 * 30,
+      });
       return {
         success: true,
-        userId: result.userId,
         isNewUser: result.isNewUser,
-        phone: input.phone.replace(/(\d{2})\d+(\d{2})/, "$1****$2"),
+        phone: result.phone,
       };
     }),
 
+  // --- Fix 2: customerMe reads identity from session cookie, not client input ---
   customerMe: publicProcedure
-    .input(z.object({ userId: z.number().int().positive() }))
-    .query(async ({ input }) => {
+    .query(async ({ ctx }) => {
+      const { COOKIE_NAME } = await import("@shared/const");
+      const { parse: parseCookieHeader } = await import("cookie");
+      const { sdk } = await import("../_core/sdk");
+      const cookies = parseCookieHeader(ctx.req.headers.cookie ?? "");
+      const sessionToken = cookies[COOKIE_NAME];
+      if (!sessionToken) return null;
+      const session = await sdk.verifySession(sessionToken);
+      if (!session) return null;
       const db = await import("../db").then(m => m.getDb());
       if (!db) return null;
       const { users, customerProfiles } = await import("../../drizzle/schema");
       const { eq } = await import("drizzle-orm");
-      const user = (await db.select().from(users).where(eq(users.id, input.userId)).limit(1))[0];
+      const user = (await db.select().from(users).where(eq(users.openId, session.openId)).limit(1))[0];
       if (!user) return null;
       const profile = (await db.select().from(customerProfiles).where(eq(customerProfiles.userId, user.id)).limit(1))[0];
       return {
@@ -113,6 +144,17 @@ export const storefrontRouter = router({
         totalOrders: profile?.totalOrders ?? 0,
         totalSpentPaise: profile?.totalSpentPaise ?? 0,
       };
+    }),
+
+  customerLogout: publicProcedure
+    .mutation(({ ctx }) => {
+      const { COOKIE_NAME } = require("@shared/const");
+      const { getSessionCookieOptions } = require("../_core/cookies");
+      ctx.res.clearCookie(COOKIE_NAME, {
+        ...getSessionCookieOptions(ctx.req),
+        maxAge: -1,
+      });
+      return { success: true } as const;
     }),
 
   // =========================================================================

@@ -88,7 +88,7 @@ export const users = pgTable("users", {
 export const otpVerifications = pgTable("otp_verifications", {
   id: serial("id").primaryKey(),
   phone: varchar("phone", { length: 15 }).notNull(),
-  code: varchar("code", { length: 6 }).notNull(),
+  code: varchar("code", { length: 64 }).notNull(), // SHA-256 hash, not plaintext
   purpose: varchar("purpose", { length: 32 }).notNull().default("login"),
   expiresAt: timestamp("expires_at").notNull(),
   usedAt: timestamp("used_at"),
@@ -96,6 +96,7 @@ export const otpVerifications = pgTable("otp_verifications", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (table) => [
   index("otp_phone_idx").on(table.phone),
+  index("otp_lookup_idx").on(table.phone, table.purpose, table.usedAt),
 ]);
 
 export const adminRoles = pgTable("admin_roles", {

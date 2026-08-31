@@ -142,9 +142,8 @@ export default function OrderingApp() {
     flatHouse?: string; building?: string; street?: string;
     landmark?: string; area?: string; city?: string; postalCode?: string;
   }>({});
-  const [customerPhone, setCustomerPhone] = useState(() => localStorage.getItem("ck_phone") ?? "");
-
-  // Customer auth state
+  const [customerPhone, setCustomerPhone] = useState(() => localStorage.getItem("ck_phone_prefill") ?? "");
+  // Customer auth state — server-side session via HttpOnly cookie
   const [authOpen, setAuthOpen] = useState(false);
   const [otpStep, setOtpStep] = useState<"phone" | "verify">("phone");
   const [otpPhone, setOtpPhone] = useState("");
@@ -153,10 +152,9 @@ export default function OrderingApp() {
   const [otpError, setOtpError] = useState("");
   const sendOtp = trpc.storefront.sendOtp.useMutation();
   const verifyOtp = trpc.storefront.verifyOtp.useMutation();
-  const customerMe = trpc.storefront.customerMe.useQuery(
-    { userId: parseInt(localStorage.getItem("ck_userId") ?? "0") },
-    { enabled: !!localStorage.getItem("ck_userId") }
-  );
+  const customerLogout = trpc.storefront.customerLogout.useMutation();
+  // Fix 2: customerMe reads identity from session cookie, NOT localStorage
+  const customerMe = trpc.storefront.customerMe.useQuery();
   const loggedInPhone = customerMe.data?.phone ?? null;
 
   // Pricing (server-side will validate on checkout)
@@ -288,15 +286,16 @@ export default function OrderingApp() {
     setOtpLoading(true);
     setOtpError("");
     try {
+      // Server sets HttpOnly session cookie — no localStorage auth
       const result = await verifyOtp.mutateAsync({ phone: otpPhone, code: otpCode });
-      // Persist auth to localStorage
-      localStorage.setItem("ck_phone", otpPhone);
-      localStorage.setItem("ck_userId", String(result.userId));
-      setCustomerPhone(otpPhone);
+      // Only remember phone for convenience (pre-fill), NOT for auth
+      localStorage.setItem("ck_phone_prefill", otpPhone);
       setAuthOpen(false);
       setOtpStep("phone");
       setOtpPhone("");
       setOtpCode("");
+      // Refetch customer session
+      customerMe.refetch();
       toast.success(result.isNewUser ? "Welcome! Your account is ready." : "Welcome back!");
     } catch (err) {
       setOtpError(err instanceof Error ? err.message : "Invalid code. Please try again.");
@@ -305,11 +304,13 @@ export default function OrderingApp() {
     }
   };
 
-  const handleLogout = () => {
-    localStorage.removeItem("ck_phone");
-    localStorage.removeItem("ck_userId");
-    setCustomerPhone("");
+  const handleLogout = async () => {
+    // Server clears the HttpOnly session cookie
+    try {
+      await customerLogout.mutateAsync();
+    } catch { /* ignore errors on logout */ }
     setAuthOpen(false);
+    customerMe.refetch();
     toast.success("Logged out.");
   };
 
