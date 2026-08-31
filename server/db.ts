@@ -533,6 +533,8 @@ export async function createOrderFromValidatedCart(args: {
   }
 
   // Ensure customer profile exists
+  // NOTE: mobileNumber is NOT set here — guest phone is unverified identity.
+  // Only OTP verification populates mobileNumber as verified identity.
   const profile = (await db.select().from(customerProfiles)
     .where(eq(customerProfiles.userId, effectiveUserId)).limit(1))[0];
   const customerId = profile?.id ?? id();
@@ -540,7 +542,7 @@ export async function createOrderFromValidatedCart(args: {
     await db.insert(customerProfiles).values({
       id: customerId,
       userId: effectiveUserId,
-      mobileNumber: phone,
+      // mobileNumber left null — only set after OTP verification
     });
   }
 
@@ -989,7 +991,7 @@ export async function verifyOtp(phone: string, code: string): Promise<{
   // (Drizzle doesn't return rowCount directly, but the update succeeds;
   //  the subsequent user lookup will handle consistency)
 
-  // --- Fix 7: Guest-to-verified account merging (atomic, complete) ---
+  // --- Guest-to-verified account merging (fully transactional) ---
   const verifiedOpenId = `customer_${normalizedPhone}`;
   const guestOpenId = `guest_${normalizedPhone}`;
 
@@ -997,70 +999,81 @@ export async function verifyOtp(phone: string, code: string): Promise<{
   const existingVerified = (await db.select().from(users).where(eq(users.openId, verifiedOpenId)).limit(1))[0];
 
   if (existingVerified) {
-    // Verified customer already exists — update last sign in
-    await db.update(users).set({ lastSignedIn: new Date() }).where(eq(users.id, existingVerified.id));
+    // Wrap entire merge in transaction — all-or-nothing
+    await db.transaction(async (tx) => {
+      await tx.update(users).set({ lastSignedIn: new Date() }).where(eq(users.id, existingVerified.id));
 
-    // Get verified customer's profile ID
-    const verifiedProfile = (await db.select().from(customerProfiles).where(eq(customerProfiles.userId, existingVerified.id)).limit(1))[0];
+      const verifiedProfile = (await tx.select().from(customerProfiles).where(eq(customerProfiles.userId, existingVerified.id)).limit(1))[0];
+      const guestUser = (await tx.select().from(users).where(eq(users.openId, guestOpenId)).limit(1))[0];
 
-    // Merge any guest data to this verified customer
-    const guestUser = (await db.select().from(users).where(eq(users.openId, guestOpenId)).limit(1))[0];
-    if (guestUser && verifiedProfile) {
-      const guestProfile = (await db.select().from(customerProfiles).where(eq(customerProfiles.userId, guestUser.id)).limit(1))[0];
-      if (guestProfile) {
-        // Transfer ALL child records that reference customerProfiles.id
-        await db.update(orders).set({ customerId: verifiedProfile.id })
-          .where(eq(orders.customerId, guestProfile.id));
-        await db.update(customerAddresses).set({ customerId: verifiedProfile.id })
-          .where(eq(customerAddresses.customerId, guestProfile.id));
-        await db.update(couponUsage).set({ customerId: verifiedProfile.id })
-          .where(eq(couponUsage.customerId, guestProfile.id));
-        // Clean up guest profile and user
-        await db.delete(customerProfiles).where(eq(customerProfiles.id, guestProfile.id));
-        await db.delete(users).where(eq(users.id, guestUser.id));
+      if (guestUser && verifiedProfile) {
+        const guestProfile = (await tx.select().from(customerProfiles).where(eq(customerProfiles.userId, guestUser.id)).limit(1))[0];
+        if (guestProfile) {
+          // Transfer ALL child records — conflict rule: verified profile wins
+          await tx.update(orders).set({ customerId: verifiedProfile.id })
+            .where(eq(orders.customerId, guestProfile.id));
+          await tx.update(customerAddresses).set({ customerId: verifiedProfile.id })
+            .where(eq(customerAddresses.customerId, guestProfile.id));
+          await tx.update(couponUsage).set({ customerId: verifiedProfile.id })
+            .where(eq(couponUsage.customerId, guestProfile.id));
+          // Recompute aggregates from canonical order data
+          const orderStats = (await tx.select({
+            count: sql<number>`count(*)::int`,
+            total: sql<number>`coalesce(sum(${orders.totalPaise}), 0)::int`,
+          }).from(orders).where(eq(orders.customerId, verifiedProfile.id)))[0];
+          await tx.update(customerProfiles).set({
+            totalOrders: orderStats.count,
+            totalSpentPaise: orderStats.total,
+          }).where(eq(customerProfiles.id, verifiedProfile.id));
+          // Clean up guest (profile first, then user — FK order)
+          await tx.delete(customerProfiles).where(eq(customerProfiles.id, guestProfile.id));
+          await tx.delete(users).where(eq(users.id, guestUser.id));
+        }
       }
-    }
+    });
 
     return { openId: verifiedOpenId, userId: existingVerified.id, isNewUser: false, phone: normalizedPhone };
   }
 
-  // Create new verified customer
-  const userId = randomInt(100000000, 999999999);
-  await db.insert(users).values({
-    id: userId,
-    openId: verifiedOpenId,
-    name: null,
-    mobile: normalizedPhone,
-    role: "user",
+  // Create new verified customer — wrap in transaction
+  let userId: number;
+  let profileId: string;
+
+  await db.transaction(async (tx) => {
+    userId = randomInt(100000000, 999999999);
+    await tx.insert(users).values({
+      id: userId,
+      openId: verifiedOpenId,
+      name: null,
+      mobile: normalizedPhone,
+      role: "user",
+    });
+
+    profileId = `cust_${nanoid(12)}`;
+    await tx.insert(customerProfiles).values({
+      id: profileId,
+      userId,
+      mobileNumber: normalizedPhone, // Only set here — verified via OTP
+    });
+
+    // Merge guest data
+    const guestUser = (await tx.select().from(users).where(eq(users.openId, guestOpenId)).limit(1))[0];
+    if (guestUser) {
+      const guestProfile = (await tx.select().from(customerProfiles).where(eq(customerProfiles.userId, guestUser.id)).limit(1))[0];
+      if (guestProfile) {
+        await tx.update(orders).set({ customerId: profileId })
+          .where(eq(orders.customerId, guestProfile.id));
+        await tx.update(customerAddresses).set({ customerId: profileId })
+          .where(eq(customerAddresses.customerId, guestProfile.id));
+        await tx.update(couponUsage).set({ customerId: profileId })
+          .where(eq(couponUsage.customerId, guestProfile.id));
+        await tx.delete(customerProfiles).where(eq(customerProfiles.id, guestProfile.id));
+      }
+      await tx.delete(users).where(eq(users.id, guestUser.id));
+    }
   });
 
-  // Create customer profile
-  const profileId = `cust_${nanoid(12)}`;
-  await db.insert(customerProfiles).values({
-    id: profileId,
-    userId,
-    mobileNumber: normalizedPhone,
-  });
-
-  // Merge any guest data to this new verified customer
-  const guestUser = (await db.select().from(users).where(eq(users.openId, guestOpenId)).limit(1))[0];
-  if (guestUser) {
-    const guestProfile = (await db.select().from(customerProfiles).where(eq(customerProfiles.userId, guestUser.id)).limit(1))[0];
-    if (guestProfile) {
-      await db.update(orders).set({ customerId: profileId })
-        .where(eq(orders.customerId, guestProfile.id));
-      await db.update(customerAddresses).set({ customerId: profileId })
-        .where(eq(customerAddresses.customerId, guestProfile.id));
-      await db.update(couponUsage).set({ customerId: profileId })
-        .where(eq(couponUsage.customerId, guestProfile.id));
-    }
-    if (guestProfile) {
-      await db.delete(customerProfiles).where(eq(customerProfiles.id, guestProfile.id));
-    }
-    await db.delete(users).where(eq(users.id, guestUser.id));
-  }
-
-  return { openId: verifiedOpenId, userId, isNewUser: true, phone: normalizedPhone };
+  return { openId: verifiedOpenId, userId: userId!, isNewUser: true, phone: normalizedPhone };
 }
 
 // =============================================================================

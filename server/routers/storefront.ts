@@ -108,18 +108,15 @@ export const storefrontRouter = router({
       if (!result) {
         throw new Error("Invalid or expired verification code.");
       }
-      // --- Fix 1: Set server-side session cookie ---
+      // --- Set customer session cookie (SameSite=Strict, not None) ---
       const { COOKIE_NAME } = await import("@shared/const");
-      const { getSessionCookieOptions } = await import("../_core/cookies");
+      const { getCustomerCookieOptions } = await import("../_core/cookies");
       const { sdk } = await import("../_core/sdk");
       const sessionToken = await sdk.signSession(
         { openId: result.openId, appId: "customer-phone", name: result.phone },
         { expiresInMs: 1000 * 60 * 60 * 24 * 30 } // 30 days
       );
-      ctx.res.cookie(COOKIE_NAME, sessionToken, {
-        ...getSessionCookieOptions(ctx.req),
-        maxAge: 1000 * 60 * 60 * 24 * 30,
-      });
+      ctx.res.cookie(COOKIE_NAME, sessionToken, getCustomerCookieOptions(ctx.req));
       return {
         success: true,
         isNewUser: result.isNewUser,
@@ -158,9 +155,9 @@ export const storefrontRouter = router({
   customerLogout: publicProcedure
     .mutation(({ ctx }) => {
       const { COOKIE_NAME } = require("@shared/const");
-      const { getSessionCookieOptions } = require("../_core/cookies");
+      const { getCustomerCookieOptions } = require("../_core/cookies");
       ctx.res.clearCookie(COOKIE_NAME, {
-        ...getSessionCookieOptions(ctx.req),
+        ...getCustomerCookieOptions(ctx.req),
         maxAge: -1,
       });
       return { success: true } as const;
