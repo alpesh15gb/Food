@@ -704,10 +704,13 @@ Returns order details and status for customer order tracking.
 **Type:** `query` (public)  
 **Procedure:** `storefront.orderTracking`
 
+**Security (Issue 1 fix):** Requires `trackingToken` — a cryptographically secure random token generated at order creation. Order number alone is insufficient to prevent IDOR attacks.
+
 **Input Schema:**
 ```typescript
 {
-  orderNumber: string;  // min 5 chars, e.g., "SG-20260831-001"
+  orderNumber: string;  // min 5 chars, e.g., "ORD-MX4K2-1234"
+  trackingToken: string; // min 16 chars, cryptographically random (40 chars base64url)
 }
 ```
 
@@ -718,16 +721,12 @@ Returns order details and status for customer order tracking.
 }
 ```
 
-**Response:**
+**Response (restricted — no PII or payment internals):**
 ```json
 {
-  "order": {
-    "id": "ord_abc123",
-    "orderNumber": "SG-20260831-001",
-    "status": "PREPARING",
-    "paymentStatus": "PAID",
-    "customerName": "Rahul",
-    "customerPhone": "+919876543210",
+  "orderNumber": "ORD-MX4K2-1234",
+  "status": "PREPARING",
+  "paymentStatus": "PAID",
     "itemTotalPaise": 62000,
     "deliveryFeePaise": 3000,
     "packagingFeePaise": 2500,

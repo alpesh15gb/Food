@@ -4,13 +4,15 @@
  * Pluggable delivery provider interface. In TEST/MOCK mode, returns simulated
  * responses. Production mode requires real Shadowfax API credentials.
  *
- * IMPORTANT: This adapter does NOT invent undocumented Shadowfax API endpoints.
- * It uses only the standard merchant API endpoints documented by Shadowfax.
- * When real credentials are unavailable, the mock adapter handles all operations
- * locally for development and testing.
+ * Issue 12: Added MANUAL provider for when Shadowfax is unavailable.
+ * Kitchen staff can manually dispatch and track delivery.
  */
 
 import { readIntegrationSecret } from "../security/secretVault";
+import { eq, and } from "drizzle-orm";
+import { deliveries, deliveryStatusHistory, orders, orderStatusHistory } from "../../drizzle/schema";
+import { getDb } from "../db";
+import { nanoid } from "nanoid";
 
 // =============================================================================
 // Types
@@ -206,11 +208,9 @@ class ShadowfaxProductionAdapter implements DeliveryProvider {
   }
 
   async handleWebhook(payload: Record<string, unknown>, signature?: string): Promise<DeliveryStatusUpdate | null> {
-    // Verify webhook signature if secret is configured
     const webhookSecret = process.env.SHADOWFAX_WEBHOOK_SECRET;
     if (webhookSecret && signature) {
-      // Signature verification would go here using HMAC
-      // For now, we trust the payload structure
+      // HMAC verification would go here
     }
 
     const status = payload.status as string;
@@ -250,7 +250,6 @@ class MockDeliveryAdapter implements DeliveryProvider {
   name = "shadowfax_mock";
 
   async checkServiceability(pincode: string) {
-    // Mock: all pincodes are serviceable
     return { serviceable: true, estimatedMinutes: 35 };
   }
 
@@ -289,6 +288,65 @@ class MockDeliveryAdapter implements DeliveryProvider {
 }
 
 // =============================================================================
+// Issue 12: Manual Delivery Provider
+// =============================================================================
+
+/**
+ * Issue 12: Manual delivery fallback for when Shadowfax is unavailable.
+ * Creates delivery records manually and allows admin to update status.
+ */
+export async function createManualDelivery(
+  orderId: string,
+  riderInfo: { riderName: string; riderPhone: string; notes?: string }
+): Promise<{ success: boolean; deliveryId?: string; error?: string }> {
+  const db = await getDb();
+  if (!db) return { success: false, error: "Database not available." };
+
+  // Check order exists and is in a valid state for delivery
+  const order = (await db.select().from(orders).where(eq(orders.id, orderId)).limit(1))[0];
+  if (!order) return { success: false, error: "Order not found." };
+
+  if (!["READY_FOR_PICKUP", "DELIVERY_REQUESTED"].includes(order.status)) {
+    return { success: false, error: "Order must be ready for pickup before dispatching delivery." };
+  }
+
+  const deliveryId = nanoid(18);
+
+  // Create delivery record
+  await db.insert(deliveries).values({
+    id: deliveryId,
+    orderId,
+    provider: "manual",
+    status: "ASSIGNED",
+    riderName: riderInfo.riderName,
+    riderPhone: riderInfo.riderPhone,
+    finalChargePaise: 0, // manual delivery, no automated charge
+  });
+
+  // Record delivery status history
+  await db.insert(deliveryStatusHistory).values({
+    id: nanoid(18),
+    deliveryId,
+    status: "ASSIGNED",
+    note: `Manually dispatched. Rider: ${riderInfo.riderName} (${riderInfo.riderPhone}).${riderInfo.notes ? ` Notes: ${riderInfo.notes}` : ""}`,
+  });
+
+  // Update order status to RIDER_ASSIGNED
+  const currentOrder = (await db.select().from(orders).where(eq(orders.id, orderId)).limit(1))[0];
+  if (currentOrder && ["READY_FOR_PICKUP", "DELIVERY_REQUESTED"].includes(currentOrder.status)) {
+    await db.update(orders).set({ status: "RIDER_ASSIGNED" }).where(eq(orders.id, orderId));
+    await db.insert(orderStatusHistory).values({
+      id: nanoid(18),
+      orderId,
+      status: "RIDER_ASSIGNED",
+      note: `Manual delivery dispatched to ${riderInfo.riderName}.`,
+    });
+  }
+
+  return { success: true, deliveryId };
+}
+
+// =============================================================================
 // Factory
 // =============================================================================
 
@@ -324,8 +382,8 @@ export function mapDeliveryStatusToOrderStatus(
     RIDER_EN_ROUTE_TO_DROP: "OUT_FOR_DELIVERY",
     ARRIVED_AT_DROP: "OUT_FOR_DELIVERY",
     DELIVERED: "DELIVERED",
-    CANCELLED: null, // handle separately
-    FAILED: null,    // handle separately
+    CANCELLED: null,
+    FAILED: null,
     REASSIGNED: "RIDER_ASSIGNED",
   };
   return mapping[deliveryStatus] ?? null;

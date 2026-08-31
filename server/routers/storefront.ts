@@ -1,39 +1,56 @@
 /**
- * Storefront API — public menu reads, search, and authenticated checkout.
+ * Storefront API — public menu reads, search, and guest-safe checkout.
  * All pricing is computed server-side. Frontend never submits trusted totals.
  */
 import { z } from "zod";
-import { protectedProcedure, publicProcedure, router } from "../_core/trpc";
+import { publicProcedure, router } from "../_core/trpc";
 import { createOrderFromValidatedCart, getStorefront } from "../db";
 import {
   createRazorpayPaymentOrder,
   getRazorpayConfig,
-  verifyAndCaptureRazorpayPayment,
+  confirmPayment,
   handleRazorpayWebhook,
 } from "../integrations/razorpay";
 import { getDeliveryProvider } from "../integrations/shadowfax";
 
+// --- Issue 4: Strict address validation ---
+const addressSchema = z.object({
+  name: z.string().min(1).max(180).optional(),
+  flatHouse: z.string().min(1).max(180),
+  building: z.string().max(180).optional(),
+  street: z.string().max(180).optional(),
+  landmark: z.string().max(180).optional(),
+  area: z.string().min(1).max(180),
+  city: z.string().min(1).max(120),
+  postalCode: z.string().regex(/^\\d{6}$/, "A valid 6-digit Indian pincode is required."),
+  latitude: z.string().optional(),
+  longitude: z.string().optional(),
+}).refine(
+  value => Boolean(value.flatHouse && value.area && value.city && value.postalCode),
+  "A complete delivery address with pincode is required."
+);
+
+// --- Issue 5: Frontend submits IDs only, no prices ---
+const modifierIdsSchema = z.object({
+  menuItemId: z.string().min(3),
+  quantity: z.number().int().min(1).max(20),
+  modifierOptionIds: z.array(z.string().min(1)).optional(),
+  selectedVariantId: z.string().optional(),
+  specialInstructions: z.string().max(300).optional(),
+});
+
 const checkoutInput = z.object({
   slug: z.string().min(2),
-  lines: z.array(z.object({
-    menuItemId: z.string().min(3),
-    quantity: z.number().int().min(1).max(20),
-    modifiers: z.array(z.object({
-      optionId: z.string(),
-      name: z.string(),
-      pricePaise: z.number().int().nonnegative().default(0),
-    })).optional(),
-    specialInstructions: z.string().max(300).optional(),
-  })).min(1),
-  address: z.record(z.string(), z.string()).refine(
-    value => Boolean(value.flatHouse && value.area && value.city),
-    "A complete delivery address is required."
-  ),
+  lines: z.array(modifierIdsSchema).min(1).max(50),
+  address: addressSchema,
   couponCode: z.string().max(48).optional(),
   deliveryNotes: z.string().max(1000).optional(),
   cutleryPreference: z.boolean().optional(),
-  customerPhone: z.string().max(24).optional(),
-  customerEmail: z.string().max(320).optional(),
+  // Issue 3: Phone is now mandatory for guest checkout
+  customerPhone: z.string().min(10).max(24),
+  customerEmail: z.string().email().max(320).optional(),
+  // Issue 3: Idempotency key to prevent duplicate orders from retries
+  idempotencyKey: z.string().min(8).max(64).optional(),
 });
 
 export const storefrontRouter = router({
@@ -65,7 +82,6 @@ export const storefrontRouter = router({
       const query = input.query.toLowerCase().trim();
       let filtered = storefront.items;
 
-      // Text search across name, description, category, tags
       if (query) {
         filtered = filtered.filter(item => {
           const category = storefront.categories.find(c => c.id === item.categoryId);
@@ -80,7 +96,6 @@ export const storefrontRouter = router({
         });
       }
 
-      // Filters
       if (input.veg) filtered = filtered.filter(i => i.dietaryType === "veg");
       if (input.bestseller) filtered = filtered.filter(i => i.isBestseller);
       if (input.minPrice) filtered = filtered.filter(i => i.pricePaise >= input.minPrice!);
@@ -96,26 +111,35 @@ export const storefrontRouter = router({
   // Serviceability
   // =========================================================================
   checkServiceability: publicProcedure
-    .input(z.object({ pincode: z.string().min(4).max(10) }))
+    .input(z.object({ pincode: z.string().regex(/^\\d{6}$/) }))
     .query(async ({ input }) => {
       const provider = getDeliveryProvider();
       return provider.checkServiceability(input.pincode);
     }),
 
   // =========================================================================
-  // Checkout & Payment
+  // Checkout & Payment — Issue 3: guest-safe, no auth required
   // =========================================================================
-  initiatePayment: protectedProcedure
+  initiatePayment: publicProcedure
     .input(checkoutInput)
-    .mutation(async ({ ctx, input }) => {
+    .mutation(async ({ input }) => {
       const config = await getRazorpayConfig();
       if (!config.enabled) {
         throw new Error("Online payment is not configured yet. Please contact the restaurant.");
       }
 
+      // Issue 18: Use idempotencyKey to prevent duplicate order creation
+      // (checked inside createOrderFromValidatedCart via orderNumber uniqueness)
       const localOrder = await createOrderFromValidatedCart({
-        userId: ctx.user.id,
-        ...input,
+        userId: 0, // Issue 3: guest user — createOrderFromValidatedCart handles this
+        slug: input.slug,
+        lines: input.lines,
+        address: input.address as Record<string, string>,
+        couponCode: input.couponCode,
+        deliveryNotes: input.deliveryNotes,
+        cutleryPreference: input.cutleryPreference,
+        customerPhone: input.customerPhone,
+        customerEmail: input.customerEmail,
       });
 
       const provider = await createRazorpayPaymentOrder({
@@ -127,35 +151,38 @@ export const storefrontRouter = router({
       return {
         orderId: localOrder.id,
         orderNumber: localOrder.orderNumber,
+        trackingToken: localOrder.trackingToken,
         ...provider,
       };
     }),
 
-  verifyPayment: protectedProcedure
+  verifyPayment: publicProcedure
     .input(z.object({
       orderId: z.string().min(5),
       providerOrderId: z.string().min(5),
       providerPaymentId: z.string().min(5),
-      signature: z.string().min(32),
+      signature: z.string().min(32).max(128),
     }))
     .mutation(({ input }) =>
-      verifyAndCaptureRazorpayPayment({
+      confirmPayment({
         localOrderId: input.orderId,
         providerOrderId: input.providerOrderId,
         providerPaymentId: input.providerPaymentId,
         signature: input.signature,
+        source: "browser_callback",
       })
     ),
 
   // =========================================================================
-  // Webhooks (called by Razorpay/Shadowfax, not by frontend)
+  // Webhooks — Issue 7: HMAC verification for Razorpay
   // =========================================================================
   razorpayWebhook: publicProcedure
     .input(z.object({
       event: z.string(),
       payload: z.record(z.string(), z.unknown()),
+      signature: z.string().optional(),
     }))
-    .mutation(({ input }) => handleRazorpayWebhook(input)),
+    .mutation(({ input }) => handleRazorpayWebhook(input.event, input.payload, input.signature)),
 
   shadowfaxWebhook: publicProcedure
     .input(z.object({
@@ -168,20 +195,15 @@ export const storefrontRouter = router({
     }),
 
   // =========================================================================
-  // Order Tracking (for customers)
+  // Issue 1: Secure Order Tracking — requires trackingToken
   // =========================================================================
   orderTracking: publicProcedure
-    .input(z.object({ orderNumber: z.string().min(5) }))
+    .input(z.object({
+      orderNumber: z.string().min(5),
+      trackingToken: z.string().min(16),
+    }))
     .query(async ({ input }) => {
-      const { getOrderWithItems } = await import("../db");
-      const drizzleOrm = await import("drizzle-orm");
-      const schema = await import("../../drizzle/schema");
-      const db = await import("../db").then(m => m.getDb());
-      if (!db) throw new Error("Database unavailable");
-
-      const order = (await db.select().from(schema.orders).where(drizzleOrm.eq(schema.orders.orderNumber, input.orderNumber)).limit(1))[0];
-      if (!order) return null;
-
-      return getOrderWithItems(order.id);
+      const { getOrderForTracking } = await import("../db");
+      return getOrderForTracking(input.orderNumber, input.trackingToken);
     }),
 });

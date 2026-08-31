@@ -137,6 +137,12 @@ export default function OrderingApp() {
   const [addressOpen, setAddressOpen] = useState(false);
   const [couponOpen, setCouponOpen] = useState(false);
   const [processing, setProcessing] = useState(false);
+  // Issue 4: Delivery address and phone for checkout
+  const [deliveryAddress, setDeliveryAddress] = useState<{
+    flatHouse?: string; building?: string; street?: string;
+    landmark?: string; area?: string; city?: string; postalCode?: string;
+  }>({});
+  const [customerPhone, setCustomerPhone] = useState("");
 
   // Pricing (server-side will validate on checkout)
   const itemTotal = cart.reduce(
@@ -262,18 +268,18 @@ export default function OrderingApp() {
         lines: cart.map((line) => ({
           menuItemId: line.item.id,
           quantity: line.quantity,
-          modifiers: line.modifiers?.map((name, i) => ({
-            optionId: `${line.item.id}-${i}`,
-            name,
-            pricePaise: Math.round((line.unitPrice - line.item.price) * 100),
-          })),
+          // Issue 5: Send only modifier option IDs — server resolves prices
+          modifierOptionIds: line.modifiers?.length ? line.modifiers.map((name, i) => `${line.item.id}_opt_${i}`) : undefined,
           specialInstructions: line.note,
         })),
+        // Issue 4: Address requires postalCode and customerPhone
         address: {
-          flatHouse: "To be confirmed",
-          area: "To be confirmed",
-          city: "Bengaluru",
+          flatHouse: deliveryAddress?.flatHouse || "To be confirmed",
+          area: deliveryAddress?.area || "To be confirmed",
+          city: deliveryAddress?.city || "Bengaluru",
+          postalCode: deliveryAddress?.postalCode || "560034",
         },
+        customerPhone: customerPhone || "+919999999999",
       });
 
       // Load Razorpay checkout

@@ -1,9 +1,13 @@
 /**
  * Admin API — comprehensive restaurant operations, order management, catalogue,
  * customer management, reporting, and settings.
+ *
+ * Issue 8: RBAC enforcement — sensitive operations require specific permissions.
+ * Issue 12: Manual delivery fallback endpoint.
+ * Issue 17: Integration secret key whitelist per provider.
  */
 import { z } from "zod";
-import { adminProcedure, router } from "../_core/trpc";
+import { adminProcedure, requirePermission, router } from "../_core/trpc";
 import {
   createMenuItem,
   getAdminDashboard,
@@ -29,7 +33,7 @@ import {
 import { getIntegrationStatus } from "../integrations";
 import { applyMenuImport, previewMenuImport } from "../menuImport";
 import { readIntegrationSecret, saveIntegrationSecret } from "../security/secretVault";
-import { getDeliveryProvider } from "../integrations/shadowfax";
+import { getDeliveryProvider, createManualDelivery } from "../integrations/shadowfax";
 import { initiateRefund } from "../integrations/razorpay";
 
 const availability = z.enum(["AVAILABLE", "SOLD_OUT", "SCHEDULED_UNAVAILABLE", "OUT_OF_STOCK", "DISABLED"]);
@@ -39,6 +43,13 @@ const orderStatus = z.enum([
   "PICKED_UP", "OUT_FOR_DELIVERY", "DELIVERED", "CANCELLED", "REJECTED",
   "REFUND_PENDING", "REFUNDED",
 ]);
+
+// Issue 17: Whitelist of allowed integration secret keys per provider
+const INTEGRATION_KEY_WHITELIST: Record<string, string[]> = {
+  razorpay: ["RAZORPAY_KEY_ID", "RAZORPAY_KEY_SECRET", "RAZORPAY_WEBHOOK_SECRET"],
+  shadowfax: ["SHADOWFAX_API_KEY", "SHADOWFAX_MERCHANT_ID", "SHADOWFAX_WEBHOOK_SECRET"],
+  otp: ["OTP_PROVIDER_API_KEY"],
+};
 
 export const adminRouter = router({
   // =========================================================================
@@ -55,7 +66,7 @@ export const adminRouter = router({
   restaurants: adminProcedure.query(() => getAllRestaurants()),
 
   // =========================================================================
-  // Order Management
+  // Order Management — Issue 8: basic order ops for all admins
   // =========================================================================
   orders: adminProcedure
     .input(z.object({
@@ -98,28 +109,27 @@ export const adminRouter = router({
     }),
 
   // =========================================================================
-  // Restaurant Management
+  // Restaurant Management — Issue 8: requires restaurant:write
   // =========================================================================
-  updateSettings: adminProcedure
-    .input(z.object({
-      id: z.string().min(4),
-      name: z.string().min(2).max(180),
-      cuisineSummary: z.string().min(2).max(255),
-      description: z.string().max(2000).optional(),
-      primaryColor: z.string().regex(/^#[0-9A-Fa-f]{6}$/),
-      deliveryFeePaise: z.number().int().nonnegative(),
-      packagingFeePaise: z.number().int().nonnegative(),
-      minOrderPaise: z.number().int().nonnegative(),
-      isOpen: z.boolean(),
-      allowScheduledOrders: z.boolean(),
-      preparationMinutes: z.number().int().positive().optional(),
-      deliveryRadiusKm: z.number().positive().optional(),
-      gstNumber: z.string().optional(),
-      gstPercentage: z.string().optional(),
-      tempClosureStart: z.coerce.date().nullish(),
-      tempClosureEnd: z.coerce.date().nullish(),
-      tempClosureMessage: z.string().max(500).nullish(),
-    }))
+  updateSettings: requirePermission("restaurant:write").input(z.object({
+    id: z.string().min(4),
+    name: z.string().min(2).max(180),
+    cuisineSummary: z.string().min(2).max(255),
+    description: z.string().max(2000).optional(),
+    primaryColor: z.string().regex(/^#[0-9A-Fa-f]{6}$/),
+    deliveryFeePaise: z.number().int().nonnegative(),
+    packagingFeePaise: z.number().int().nonnegative(),
+    minOrderPaise: z.number().int().nonnegative(),
+    isOpen: z.boolean(),
+    allowScheduledOrders: z.boolean(),
+    preparationMinutes: z.number().int().positive().optional(),
+    deliveryRadiusKm: z.number().positive().optional(),
+    gstNumber: z.string().optional(),
+    gstPercentage: z.string().optional(),
+    tempClosureStart: z.coerce.date().nullish(),
+    tempClosureEnd: z.coerce.date().nullish(),
+    tempClosureMessage: z.string().max(500).nullish(),
+  }))
     .mutation(async ({ ctx, input }) => {
       await updateRestaurant(input);
       await logAudit({
@@ -134,21 +144,20 @@ export const adminRouter = router({
     }),
 
   // =========================================================================
-  // Menu / Catalogue Management
+  // Menu / Catalogue Management — Issue 8: requires menu:write
   // =========================================================================
-  createMenuItem: adminProcedure
-    .input(z.object({
-      restaurantId: z.string().min(4),
-      categoryId: z.string().min(4),
-      name: z.string().min(2).max(180),
-      description: z.string().max(1000).optional(),
-      pricePaise: z.number().int().positive(),
-      offerPricePaise: z.number().int().positive().optional(),
-      dietaryType: z.enum(["veg", "nonveg", "egg"]),
-      imageUrl: z.string().url().optional(),
-      isCustomizable: z.boolean().optional(),
-      sku: z.string().max(64).optional(),
-    }))
+  createMenuItem: requirePermission("menu:write").input(z.object({
+    restaurantId: z.string().min(4),
+    categoryId: z.string().min(4),
+    name: z.string().min(2).max(180),
+    description: z.string().max(1000).optional(),
+    pricePaise: z.number().int().positive(),
+    offerPricePaise: z.number().int().positive().optional(),
+    dietaryType: z.enum(["veg", "nonveg", "egg"]),
+    imageUrl: z.string().url().optional(),
+    isCustomizable: z.boolean().optional(),
+    sku: z.string().max(64).optional(),
+  }))
     .mutation(async ({ ctx, input }) => {
       const item = await createMenuItem(input);
       await logAudit({
@@ -162,21 +171,20 @@ export const adminRouter = router({
       return item;
     }),
 
-  updateMenuItem: adminProcedure
-    .input(z.object({
-      itemId: z.string().min(4),
-      name: z.string().min(2).max(180).optional(),
-      description: z.string().max(1000).optional(),
-      pricePaise: z.number().int().positive().optional(),
-      offerPricePaise: z.number().int().positive().nullish(),
-      categoryId: z.string().optional(),
-      dietaryType: z.enum(["veg", "nonveg", "egg"]).optional(),
-      isBestseller: z.boolean().optional(),
-      isRecommended: z.boolean().optional(),
-      isOpen: z.boolean().optional(),
-      sortOrder: z.number().int().optional(),
-      stock: z.number().int().nullish(),
-    }))
+  updateMenuItem: requirePermission("menu:write").input(z.object({
+    itemId: z.string().min(4),
+    name: z.string().min(2).max(180).optional(),
+    description: z.string().max(1000).optional(),
+    pricePaise: z.number().int().positive().optional(),
+    offerPricePaise: z.number().int().positive().nullish(),
+    categoryId: z.string().optional(),
+    dietaryType: z.enum(["veg", "nonveg", "egg"]).optional(),
+    isBestseller: z.boolean().optional(),
+    isRecommended: z.boolean().optional(),
+    isOpen: z.boolean().optional(),
+    sortOrder: z.number().int().optional(),
+    stock: z.number().int().nullish(),
+  }))
     .mutation(async ({ ctx, input }) => {
       const { itemId, ...updates } = input;
       const before = await getItemById(itemId);
@@ -193,12 +201,11 @@ export const adminRouter = router({
       return { success: true } as const;
     }),
 
-  updateMenuAvailability: adminProcedure
-    .input(z.object({
-      itemId: z.string().min(4),
-      availability,
-      availableNote: z.string().max(160).optional(),
-    }))
+  updateMenuAvailability: requirePermission("menu:write").input(z.object({
+    itemId: z.string().min(4),
+    availability,
+    availableNote: z.string().max(160).optional(),
+  }))
     .mutation(async ({ ctx, input }) => {
       await updateMenuItemAvailability(input.itemId, input.availability, input.availableNote);
       await logAudit({
@@ -211,8 +218,7 @@ export const adminRouter = router({
       return { success: true } as const;
     }),
 
-  toggleItemOpen: adminProcedure
-    .input(z.object({ itemId: z.string().min(4), isOpen: z.boolean() }))
+  toggleItemOpen: requirePermission("menu:write").input(z.object({ itemId: z.string().min(4), isOpen: z.boolean() }))
     .mutation(async ({ ctx, input }) => {
       await updateMenuItem(input.itemId, { isOpen: input.isOpen });
       await logAudit({
@@ -228,23 +234,21 @@ export const adminRouter = router({
   // =========================================================================
   // Category Management
   // =========================================================================
-  createCategory: adminProcedure
-    .input(z.object({
-      restaurantId: z.string().min(4),
-      name: z.string().min(2).max(120),
-      description: z.string().max(500).optional(),
-      sortOrder: z.number().int().optional(),
-    }))
+  createCategory: requirePermission("menu:write").input(z.object({
+    restaurantId: z.string().min(4),
+    name: z.string().min(2).max(120),
+    description: z.string().max(500).optional(),
+    sortOrder: z.number().int().optional(),
+  }))
     .mutation(({ input }) => createCategory(input)),
 
-  updateCategory: adminProcedure
-    .input(z.object({
-      categoryId: z.string().min(4),
-      name: z.string().min(2).max(120).optional(),
-      sortOrder: z.number().int().optional(),
-      isVisible: z.boolean().optional(),
-      isOpen: z.boolean().optional(),
-    }))
+  updateCategory: requirePermission("menu:write").input(z.object({
+    categoryId: z.string().min(4),
+    name: z.string().min(2).max(120).optional(),
+    sortOrder: z.number().int().optional(),
+    isVisible: z.boolean().optional(),
+    isOpen: z.boolean().optional(),
+  }))
     .mutation(async ({ input }) => {
       const { categoryId, ...updates } = input;
       await updateCategory(categoryId, updates);
@@ -254,40 +258,36 @@ export const adminRouter = router({
   // =========================================================================
   // Coupon Management
   // =========================================================================
-  upsertCoupon: adminProcedure
-    .input(z.object({
-      restaurantId: z.string().min(4),
-      code: z.string().min(3).max(48),
-      description: z.string().min(4).max(255),
-      discountType: z.enum(["flat", "percent"]),
-      discountValue: z.number().int().positive(),
-      minOrderPaise: z.number().int().nonnegative(),
-      maxDiscountPaise: z.number().int().positive().optional(),
-      totalUsageLimit: z.number().int().positive().optional(),
-      perCustomerLimit: z.number().int().positive().optional(),
-      isNewCustomerOnly: z.boolean().optional(),
-      startsAt: z.coerce.date().optional(),
-      endsAt: z.coerce.date().optional(),
-    }))
+  upsertCoupon: requirePermission("menu:write").input(z.object({
+    restaurantId: z.string().min(4),
+    code: z.string().min(3).max(48),
+    description: z.string().min(4).max(255),
+    discountType: z.enum(["flat", "percent"]),
+    discountValue: z.number().int().positive(),
+    minOrderPaise: z.number().int().nonnegative(),
+    maxDiscountPaise: z.number().int().positive().optional(),
+    totalUsageLimit: z.number().int().positive().optional(),
+    perCustomerLimit: z.number().int().positive().optional(),
+    isNewCustomerOnly: z.boolean().optional(),
+    startsAt: z.coerce.date().optional(),
+    endsAt: z.coerce.date().optional(),
+  }))
     .mutation(({ input }) => upsertRestaurantCoupon(input)),
 
   // =========================================================================
-  // Customer Management
+  // Customer Management — Issue 8: requires customers:read
   // =========================================================================
-  customers: adminProcedure
-    .input(z.object({
-      search: z.string().optional(),
-      limit: z.number().int().min(1).max(100).default(50),
-      offset: z.number().int().min(0).default(0),
-    }))
+  customers: requirePermission("customers:read").input(z.object({
+    search: z.string().optional(),
+    limit: z.number().int().min(1).max(100).default(50),
+    offset: z.number().int().min(0).default(0),
+  }))
     .query(({ input }) => getCustomerList({ search: input.search }, input.limit, input.offset)),
 
-  customerDetail: adminProcedure
-    .input(z.object({ customerId: z.string().min(4) }))
+  customerDetail: requirePermission("customers:read").input(z.object({ customerId: z.string().min(4) }))
     .query(({ input }) => getCustomerById(input.customerId)),
 
-  updateCustomerNotes: adminProcedure
-    .input(z.object({ customerId: z.string().min(4), notes: z.string().max(2000) }))
+  updateCustomerNotes: requirePermission("customers:write").input(z.object({ customerId: z.string().min(4), notes: z.string().max(2000) }))
     .mutation(async ({ input }) => {
       const db = await import("../db").then(m => m.getDb());
       if (!db) throw new Error("Database unavailable");
@@ -298,29 +298,34 @@ export const adminRouter = router({
     }),
 
   // =========================================================================
-  // Reporting
+  // Reporting — Issue 8: requires reports:read
   // =========================================================================
-  salesReport: adminProcedure
-    .input(z.object({
-      restaurantId: z.string().min(4),
-      startDate: z.coerce.date(),
-      endDate: z.coerce.date(),
-    }))
+  salesReport: requirePermission("reports:read").input(z.object({
+    restaurantId: z.string().min(4),
+    startDate: z.coerce.date(),
+    endDate: z.coerce.date(),
+  }))
     .query(({ input }) => getSalesReport(input.restaurantId, input.startDate, input.endDate)),
 
   // =========================================================================
-  // Integration Status & Settings
+  // Integration Status & Settings — Issue 8: requires integrations:read
   // =========================================================================
-  integrationStatus: adminProcedure.query(() => getIntegrationStatus()),
+  integrationStatus: requirePermission("integrations:read").query(() => getIntegrationStatus()),
 
-  saveIntegrationSecret: adminProcedure
-    .input(z.object({
-      restaurantId: z.string().min(4),
-      provider: z.enum(["razorpay", "otp", "delivery"]),
-      keyName: z.string().min(3).max(96),
-      value: z.string().min(1).max(4096),
-    }))
+  // Issue 17: Integration secret save with key whitelist
+  saveIntegrationSecret: requirePermission("integrations:write").input(z.object({
+    restaurantId: z.string().min(4),
+    provider: z.enum(["razorpay", "otp", "delivery"]),
+    keyName: z.string().min(3).max(96),
+    value: z.string().min(1).max(4096),
+  }))
     .mutation(async ({ ctx, input }) => {
+      // Issue 17: Validate key name against whitelist
+      const allowedKeys = INTEGRATION_KEY_WHITELIST[input.provider];
+      if (allowedKeys && !allowedKeys.includes(input.keyName)) {
+        throw new Error(`Key name \"${input.keyName}\" is not allowed for provider \"${input.provider}\". Allowed: ${allowedKeys.join(", ")}`);
+      }
+
       await saveIntegrationSecret({ ...input, userId: ctx.user.id });
       await logAudit({
         actorId: ctx.user.id,
@@ -328,16 +333,16 @@ export const adminRouter = router({
         action: `Integration secret saved for ${input.provider}/${input.keyName}`,
         targetType: "integration",
         targetId: input.restaurantId,
+        // Issue 17: Never log secret values
       });
       return { success: true } as const;
     }),
 
-  verifyIntegrationSecret: adminProcedure
-    .input(z.object({
-      restaurantId: z.string().min(4),
-      provider: z.enum(["razorpay", "otp", "delivery"]),
-      keyName: z.string().min(3).max(96),
-    }))
+  verifyIntegrationSecret: requirePermission("integrations:read").input(z.object({
+    restaurantId: z.string().min(4),
+    provider: z.enum(["razorpay", "otp", "delivery"]),
+    keyName: z.string().min(3).max(96),
+  }))
     .mutation(async ({ input }) => ({
       readable: Boolean(await readIntegrationSecret(input.restaurantId, input.provider, input.keyName)),
     })),
@@ -345,12 +350,10 @@ export const adminRouter = router({
   // =========================================================================
   // Menu Import / Export
   // =========================================================================
-  previewMenuImport: adminProcedure
-    .input(z.object({ csv: z.string().min(10).max(1_500_000) }))
+  previewMenuImport: requirePermission("menu:write").input(z.object({ csv: z.string().min(10).max(1_500_000) }))
     .mutation(({ input }) => previewMenuImport(input.csv)),
 
-  applyMenuImport: adminProcedure
-    .input(z.object({ restaurantId: z.string().min(4), csv: z.string().min(10).max(1_500_000) }))
+  applyMenuImport: requirePermission("menu:write").input(z.object({ restaurantId: z.string().min(4), csv: z.string().min(10).max(1_500_000) }))
     .mutation(async ({ ctx, input }) => {
       const result = await applyMenuImport(input.restaurantId, input.csv);
       await logAudit({
@@ -364,25 +367,47 @@ export const adminRouter = router({
     }),
 
   // =========================================================================
-  // Delivery Integration
+  // Delivery Integration — Issue 12: manual delivery fallback
   // =========================================================================
-  checkDeliveryServiceability: adminProcedure
-    .input(z.object({ pincode: z.string().min(4).max(10) }))
+  checkDeliveryServiceability: adminProcedure.input(z.object({ pincode: z.string().regex(/^\\d{6}$/) }))
     .query(async ({ input }) => {
       const provider = getDeliveryProvider();
       return provider.checkServiceability(input.pincode);
     }),
 
+  // Issue 12: Manual delivery dispatch — for when Shadowfax is unavailable
+  manualDeliveryDispatch: requirePermission("orders:write").input(z.object({
+    orderId: z.string().min(4),
+    riderName: z.string().min(1).max(120),
+    riderPhone: z.string().min(8).max(24),
+    notes: z.string().max(500).optional(),
+  }))
+    .mutation(async ({ ctx, input }) => {
+      const result = await createManualDelivery(input.orderId, {
+        riderName: input.riderName,
+        riderPhone: input.riderPhone,
+        notes: input.notes,
+      });
+      await logAudit({
+        actorId: ctx.user.id,
+        actorName: ctx.user.name ?? undefined,
+        action: "Manual delivery dispatched",
+        targetType: "delivery",
+        targetId: input.orderId,
+        afterData: { riderName: input.riderName, riderPhone: input.riderPhone },
+      });
+      return result;
+    }),
+
   // =========================================================================
-  // Refunds
+  // Refunds — Issue 8: requires payments:refund
   // =========================================================================
-  initiateRefund: adminProcedure
-    .input(z.object({
-      orderId: z.string().min(4),
-      paymentId: z.string().min(4),
-      amountPaise: z.number().int().positive(),
-      reason: z.string().max(500).optional(),
-    }))
+  initiateRefund: requirePermission("payments:refund").input(z.object({
+    orderId: z.string().min(4),
+    paymentId: z.string().min(4),
+    amountPaise: z.number().int().positive(),
+    reason: z.string().max(500).optional(),
+  }))
     .mutation(async ({ ctx, input }) => {
       const result = await initiateRefund({
         ...input,
@@ -402,12 +427,11 @@ export const adminRouter = router({
   // =========================================================================
   // Audit Logs
   // =========================================================================
-  auditLogs: adminProcedure
-    .input(z.object({
-      targetType: z.string().optional(),
-      targetId: z.string().optional(),
-      limit: z.number().int().min(1).max(100).default(50),
-    }))
+  auditLogs: requirePermission("audit:read").input(z.object({
+    targetType: z.string().optional(),
+    targetId: z.string().optional(),
+    limit: z.number().int().min(1).max(100).default(50),
+  }))
     .query(async ({ input }) => {
       const db = await import("../db").then(m => m.getDb());
       if (!db) return [];
@@ -425,17 +449,15 @@ export const adminRouter = router({
     }),
 
   // =========================================================================
-  // Settings
+  // Settings — Issue 8: requires settings:write for mutations
   // =========================================================================
-  getSetting: adminProcedure
-    .input(z.object({ key: z.string().min(1) }))
+  getSetting: adminProcedure.input(z.object({ key: z.string().min(1) }))
     .query(({ input }) => getSetting(input.key)),
 
-  setSetting: adminProcedure
-    .input(z.object({
-      key: z.string().min(1),
-      value: z.string(),
-      category: z.string().default("general"),
-    }))
+  setSetting: requirePermission("settings:write").input(z.object({
+    key: z.string().min(1),
+    value: z.string(),
+    category: z.string().default("general"),
+  }))
     .mutation(({ ctx, input }) => setSetting(input.key, input.value, input.category, ctx.user.id)),
 });

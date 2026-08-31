@@ -374,6 +374,7 @@ export const cartItems = pgTable("cart_items", {
 export const orders = pgTable("orders", {
   id: varchar("id", { length: 36 }).primaryKey(),
   orderNumber: varchar("order_number", { length: 32 }).notNull().unique(),
+  trackingToken: varchar("tracking_token", { length: 36 }).notNull().unique(),
   restaurantId: varchar("restaurant_id", { length: 36 }).notNull().references(() => restaurants.id),
   outletId: varchar("outlet_id", { length: 36 }).notNull().references(() => outlets.id),
   customerId: varchar("customer_id", { length: 36 }).references(() => customerProfiles.id),
@@ -547,7 +548,7 @@ export const webhookEvents = pgTable("webhook_events", {
   id: varchar("id", { length: 36 }).primaryKey(),
   provider: varchar("provider", { length: 64 }).notNull(),
   eventType: varchar("event_type", { length: 120 }).notNull(),
-  externalId: varchar("external_id", { length: 120 }),
+  externalId: varchar("external_id", { length: 120 }).notNull(),
   payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
   processed: boolean("processed").notNull().default(false),
   processingError: varchar("processing_error", { length: 1000 }),
