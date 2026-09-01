@@ -3,7 +3,7 @@ import { adminProcedure, router } from "../_core/trpc";
 
 export const kdsRouter = router({
   getActiveOrders: adminProcedure.input(z.object({
-    slug: z.string().optional(),
+    slug: z.string().min(2),
     station: z.string().optional(),
   }))
     .query(async ({ input }) => {
@@ -14,15 +14,14 @@ export const kdsRouter = router({
 
       const activeStatuses = ["PLACED", "RESTAURANT_ACCEPTED", "PREPARING", "READY_FOR_PICKUP"] as const;
 
-      let restaurantId: string | null = null;
-      if (input.slug) {
-        const { getRestaurantBySlug } = await import("../db");
-        const rest = await getRestaurantBySlug(input.slug);
-        restaurantId = rest?.id ?? null;
-      }
+      const { getRestaurantBySlug } = await import("../db");
+      const rest = await getRestaurantBySlug(input.slug);
+      if (!rest?.id) return [];
 
-      const conditions = [inArray(orders.status, [...activeStatuses])];
-      if (restaurantId) conditions.push(eq(orders.restaurantId, restaurantId));
+      const conditions = [
+        inArray(orders.status, [...activeStatuses]),
+        eq(orders.restaurantId, rest.id),
+      ];
 
       const activeOrders = await db.select().from(orders)
         .where(and(...conditions))

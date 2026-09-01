@@ -13,19 +13,18 @@ interface RateLimitEntry {
 const phoneSendLimits = new Map<string, RateLimitEntry>();
 const phoneVerifyLimits = new Map<string, RateLimitEntry>();
 const ipLimits = new Map<string, RateLimitEntry>();
+const loginEmailLimits = new Map<string, RateLimitEntry>();
+const loginIpLimits = new Map<string, RateLimitEntry>();
+const registerIpLimits = new Map<string, RateLimitEntry>();
 
 // Cleanup old entries every 5 minutes
 setInterval(() => {
   const now = Date.now();
-  const maxAge = 10 * 60 * 1000; // 10 minutes
-  for (const [key, entry] of Array.from(phoneSendLimits.entries())) {
-    if (now - entry.windowStart > maxAge) phoneSendLimits.delete(key);
-  }
-  for (const [key, entry] of Array.from(phoneVerifyLimits.entries())) {
-    if (now - entry.windowStart > maxAge) phoneVerifyLimits.delete(key);
-  }
-  for (const [key, entry] of Array.from(ipLimits.entries())) {
-    if (now - entry.windowStart > maxAge) ipLimits.delete(key);
+  const maxAge = 60 * 60 * 1000; // 1 hour
+  for (const store of [phoneSendLimits, phoneVerifyLimits, ipLimits, loginEmailLimits, loginIpLimits, registerIpLimits]) {
+    for (const [key, entry] of Array.from(store.entries())) {
+      if (now - entry.windowStart > maxAge) store.delete(key);
+    }
   }
 }, 5 * 60 * 1000);
 
@@ -70,4 +69,19 @@ export function checkPhoneVerifyLimit(phone: string) {
 /** Check IP rate limit: 20 OTP requests per 10 minutes per IP */
 export function checkIpOtpLimit(ip: string) {
   return checkRateLimit(`ip:${ip}`, 20, 10 * 60 * 1000, ipLimits);
+}
+
+/** Check per-email login rate limit: 5 attempts per 15 minutes */
+export function checkLoginEmailLimit(email: string) {
+  return checkRateLimit(`login-email:${email.toLowerCase()}`, 5, 15 * 60 * 1000, loginEmailLimits);
+}
+
+/** Check per-IP login rate limit: 20 attempts per 15 minutes */
+export function checkLoginIpLimit(ip: string) {
+  return checkRateLimit(`login-ip:${ip}`, 20, 15 * 60 * 1000, loginIpLimits);
+}
+
+/** Check per-IP registration rate limit: 3 registrations per hour */
+export function checkRegisterIpLimit(ip: string) {
+  return checkRateLimit(`register-ip:${ip}`, 3, 60 * 60 * 1000, registerIpLimits);
 }

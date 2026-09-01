@@ -22,6 +22,7 @@ import {
   uniqueIndex,
   varchar,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 
 // =============================================================================
 // ENUMS
@@ -83,7 +84,9 @@ export const users = pgTable("users", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
   lastSignedIn: timestamp("last_signed_in").defaultNow().notNull(),
-});
+}, (t) => [
+  uniqueIndex("users_email_unique_idx").on(t.email).where(sql`${t.email} IS NOT NULL`),
+]);
 
 // =============================================================================
 // Customer Phone Verification (OTP)
@@ -201,6 +204,9 @@ export const restaurants = pgTable("restaurants", {
   tempClosureStart: timestamp("temp_closure_start"),
   tempClosureEnd: timestamp("temp_closure_end"),
   tempClosureMessage: varchar("temp_closure_message", { length: 500 }),
+  razorpayAccountId: varchar("razorpay_account_id", { length: 64 }),
+  platformFeePercent: numeric("platform_fee_percent", { precision: 5, scale: 2 }).default("0"),
+  razorpayAccountStatus: varchar("razorpay_account_status", { length: 32 }).default("not_linked"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
@@ -491,6 +497,8 @@ export const payments = pgTable("payments", {
   method: varchar("method", { length: 64 }),
   failureReason: varchar("failure_reason", { length: 500 }),
   providerPayload: jsonb("provider_payload").$type<Record<string, unknown>>(),
+  transferAmountPaise: integer("transfer_amount_paise"),
+  platformFeePaise: integer("platform_fee_paise"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (t) => [index("payment_order_idx").on(t.orderId)]);

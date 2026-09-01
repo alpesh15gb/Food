@@ -1,10 +1,20 @@
 /** Typed environment variable access with sensible defaults for development. */
+
+const isProduction = process.env.NODE_ENV === "production";
+
+if (isProduction && !process.env.JWT_SECRET) {
+  throw new Error("FATAL: JWT_SECRET must be set in production.");
+}
+if (isProduction && !process.env.COOKIE_SECRET) {
+  throw new Error("FATAL: COOKIE_SECRET must be set in production.");
+}
+
 export const ENV = {
   nodeEnv: process.env.NODE_ENV ?? "development",
   port: parseInt(process.env.PORT || "3000"),
   databaseUrl: process.env.DATABASE_URL ?? "",
-  jwtSecret: process.env.JWT_SECRET ?? "dev-jwt-secret-change-in-production",
-  cookieSecret: process.env.COOKIE_SECRET ?? "dev-cookie-secret-change-in-production",
+  jwtSecret: process.env.JWT_SECRET ?? (isProduction ? "" : "dev-jwt-secret-not-for-production-use"),
+  cookieSecret: process.env.COOKIE_SECRET ?? (isProduction ? "" : "dev-cookie-secret-not-for-production-use"),
   appId: process.env.APP_ID ?? "supperclub-direct",
   ownerOpenId: process.env.OWNER_OPEN_ID ?? "",
   oAuthServerUrl: process.env.OAUTH_SERVER_URL ?? "",

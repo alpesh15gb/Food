@@ -19,6 +19,7 @@ import { analyticsRouter } from "./routers/analytics";
 import { loyaltyRouter } from "./routers/loyalty";
 import { isPlausibleLocalAdminToken, normalizeLocalAdminToken } from "./auth/localAdmin";
 import { hashPassword, verifyPassword } from "./security/passwordHash";
+import { checkLoginEmailLimit, checkLoginIpLimit, checkRegisterIpLimit } from "./security/rateLimit";
 import { users, restaurantMembers } from "../drizzle/schema";
 import { eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
@@ -74,6 +75,12 @@ export const appRouter = router({
         address: z.string().min(5).max(500),
       }))
       .mutation(async ({ ctx, input }) => {
+        const clientIp = (ctx.req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() ?? ctx.req.socket.remoteAddress ?? "unknown";
+        const regLimit = checkRegisterIpLimit(clientIp);
+        if (!regLimit.allowed) {
+          throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: `Too many registration attempts. Try again in ${regLimit.retryAfterSeconds} seconds.` });
+        }
+
         const db = await getDb();
         if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
 
@@ -86,15 +93,22 @@ export const appRouter = router({
         const pwHash = await hashPassword(input.password);
         const openId = `self_${nanoid(16)}`;
 
-        await db.insert(users).values({
-          openId,
-          name: input.name,
-          email: input.email,
-          passwordHash: pwHash,
-          loginMethod: "email",
-          role: "admin",
-          lastSignedIn: new Date(),
-        });
+        try {
+          await db.insert(users).values({
+            openId,
+            name: input.name,
+            email: input.email,
+            passwordHash: pwHash,
+            loginMethod: "email",
+            role: "admin",
+            lastSignedIn: new Date(),
+          });
+        } catch (err: unknown) {
+          if (err instanceof Error && err.message.includes("unique") || String(err).includes("23505")) {
+            throw new TRPCError({ code: "CONFLICT", message: "An account with this email already exists." });
+          }
+          throw err;
+        }
 
         const restaurantId = await createRestaurant({
           name: input.restaurantName,
@@ -128,6 +142,16 @@ export const appRouter = router({
         password: z.string().min(1),
       }))
       .mutation(async ({ ctx, input }) => {
+        const clientIp = (ctx.req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() ?? ctx.req.socket.remoteAddress ?? "unknown";
+        const ipLimit = checkLoginIpLimit(clientIp);
+        if (!ipLimit.allowed) {
+          throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: `Too many login attempts. Try again in ${ipLimit.retryAfterSeconds} seconds.` });
+        }
+        const emailLimit = checkLoginEmailLimit(input.email);
+        if (!emailLimit.allowed) {
+          throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: `Too many login attempts for this email. Try again in ${emailLimit.retryAfterSeconds} seconds.` });
+        }
+
         const db = await getDb();
         if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
 

@@ -305,6 +305,7 @@ export const storefrontRouter = router({
         localOrderId: localOrder.id,
         orderNumber: localOrder.orderNumber,
         amountPaise: localOrder.totalPaise,
+        restaurantId: localOrder.restaurantId,
       });
 
       return {

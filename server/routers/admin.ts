@@ -35,7 +35,7 @@ import { getIntegrationStatus } from "../integrations";
 import { applyMenuImport, previewMenuImport } from "../menuImport";
 import { readIntegrationSecret, saveIntegrationSecret } from "../security/secretVault";
 import { getDeliveryProvider, createManualDelivery } from "../integrations/shadowfax";
-import { initiateRefund } from "../integrations/razorpay";
+import { initiateRefund, createRazorpayLinkedAccount } from "../integrations/razorpay";
 import { orders, deliveries, outlets, restaurants, deliveryStatusHistory, orderStatusHistory } from "../../drizzle/schema";
 import { getDb } from "../db";
 import { nanoid } from "nanoid";
@@ -358,14 +358,15 @@ export const adminRouter = router({
   // Customer Management — Issue 8: requires customers:read
   // =========================================================================
   customers: requirePermission("customers:read").input(z.object({
+    restaurantId: z.string().min(4),
     search: z.string().optional(),
     limit: z.number().int().min(1).max(100).default(50),
     offset: z.number().int().min(0).default(0),
   }))
-    .query(({ input }) => getCustomerList({ search: input.search }, input.limit, input.offset)),
+    .query(({ input }) => getCustomerList({ search: input.search, restaurantId: input.restaurantId }, input.limit, input.offset)),
 
-  customerDetail: requirePermission("customers:read").input(z.object({ customerId: z.string().min(4) }))
-    .query(({ input }) => getCustomerById(input.customerId)),
+  customerDetail: requirePermission("customers:read").input(z.object({ customerId: z.string().min(4), restaurantId: z.string().min(4) }))
+    .query(({ input }) => getCustomerById(input.customerId, input.restaurantId)),
 
   updateCustomerNotes: requirePermission("customers:write").input(z.object({ customerId: z.string().min(4), notes: z.string().max(2000) }))
     .mutation(async ({ ctx, input }) => {
@@ -446,6 +447,93 @@ export const adminRouter = router({
     .mutation(async ({ input }) => ({
       readable: Boolean(await readIntegrationSecret(input.restaurantId, input.provider, input.keyName)),
     })),
+
+  // =========================================================================
+  // Razorpay Route — Split Settlement
+  // =========================================================================
+  setupRazorpayRoute: requirePermission("integrations:write").input(z.object({
+    restaurantId: z.string().min(4),
+    contactEmail: z.string().email(),
+    contactPhone: z.string().min(10),
+    legalBusinessName: z.string().max(180).optional(),
+    pan: z.string().max(20).optional(),
+    gstin: z.string().max(20).optional(),
+  }))
+    .mutation(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database not available." });
+
+      const restaurant = (await db.select().from(restaurants).where(eq(restaurants.id, input.restaurantId)).limit(1))[0];
+      if (!restaurant) throw new TRPCError({ code: "NOT_FOUND", message: "Restaurant not found." });
+
+      const result = await createRazorpayLinkedAccount({
+        restaurantId: input.restaurantId,
+        restaurantName: restaurant.name,
+        contactEmail: input.contactEmail,
+        contactPhone: input.contactPhone,
+        legalBusinessName: input.legalBusinessName,
+        pan: input.pan,
+        gstin: input.gstin,
+      });
+
+      await logAudit({
+        actorId: ctx.user.id,
+        actorName: ctx.user.name ?? undefined,
+        action: `Razorpay Route account linked: ${result.accountId}`,
+        targetType: "integration",
+        targetId: input.restaurantId,
+        restaurantId: input.restaurantId,
+      });
+
+      return { accountId: result.accountId, status: "active" as const };
+    }),
+
+  getRazorpayRouteStatus: requirePermission("integrations:read").input(z.object({
+    restaurantId: z.string().min(4),
+  }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database not available." });
+
+      const restaurant = (await db.select({
+        razorpayAccountId: restaurants.razorpayAccountId,
+        razorpayAccountStatus: restaurants.razorpayAccountStatus,
+        platformFeePercent: restaurants.platformFeePercent,
+      }).from(restaurants).where(eq(restaurants.id, input.restaurantId)).limit(1))[0];
+
+      if (!restaurant) throw new TRPCError({ code: "NOT_FOUND", message: "Restaurant not found." });
+
+      return {
+        accountId: restaurant.razorpayAccountId,
+        status: restaurant.razorpayAccountStatus ?? "not_linked",
+        platformFeePercent: parseFloat(restaurant.platformFeePercent ?? "0"),
+      };
+    }),
+
+  updatePlatformFee: requirePermission("integrations:write").input(z.object({
+    restaurantId: z.string().min(4),
+    percent: z.number().min(0).max(100),
+  }))
+    .mutation(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database not available." });
+
+      await db
+        .update(restaurants)
+        .set({ platformFeePercent: String(input.percent) })
+        .where(eq(restaurants.id, input.restaurantId));
+
+      await logAudit({
+        actorId: ctx.user.id,
+        actorName: ctx.user.name ?? undefined,
+        action: `Platform fee updated to ${input.percent}%`,
+        targetType: "settings",
+        targetId: input.restaurantId,
+        restaurantId: input.restaurantId,
+      });
+
+      return { success: true, percent: input.percent };
+    }),
 
   // =========================================================================
   // Menu Import / Export

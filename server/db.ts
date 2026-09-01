@@ -817,6 +817,7 @@ export async function createOrderFromValidatedCart(args: {
     id: orderId,
     orderNumber,
     trackingToken,
+    restaurantId: storefront.restaurant.id,
     ...finalQuote,
     estimatedMinutes: selectedOutlet.preparationMinutes + 15,
   };

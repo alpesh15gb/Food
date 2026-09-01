@@ -14,8 +14,8 @@
  */
 
 import { createHmac, timingSafeEqual } from "node:crypto";
-import { eq, and } from "drizzle-orm";
-import { orderStatusHistory, orders, payments, refunds, webhookEvents } from "../../drizzle/schema";
+import { eq, and, sql } from "drizzle-orm";
+import { orderStatusHistory, orders, payments, refunds, webhookEvents, restaurants } from "../../drizzle/schema";
 import { getDb } from "../db";
 import { readIntegrationSecret } from "../security/secretVault";
 import { nanoid } from "nanoid";
@@ -56,25 +56,106 @@ export async function getRazorpayConfig(restaurantId?: string) {
   };
 }
 
+export async function createRazorpayLinkedAccount(input: {
+  restaurantId: string;
+  restaurantName: string;
+  contactEmail: string;
+  contactPhone: string;
+  legalBusinessName?: string;
+  pan?: string;
+  gstin?: string;
+}): Promise<{ accountId: string }> {
+  const { keyId, keySecret } = await credentials();
+  const auth = Buffer.from(`${keyId}:${keySecret}`).toString("base64");
+
+  const body: Record<string, unknown> = {
+    email: input.contactEmail,
+    phone: input.contactPhone,
+    type: "route",
+    legal_business_name: input.legalBusinessName || input.restaurantName,
+    profile: {
+      category: "food",
+      subcategory: "restaurant",
+    },
+  };
+  if (input.pan) body.pan = input.pan;
+  if (input.gstin) body.gstin = input.gstin;
+
+  const response = await fetch("https://api.razorpay.com/v2/accounts", {
+    method: "POST",
+    headers: { Authorization: `Basic ${auth}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text().catch(() => response.statusText);
+    throw new Error(`Razorpay Route account creation failed: ${errorText}`);
+  }
+
+  const accountData = (await response.json()) as { id: string; status: string };
+
+  const db = await getDb();
+  if (!db) throw new Error("Database not available.");
+
+  await db
+    .update(restaurants)
+    .set({
+      razorpayAccountId: accountData.id,
+      razorpayAccountStatus: "active",
+    })
+    .where(eq(restaurants.id, input.restaurantId));
+
+  return { accountId: accountData.id };
+}
+
 /**
  * Create a Razorpay order from a validated internal order.
+ * When restaurantId is provided and has an active Route linked account,
+ * automatically splits payment via the transfers array.
  */
 export async function createRazorpayPaymentOrder(input: {
   localOrderId: string;
   orderNumber: string;
   amountPaise: number;
+  restaurantId?: string;
 }) {
   const { keyId, keySecret } = await credentials();
   const auth = Buffer.from(`${keyId}:${keySecret}`).toString("base64");
+
+  let transferAmountPaise: number | null = null;
+  let platformFeePaise: number | null = null;
+  let transfers: Array<{ account: string; amount: number; currency: string; notes: Record<string, string> }> | undefined;
+
+  if (input.restaurantId) {
+    const db = await getDb();
+    if (db) {
+      const restaurant = (await db.select().from(restaurants).where(eq(restaurants.id, input.restaurantId)).limit(1))[0];
+      if (restaurant?.razorpayAccountId && restaurant.razorpayAccountStatus === "active") {
+        const feePercent = parseFloat(restaurant.platformFeePercent ?? "0");
+        platformFeePaise = Math.round(input.amountPaise * feePercent / 100);
+        transferAmountPaise = input.amountPaise - platformFeePaise;
+        transfers = [{
+          account: restaurant.razorpayAccountId,
+          amount: transferAmountPaise,
+          currency: "INR",
+          notes: { orderId: input.localOrderId },
+        }];
+      }
+    }
+  }
+
+  const requestBody: Record<string, unknown> = {
+    amount: input.amountPaise,
+    currency: "INR",
+    receipt: input.orderNumber,
+    notes: { cloudKitchenOrderId: input.localOrderId },
+  };
+  if (transfers) requestBody.transfers = transfers;
+
   const response = await fetch("https://api.razorpay.com/v1/orders", {
     method: "POST",
     headers: { Authorization: `Basic ${auth}`, "Content-Type": "application/json" },
-    body: JSON.stringify({
-      amount: input.amountPaise,
-      currency: "INR",
-      receipt: input.orderNumber,
-      notes: { cloudKitchenOrderId: input.localOrderId },
-    }),
+    body: JSON.stringify(requestBody),
   });
 
   if (!response.ok) {
@@ -85,9 +166,16 @@ export async function createRazorpayPaymentOrder(input: {
   const db = await getDb();
   if (!db) throw new Error("The database connection is not available.");
 
+  const paymentUpdate: Record<string, unknown> = {
+    providerOrderId: providerOrder.id,
+    providerPayload: providerOrder,
+  };
+  if (transferAmountPaise !== null) paymentUpdate.transferAmountPaise = transferAmountPaise;
+  if (platformFeePaise !== null) paymentUpdate.platformFeePaise = platformFeePaise;
+
   await db
     .update(payments)
-    .set({ providerOrderId: providerOrder.id, providerPayload: providerOrder })
+    .set(paymentUpdate)
     .where(eq(payments.orderId, input.localOrderId));
 
   return {
@@ -225,9 +313,17 @@ export async function handleRazorpayWebhook(
   const db = await getDb();
   if (!db) throw new Error("The database connection is not available.");
 
-  // --- Issue 7: Verify webhook HMAC signature ---
+  // --- Issue 7: Verify webhook HMAC signature (mandatory) ---
   const webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET;
-  if (webhookSecret && signature) {
+  if (!webhookSecret) {
+    console.error("[Razorpay] RAZORPAY_WEBHOOK_SECRET not configured. Rejecting webhook.");
+    return { processed: false, error: "Webhook secret not configured." };
+  }
+  if (!signature) {
+    console.warn("[Razorpay] Webhook received without signature. Rejecting.");
+    return { processed: false, error: "Missing webhook signature." };
+  }
+  {
     const rawBody = JSON.stringify(payload);
     const expectedSig = createHmac("sha256", webhookSecret).update(rawBody).digest("hex");
     if (expectedSig.length !== signature.length || !timingSafeEqual(Buffer.from(expectedSig), Buffer.from(signature))) {
@@ -451,6 +547,21 @@ export async function initiateRefund(input: {
   const payment = (await db.select().from(payments).where(eq(payments.id, input.paymentId)).limit(1))[0];
   if (!payment || !payment.providerPaymentId) {
     throw new Error("Payment not found or not yet captured.");
+  }
+  if (payment.status !== "CAPTURED") {
+    throw new Error(`Cannot refund a payment with status "${payment.status}". Only captured payments can be refunded.`);
+  }
+  if (input.amountPaise <= 0) {
+    throw new Error("Refund amount must be greater than zero.");
+  }
+
+  const alreadyRefunded = (await db.select({ total: sql<number>`COALESCE(SUM(${refunds.amountPaise}), 0)` })
+    .from(refunds)
+    .where(and(eq(refunds.paymentId, input.paymentId), sql`${refunds.status} != 'FAILED'`)))[0]?.total ?? 0;
+
+  if (input.amountPaise + alreadyRefunded > payment.amountPaise) {
+    const remaining = payment.amountPaise - alreadyRefunded;
+    throw new Error(`Refund amount exceeds remaining refundable amount. Maximum refundable: ₹${remaining / 100}.`);
   }
 
   const auth = Buffer.from(`${keyId}:${keySecret}`).toString("base64");

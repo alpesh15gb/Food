@@ -108,12 +108,21 @@ export default function Admin() {
 function AdminAccess() {
   const [token, setToken] = useState("");
   const [accessError, setAccessError] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const localAccess = trpc.auth.localAdminEnabled.useQuery();
   const localLogin = trpc.auth.localAdminLogin.useMutation({
     onSuccess: () => window.location.reload(),
     onError: () => {
       setAccessError("Sign-in was not accepted. Paste only the administrator passphrase.");
       toast.error("Sign-in was not accepted.");
+    },
+  });
+  const emailLogin = trpc.auth.login.useMutation({
+    onSuccess: () => window.location.reload(),
+    onError: (err) => {
+      setAccessError(err.message || "Invalid credentials.");
+      toast.error(err.message || "Login failed.");
     },
   });
 
@@ -167,9 +176,55 @@ function AdminAccess() {
             </Button>
           </form>
         ) : (
-          <p className="mt-3 text-sm leading-relaxed text-[#816252]">
-            Sign in with the project owner account to access the admin panel.
-          </p>
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              setAccessError("");
+              emailLogin.mutate({ email: email.trim(), password });
+            }}
+            className="mt-5 text-left"
+          >
+            <p className="mb-4 text-center text-sm leading-relaxed text-[#816252]">
+              Sign in with your owner account to access the admin panel.
+            </p>
+            <label className="text-sm font-extrabold text-[#563d2d]">
+              Email
+              <Input
+                value={email}
+                onChange={(e) => { setEmail(e.target.value); setAccessError(""); }}
+                type="email"
+                autoComplete="email"
+                className="mt-2 h-11 rounded-xl border-[#ddc6b5]"
+                placeholder="owner@restaurant.com"
+              />
+            </label>
+            <label className="mt-3 block text-sm font-extrabold text-[#563d2d]">
+              Password
+              <Input
+                value={password}
+                onChange={(e) => { setPassword(e.target.value); setAccessError(""); }}
+                type="password"
+                autoComplete="current-password"
+                className="mt-2 h-11 rounded-xl border-[#ddc6b5]"
+                placeholder="Enter your password"
+              />
+            </label>
+            {accessError && (
+              <p
+                role="alert"
+                className="mt-3 rounded-xl bg-[#fff0ed] px-3 py-2.5 text-sm font-bold leading-relaxed text-[#a44230]"
+              >
+                {accessError}
+              </p>
+            )}
+            <Button
+              type="submit"
+              disabled={emailLogin.isPending || !email.trim() || !password}
+              className="mt-3 h-11 w-full rounded-xl bg-[#c84630] font-extrabold hover:bg-[#ad3627]"
+            >
+              {emailLogin.isPending ? "Signing in..." : "Sign in"}
+            </Button>
+          </form>
         )}
       </section>
     </main>
@@ -408,7 +463,7 @@ function AdminWorkspace({ section, slug }: { section: string; slug?: string }) {
             onSave={saveCoupon}
           />
         ) : section === "customers" ? (
-          <CustomersPanel />
+          <CustomersPanel restaurantId={data.restaurant.id} />
         ) : section === "restaurant" ? (
           <RestaurantPanel
             restaurant={data.restaurant}
@@ -1445,14 +1500,14 @@ function CouponsPanel({
 // Customers Panel
 // =============================================================================
 
-function CustomersPanel() {
+function CustomersPanel({ restaurantId }: { restaurantId: string }) {
   const [search, setSearch] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [notes, setNotes] = useState("");
 
-  const customers = trpc.admin.customers.useQuery({ search: search || undefined, limit: 50 });
+  const customers = trpc.admin.customers.useQuery({ restaurantId, search: search || undefined, limit: 50 });
   const customerDetail = trpc.admin.customerDetail.useQuery(
-    { customerId: selectedId! },
+    { customerId: selectedId!, restaurantId },
     { enabled: !!selectedId }
   );
   const updateNotes = trpc.admin.updateCustomerNotes.useMutation({

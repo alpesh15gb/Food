@@ -234,8 +234,22 @@ class ShadowfaxProductionAdapter implements DeliveryProvider {
 
   async handleWebhook(payload: Record<string, unknown>, signature?: string): Promise<DeliveryStatusUpdate | null> {
     const webhookSecret = process.env.SHADOWFAX_WEBHOOK_SECRET;
-    if (webhookSecret && signature) {
-      // HMAC verification would go here
+    if (!webhookSecret) {
+      console.error("[Shadowfax] SHADOWFAX_WEBHOOK_SECRET not configured. Rejecting webhook.");
+      return null;
+    }
+    if (!signature) {
+      console.warn("[Shadowfax] Webhook received without signature. Rejecting.");
+      return null;
+    }
+    {
+      const { createHmac, timingSafeEqual } = await import("node:crypto");
+      const rawBody = JSON.stringify(payload);
+      const expectedSig = createHmac("sha256", webhookSecret).update(rawBody).digest("hex");
+      if (expectedSig.length !== signature.length || !timingSafeEqual(Buffer.from(expectedSig), Buffer.from(signature))) {
+        console.warn("[Shadowfax] Webhook signature verification failed");
+        return null;
+      }
     }
 
     const status = payload.status as string;
