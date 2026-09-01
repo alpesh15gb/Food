@@ -39,7 +39,12 @@ export async function createContext({
   let user: AuthenticatedUser | null = null;
   try {
     user = await sdk.authenticateRequest(req);
-  } catch {
+  } catch (err) {
+    // M-06: Log auth failures for observability (non-PII)
+    const path = req.path ?? req.url ?? "unknown";
+    if (path !== "/" && !path.startsWith("/assets") && !path.startsWith("/images")) {
+      console.warn(`[Auth] Session rejected for ${path}:`, err instanceof Error ? err.message : "unknown");
+    }
     user = null;
   }
 

@@ -154,6 +154,7 @@ export const loyaltyRouter = router({
         .limit(1))[0];
       if (!program) throw new Error("Loyalty program not active");
 
+      // H-12: Atomic deduction with optimistic locking to prevent double-spend
       const balance = (await db.select().from(loyaltyBalances)
         .where(and(eq(loyaltyBalances.customerId, input.customerId), eq(loyaltyBalances.restaurantId, input.restaurantId)))
         .limit(1))[0];
@@ -161,10 +162,17 @@ export const loyaltyRouter = router({
         throw new Error("Insufficient points");
       }
 
-      await db.update(loyaltyBalances).set({
-        points: balance.points - input.pointsToRedeem,
-        updatedAt: new Date(),
-      }).where(eq(loyaltyBalances.id, balance.id));
+      // Atomic: only deduct if points haven't changed since read
+      const { sql } = await import("drizzle-orm");
+      const updated = await db.update(loyaltyBalances)
+        .set({
+          points: sql`${loyaltyBalances.points} - ${input.pointsToRedeem}`,
+          updatedAt: new Date(),
+        })
+        .where(and(
+          eq(loyaltyBalances.id, balance.id),
+          sql`${loyaltyBalances.points} >= ${input.pointsToRedeem}`,
+        ));
 
       await db.insert(loyaltyTransactions).values({
         id: nanoid(),

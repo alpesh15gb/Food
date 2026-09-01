@@ -393,21 +393,30 @@ export async function createManualDelivery(
 // Factory
 // =============================================================================
 
-let _provider: DeliveryProvider | null = null;
+const _providerCache = new Map<string, DeliveryProvider>();
 
-export function getDeliveryProvider(): DeliveryProvider {
-  if (_provider) return _provider;
+/** L-11 fix: Per-restaurant provider instances to prevent cross-tenant state sharing. */
+export function getDeliveryProvider(restaurantId?: string): DeliveryProvider {
+  const cacheKey = restaurantId ?? "__default__";
+  const cached = _providerCache.get(cacheKey);
+  if (cached) return cached;
 
   const hasRealCredentials = Boolean(
     process.env.SHADOWFAX_API_KEY && process.env.SHADOWFAX_MERCHANT_ID
   );
 
-  _provider = hasRealCredentials
-    ? new ShadowfaxProductionAdapter()
-    : new MockDeliveryAdapter();
+  let provider: DeliveryProvider;
+  if (hasRealCredentials && restaurantId) {
+    const adapter = new ShadowfaxProductionAdapter();
+    adapter.setRestaurantId(restaurantId);
+    provider = adapter;
+  } else {
+    provider = new MockDeliveryAdapter();
+  }
 
-  console.log(`[Delivery] Using ${_provider.name} adapter`);
-  return _provider;
+  _providerCache.set(cacheKey, provider);
+  console.log(`[Delivery] Using ${provider.name} adapter for ${cacheKey}`);
+  return provider;
 }
 
 /**

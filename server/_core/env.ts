@@ -13,8 +13,9 @@ export const ENV = {
   nodeEnv: process.env.NODE_ENV ?? "development",
   port: parseInt(process.env.PORT || "3000"),
   databaseUrl: process.env.DATABASE_URL ?? "",
-  jwtSecret: process.env.JWT_SECRET ?? (isProduction ? "" : "dev-jwt-secret-not-for-production-use"),
-  cookieSecret: process.env.COOKIE_SECRET ?? (isProduction ? "" : "dev-cookie-secret-not-for-production-use"),
+  // C-04: Remove fallback secrets — fail at startup if not configured
+  jwtSecret: process.env.JWT_SECRET ?? "",
+  cookieSecret: process.env.COOKIE_SECRET ?? "",
   appId: process.env.APP_ID ?? "supperclub-direct",
   ownerOpenId: process.env.OWNER_OPEN_ID ?? "",
   oAuthServerUrl: process.env.OAUTH_SERVER_URL ?? "",

@@ -90,50 +90,49 @@ export function requirePermission(permission: string) {
   return t.procedure.use(requireAdmin).use(async opts => {
     const user = opts.ctx.user!;
 
-    // Owner role bypasses all permission checks
     const input = opts.input as unknown as Record<string, unknown> | undefined;
     const slug = typeof input?.slug === "string" ? input.slug : undefined;
     const restaurantId = await resolveTenantId(opts.ctx, slug);
 
     if (restaurantId) {
-      try {
-        const db = await import("../db").then(m => m.getDb());
-        if (db) {
-          const { restaurantMembers } = await import("../../drizzle/schema");
-          const { eq, and } = await import("drizzle-orm");
+      const db = await import("../db").then(m => m.getDb());
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
 
-          const [membership] = await db.select().from(restaurantMembers)
-            .where(and(
-              eq(restaurantMembers.userId, user.id),
-              eq(restaurantMembers.restaurantId, restaurantId),
-              eq(restaurantMembers.isActive, true),
-            ))
-            .limit(1);
+      const { restaurantMembers } = await import("../../drizzle/schema");
+      const { eq, and } = await import("drizzle-orm");
 
-          if (membership && membership.role === "owner") {
-            return opts.next({ ctx: { ...opts.ctx, user, restaurantId } });
-          }
+      const [membership] = await db.select().from(restaurantMembers)
+        .where(and(
+          eq(restaurantMembers.userId, user.id),
+          eq(restaurantMembers.restaurantId, restaurantId),
+          eq(restaurantMembers.isActive, true),
+        ))
+        .limit(1);
 
-          // For non-owner roles, check admin_user_roles → admin_role_permissions
-          if (membership) {
-            const { adminUserRoles, adminRolePermissions } = await import("../../drizzle/schema");
-            const perms = await db.select({ permission: adminRolePermissions.permission })
-              .from(adminUserRoles)
-              .innerJoin(adminRolePermissions, eq(adminUserRoles.roleId, adminRolePermissions.roleId))
-              .where(eq(adminUserRoles.userId, user.id));
+      // H-01: Verify user is actually a member of this restaurant
+      if (!membership) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "You are not a member of this restaurant." });
+      }
 
-            const hasPermission = perms.some(p => p.permission === permission || p.permission === "*");
-            if (!hasPermission) {
-              throw new TRPCError({ code: "FORBIDDEN", message: `Missing permission: ${permission}` });
-            }
-          }
-        }
-      } catch (err) {
-        if (err instanceof TRPCError) throw err;
-        // If permission check fails due to missing tables during migration, allow access
+      // Owner role bypasses all permission checks
+      if (membership.role === "owner") {
+        return opts.next({ ctx: { ...opts.ctx, user, restaurantId } });
+      }
+
+      // For non-owner roles, check admin_user_roles → admin_role_permissions
+      const { adminUserRoles, adminRolePermissions } = await import("../../drizzle/schema");
+      const perms = await db.select({ permission: adminRolePermissions.permission })
+        .from(adminUserRoles)
+        .innerJoin(adminRolePermissions, eq(adminUserRoles.roleId, adminRolePermissions.roleId))
+        .where(eq(adminUserRoles.userId, user.id));
+
+      const hasPermission = perms.some(p => p.permission === permission || p.permission === "*");
+      // H-02: Fail-closed — deny access on permission check failure
+      if (!hasPermission) {
+        throw new TRPCError({ code: "FORBIDDEN", message: `Missing permission: ${permission}` });
       }
     }
 
-    return opts.next({ ctx: { ...opts.ctx, user } });
+    return opts.next({ ctx: { ...opts.ctx, user, restaurantId } });
   });
 }

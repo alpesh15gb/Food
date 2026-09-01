@@ -133,6 +133,8 @@ export async function createRazorpayPaymentOrder(input: {
       if (restaurant?.razorpayAccountId && restaurant.razorpayAccountStatus === "active") {
         const feePercent = parseFloat(restaurant.platformFeePercent ?? "0");
         platformFeePaise = Math.round(input.amountPaise * feePercent / 100);
+        // H-17: Clamp fee to prevent negative transfer
+        platformFeePaise = Math.min(platformFeePaise, input.amountPaise);
         transferAmountPaise = input.amountPaise - platformFeePaise;
         transfers = [{
           account: restaurant.razorpayAccountId,
@@ -223,19 +225,23 @@ export async function confirmPayment(input: {
   providerPaymentId: string;
   signature: string;
   source: "browser_callback" | "webhook";
+  /** C-02 fix: Skip signature verification when called from webhook path
+   * that has already verified the HMAC signature. */
+  preVerified?: boolean;
 }): Promise<{ success: boolean; alreadyConfirmed?: boolean; error?: string }> {
-  const { keySecret } = await credentials();
-
-  // Verify signature
-  if (
-    !isValidRazorpaySignature({
-      providerOrderId: input.providerOrderId,
-      providerPaymentId: input.providerPaymentId,
-      signature: input.signature,
-      keySecret,
-    })
-  ) {
-    return { success: false, error: "Payment signature verification failed." };
+  // Verify signature — skip only when pre-verified by webhook HMAC check
+  if (!input.preVerified) {
+    const { keySecret } = await credentials();
+    if (
+      !isValidRazorpaySignature({
+        providerOrderId: input.providerOrderId,
+        providerPaymentId: input.providerPaymentId,
+        signature: input.signature,
+        keySecret,
+      })
+    ) {
+      return { success: false, error: "Payment signature verification failed." };
+    }
   }
 
   const db = await getDb();
@@ -377,8 +383,9 @@ export async function handleRazorpayWebhook(
               localOrderId: orderId,
               providerOrderId: paymentEntity.order_id ?? "",
               providerPaymentId: paymentEntity.id,
-              signature: "webhook_verified", // signature already verified above
+              signature: "webhook_verified",
               source: "webhook",
+              preVerified: true, // C-02: HMAC already verified above, skip re-verification
             });
           }
         }
@@ -511,14 +518,22 @@ async function handleRefundProcessed(refundEntity: Record<string, unknown>) {
       .set({ status: "PROCESSED", providerPayload: refundEntity })
       .where(eq(refunds.id, existingRefund.id));
 
+    // M-14: Only mark fully REFUNDED if cumulative refunds >= payment amount
+    const payment = (await tx.select().from(payments).where(eq(payments.id, existingRefund.paymentId)).limit(1))[0];
+    const allRefunds = await tx.select({ total: sql<number>`COALESCE(SUM(${refunds.amountPaise}), 0)` })
+      .from(refunds)
+      .where(eq(refunds.paymentId, existingRefund.paymentId));
+    const totalRefunded = (allRefunds[0]?.total ?? 0);
+    const isFullyRefunded = payment && totalRefunded >= payment.amountPaise;
+
     await tx
       .update(payments)
-      .set({ status: "REFUNDED" })
+      .set({ status: isFullyRefunded ? "REFUNDED" : "CAPTURED" })
       .where(eq(payments.id, existingRefund.paymentId));
 
     await tx
       .update(orders)
-      .set({ paymentStatus: "REFUNDED", status: "REFUNDED" })
+      .set({ paymentStatus: isFullyRefunded ? "REFUNDED" : "PAID", status: isFullyRefunded ? "REFUNDED" : undefined })
       .where(eq(orders.id, existingRefund.orderId));
 
     await tx.insert(orderStatusHistory).values({

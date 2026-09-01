@@ -77,10 +77,20 @@ export class SmsFallbackAdapter implements NotificationProvider {
     this.apiKey = apiKey;
   }
 
+  // H-10: Use POST with body instead of GET with API key in URL
   async sendText(phone: string, message: string) {
     try {
-      const url = `https://api.msg91.com/api/v5/flow/?authkey=${this.apiKey}&mobiles=${phone}&message=${encodeURIComponent(message)}`;
-      const res = await fetch(url);
+      const res = await fetch("https://api.msg91.com/api/v5/flow/", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "authkey": this.apiKey,
+        },
+        body: JSON.stringify({
+          mobiles: phone,
+          message: message,
+        }),
+      });
       return { success: res.ok };
     } catch {
       return { success: false };

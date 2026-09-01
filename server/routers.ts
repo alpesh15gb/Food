@@ -28,8 +28,9 @@ export const appRouter = router({
   system: systemRouter,
   auth: router({
     me: publicProcedure.query(opts => opts.ctx.user),
+    // M-23: Don't leak whether JWT_SECRET is configured — only check LOCAL_ADMIN_TOKEN
     localAdminEnabled: publicProcedure.query(() =>
-      Boolean(process.env.LOCAL_ADMIN_TOKEN && process.env.JWT_SECRET)
+      Boolean(process.env.LOCAL_ADMIN_TOKEN)
     ),
     localAdminLogin: publicProcedure
       .input(z.object({ token: z.string().max(4096) }))
@@ -100,7 +101,7 @@ export const appRouter = router({
             email: input.email,
             passwordHash: pwHash,
             loginMethod: "email",
-            role: "admin",
+            role: "user", // H-04: Registrants get global role "user". Admin access via restaurantMembers.
             lastSignedIn: new Date(),
           });
         } catch (err: unknown) {
@@ -130,8 +131,15 @@ export const appRouter = router({
           });
         }
 
-        const sessionToken = await sdk.createSessionToken(openId, { name: input.name });
-        ctx.res.cookie(COOKIE_NAME, sessionToken, getSessionCookieOptions(ctx.req));
+        // H-03: Use explicit 12-hour expiry for registration session (not default ONE_YEAR_MS)
+        const sessionToken = await sdk.signSession(
+          { openId, appId: "self-register", name: input.name },
+          { expiresInMs: 1000 * 60 * 60 * 12 }
+        );
+        ctx.res.cookie(COOKIE_NAME, sessionToken, {
+          ...getSessionCookieOptions(ctx.req),
+          maxAge: 1000 * 60 * 60 * 12,
+        });
 
         return { success: true, restaurantId } as const;
       }),
@@ -176,8 +184,15 @@ export const appRouter = router({
           lastSignedIn: new Date(),
         });
 
-        const sessionToken = await sdk.createSessionToken(user.openId, { name: user.name ?? "" });
-        ctx.res.cookie(COOKIE_NAME, sessionToken, getSessionCookieOptions(ctx.req));
+        // H-03: Use explicit 12-hour expiry for login session
+        const sessionToken = await sdk.signSession(
+          { openId: user.openId, appId: "email-login", name: user.name ?? "" },
+          { expiresInMs: 1000 * 60 * 60 * 12 }
+        );
+        ctx.res.cookie(COOKIE_NAME, sessionToken, {
+          ...getSessionCookieOptions(ctx.req),
+          maxAge: 1000 * 60 * 60 * 12,
+        });
 
         return { success: true } as const;
       }),

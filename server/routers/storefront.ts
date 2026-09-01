@@ -289,6 +289,34 @@ export const storefrontRouter = router({
 
       // Issue 18: Use idempotencyKey to prevent duplicate order creation
       // (checked inside createOrderFromValidatedCart via orderNumber uniqueness)
+      // H-07: Check idempotency — if key provided, check for existing order first
+      if (input.idempotencyKey) {
+        const { getDb } = await import("../db");
+        const db = await getDb();
+        if (db) {
+          const { orders } = await import("../../drizzle/schema");
+          const { eq } = await import("drizzle-orm");
+          const existing = await db.select({ id: orders.id, orderNumber: orders.orderNumber })
+            .from(orders)
+            .where(eq(orders.orderNumber, input.idempotencyKey))
+            .limit(1);
+          if (existing[0]) {
+            // Return existing order with payment config — idempotent response
+            const config = await getRazorpayConfig();
+            return {
+              orderId: existing[0].id,
+              orderNumber: existing[0].orderNumber,
+              trackingToken: "",
+              keyId: config.keyId ?? "",
+              providerOrderId: "",
+              amountPaise: 0,
+              currency: "INR",
+              alreadyExists: true,
+            };
+          }
+        }
+      }
+
       const localOrder = await createOrderFromValidatedCart({
         userId: 0, // Issue 3: guest user — createOrderFromValidatedCart handles this
         slug: input.slug,
@@ -316,6 +344,7 @@ export const storefrontRouter = router({
       };
     }),
 
+  // M-18: Rate limit payment verification to prevent abuse
   verifyPayment: publicProcedure
     .input(z.object({
       orderId: z.string().min(5),
@@ -323,15 +352,21 @@ export const storefrontRouter = router({
       providerPaymentId: z.string().min(5),
       signature: z.string().min(32).max(128),
     }))
-    .mutation(({ input }) =>
-      confirmPayment({
+    .mutation(async ({ ctx, input }) => {
+      const { checkIpOtpLimit } = await import("../security/rateLimit");
+      const clientIp = (ctx.req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || "unknown";
+      const limit = checkIpOtpLimit(`payment:${clientIp}`);
+      if (!limit.allowed) {
+        throw new Error(`Too many payment attempts. Please try again in ${limit.retryAfterSeconds} seconds.`);
+      }
+      return confirmPayment({
         localOrderId: input.orderId,
         providerOrderId: input.providerOrderId,
         providerPaymentId: input.providerPaymentId,
         signature: input.signature,
         source: "browser_callback",
-      })
-    ),
+      });
+    }),
 
   // =========================================================================
   // Webhooks — Issue 7: HMAC verification for Razorpay

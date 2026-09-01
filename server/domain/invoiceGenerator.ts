@@ -31,10 +31,15 @@ export interface InvoiceData {
 const money = (paise: number) =>
   `₹${(paise / 100).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
+/** H-09: HTML-escape all user-supplied values to prevent XSS in invoice HTML. */
+function esc(str: string): string {
+  return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+
 export function generateInvoiceHtml(data: InvoiceData): string {
   const rows = data.items.map(item => `
     <tr>
-      <td style="padding:8px 12px;border-bottom:1px solid #eee">${item.name}${item.hsnCode ? `<br><small style="color:#999">HSN: ${item.hsnCode}</small>` : ""}</td>
+      <td style="padding:8px 12px;border-bottom:1px solid #eee">${esc(item.name)}${item.hsnCode ? `<br><small style="color:#999">HSN: ${esc(item.hsnCode)}</small>` : ""}</td>
       <td style="padding:8px 12px;border-bottom:1px solid #eee;text-align:center">${item.quantity}</td>
       <td style="padding:8px 12px;border-bottom:1px solid #eee;text-align:right">${money(item.unitPricePaise)}</td>
       <td style="padding:8px 12px;border-bottom:1px solid #eee;text-align:right">${money(item.totalPricePaise)}</td>
@@ -77,10 +82,10 @@ export function generateInvoiceHtml(data: InvoiceData): string {
   <div class="header">
     <div class="brand">
       ${data.logoUrl ? `<img src="${data.logoUrl}" alt="Logo" style="height:40px;margin-bottom:8px">` : ""}
-      <h1>${data.restaurantName}</h1>
-      <p>${data.restaurantAddress}</p>
-      <p>Phone: ${data.restaurantPhone}</p>
-      ${data.restaurantGst ? `<p>GSTIN: ${data.restaurantGst}</p>` : ""}
+      <h1>${esc(data.restaurantName)}</h1>
+      <p>${esc(data.restaurantAddress)}</p>
+      <p>Phone: ${esc(data.restaurantPhone)}</p>
+      ${data.restaurantGst ? `<p>GSTIN: ${esc(data.restaurantGst)}</p>` : ""}
     </div>
     <div class="invoice-meta">
       <h2>TAX INVOICE</h2>
@@ -94,9 +99,9 @@ export function generateInvoiceHtml(data: InvoiceData): string {
   <div class="parties">
     <div class="party">
       <h3>Billed To</h3>
-      <p><strong>${data.customerName || "Walk-in Customer"}</strong></p>
-      <p>${data.customerPhone || "-"}</p>
-      <p>${data.deliveryAddress || "-"}</p>
+      <p><strong>${esc(data.customerName || "Walk-in Customer")}</strong></p>
+      <p>${esc(data.customerPhone || "-")}</p>
+      <p>${esc(data.deliveryAddress || "-")}</p>
     </div>
     <div class="party">
       <h3>Payment Details</h3>

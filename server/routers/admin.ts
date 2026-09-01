@@ -90,10 +90,20 @@ export const adminRouter = router({
       input.offset
     )),
 
+  // H-13: Verify order belongs to caller's tenant
   orderDetail: adminProcedure
     .input(z.object({ orderId: z.string().min(4) }))
-    .query(({ input }) => getOrderWithItems(input.orderId)),
+    .query(async ({ ctx, input }) => {
+      const result = await getOrderWithItems(input.orderId);
+      if (!result) return null;
+      // Verify tenant ownership if restaurantId is in context (result is spread order)
+      if (ctx.restaurantId && result.restaurantId !== ctx.restaurantId) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Order not found for this restaurant." });
+      }
+      return result;
+    }),
 
+  // H-14: Verify order belongs to caller's tenant before status change
   updateOrderStatus: adminProcedure
     .input(z.object({
       orderId: z.string().min(4),
@@ -101,6 +111,12 @@ export const adminRouter = router({
       note: z.string().max(500).optional(),
     }))
     .mutation(async ({ ctx, input }) => {
+      if (ctx.restaurantId) {
+        const orderData = await getOrderWithItems(input.orderId);
+        if (!orderData || orderData.restaurantId !== ctx.restaurantId) {
+          throw new TRPCError({ code: "FORBIDDEN", message: "Order not found for this restaurant." });
+        }
+      }
       await updateOrderStatus(input.orderId, input.status, ctx.user.id, input.note);
       await logAudit({
         actorId: ctx.user.id,
@@ -565,6 +581,7 @@ export const adminRouter = router({
     }),
 
   // Issue 12: Manual delivery dispatch — for when Shadowfax is unavailable
+  // H-15: Verify tenant ownership before dispatch
   manualDeliveryDispatch: requirePermission("orders:write").input(z.object({
     orderId: z.string().min(4),
     riderName: z.string().min(1).max(120),
@@ -572,6 +589,12 @@ export const adminRouter = router({
     notes: z.string().max(500).optional(),
   }))
     .mutation(async ({ ctx, input }) => {
+      if (ctx.restaurantId) {
+        const orderData = await getOrderWithItems(input.orderId);
+        if (!orderData || orderData.restaurantId !== ctx.restaurantId) {
+          throw new TRPCError({ code: "FORBIDDEN", message: "Order not found for this restaurant." });
+        }
+      }
       const result = await createManualDelivery(input.orderId, {
         riderName: input.riderName,
         riderPhone: input.riderPhone,
@@ -600,6 +623,10 @@ export const adminRouter = router({
       // 1. Load order
       const order = (await db.select().from(orders).where(eq(orders.id, input.orderId)).limit(1))[0];
       if (!order) throw new Error("Order not found.");
+      // H-15: Verify tenant ownership
+      if (ctx.restaurantId && order.restaurantId !== ctx.restaurantId) {
+        throw new Error("Order does not belong to this restaurant.");
+      }
       if (order.status !== "READY_FOR_PICKUP") {
         throw new Error(`Order must be READY_FOR_PICKUP to dispatch. Current status: ${order.status}`);
       }
@@ -642,8 +669,8 @@ export const adminRouter = router({
         });
       });
 
-      // 6. Call Shadowfax API
-      const provider = getDeliveryProvider();
+      // 6. Call Shadowfax API — pass restaurantId for per-tenant isolation
+      const provider = getDeliveryProvider(order.restaurantId);
       const restaurant = (await db.select().from(restaurants).where(eq(restaurants.id, order.restaurantId)).limit(1))[0];
 
       let result;
@@ -1151,7 +1178,7 @@ export const adminRouter = router({
 
   // =========================================================================
   // Manual Aggregator Order Entry
-  // =========================================================================
+  // =========================================================================  // H-08: Server-side pricing — do not trust client-supplied totalPaise
   createManualOrder: requirePermission("orders:write").input(z.object({
     restaurantId: z.string().min(4),
     outletId: z.string().min(4),
@@ -1163,15 +1190,22 @@ export const adminRouter = router({
       quantity: z.number().int().min(1),
       unitPricePaise: z.number().int().min(0),
     })).min(1),
-    totalPaise: z.number().int().min(0),
     paymentStatus: z.enum(["PAID", "COD"]).default("PAID"),
     notes: z.string().optional(),
   }))
     .mutation(async ({ input, ctx }) => {
       const db = await import("../db").then(m => m.getDb());
       if (!db) throw new Error("Database unavailable");
-      const { orders, orderItems } = await import("../../drizzle/schema");
+      const { orders, orderItems, restaurants } = await import("../../drizzle/schema");
       const { nanoid } = await import("nanoid");
+      const { eq } = await import("drizzle-orm");
+
+      // H-08: Compute total from items server-side
+      const computedItemTotal = input.items.reduce((sum, it) => sum + it.unitPricePaise * it.quantity, 0);
+      // Add restaurant packaging fee
+      const restaurant = (await db.select().from(restaurants).where(eq(restaurants.id, input.restaurantId)).limit(1))[0];
+      const packagingFee = restaurant?.packagingFeePaise ?? 0;
+      const totalPaise = computedItemTotal + packagingFee;
 
       const orderId = nanoid();
       const orderNumber = `AGG-${Date.now().toString(36).toUpperCase()}`;
@@ -1189,12 +1223,12 @@ export const adminRouter = router({
         customerName: input.customerName || null,
         customerPhone: input.customerPhone || null,
         addressSnapshot: { source: input.source, note: "Manual aggregator entry" },
-        itemTotalPaise: input.totalPaise,
+        itemTotalPaise: computedItemTotal,
         discountPaise: 0,
-        packagingFeePaise: 0,
+        packagingFeePaise: packagingFee,
         deliveryFeePaise: 0,
         taxPaise: 0,
-        totalPaise: input.totalPaise,
+        totalPaise: totalPaise,
         specialInstructions: input.notes || null,
       });
 

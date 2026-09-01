@@ -2,6 +2,7 @@ import { z } from "zod";
 import { adminProcedure, router } from "../_core/trpc";
 
 export const kdsRouter = router({
+  // C-07 fix: slug is required to prevent cross-tenant data leak
   getActiveOrders: adminProcedure.input(z.object({
     slug: z.string().min(2),
     station: z.string().optional(),
@@ -18,14 +19,17 @@ export const kdsRouter = router({
       const rest = await getRestaurantBySlug(input.slug);
       if (!rest?.id) return [];
 
+      // Always filter by restaurant — never return all tenants' orders
       const conditions = [
         inArray(orders.status, [...activeStatuses]),
         eq(orders.restaurantId, rest.id),
       ];
 
+      // M-09: Add LIMIT to prevent unbounded query
       const activeOrders = await db.select().from(orders)
         .where(and(...conditions))
-        .orderBy(orders.createdAt);
+        .orderBy(orders.createdAt)
+        .limit(100);
 
       const result = [];
       for (const order of activeOrders) {

@@ -69,6 +69,7 @@ export const inventoryRouter = router({
       return { success: true };
     }),
 
+  // H-11: Atomic stock operations with negative-stock prevention
   recordWastage: requirePermission("menu:write").input(z.object({
     materialId: z.string().min(4),
     restaurantId: z.string().min(4),
@@ -79,12 +80,24 @@ export const inventoryRouter = router({
       const db = await import("../db").then(m => m.getDb());
       if (!db) throw new Error("Database unavailable");
       const { rawMaterials, stockMovements } = await import("../../drizzle/schema");
-      const { eq, sql } = await import("drizzle-orm");
+      const { eq, and, sql } = await import("drizzle-orm");
       const { nanoid } = await import("nanoid");
 
-      await db.update(rawMaterials)
+      // Validate sufficient stock before deducting
+      const [material] = await db.select({ currentStock: rawMaterials.currentStock })
+        .from(rawMaterials).where(eq(rawMaterials.id, input.materialId)).limit(1);
+      if (!material) throw new Error("Material not found.");
+      if (parseFloat(String(material.currentStock)) < input.quantity) {
+        throw new Error(`Insufficient stock. Available: ${material.currentStock}, requested: ${input.quantity}`);
+      }
+
+      // Atomic deduction — only deduct if stock remains non-negative
+      const updated = await db.update(rawMaterials)
         .set({ currentStock: sql`${rawMaterials.currentStock} - ${String(input.quantity)}` })
-        .where(eq(rawMaterials.id, input.materialId));
+        .where(and(
+          eq(rawMaterials.id, input.materialId),
+          sql`${rawMaterials.currentStock} >= ${String(input.quantity)}`,
+        ));
 
       await db.insert(stockMovements).values({
         id: nanoid(18),
@@ -109,11 +122,20 @@ export const inventoryRouter = router({
       const db = await import("../db").then(m => m.getDb());
       if (!db) throw new Error("Database unavailable");
       const { rawMaterials, stockMovements } = await import("../../drizzle/schema");
-      const { eq, sql } = await import("drizzle-orm");
+      const { eq, and, sql } = await import("drizzle-orm");
       const { nanoid } = await import("nanoid");
 
       const op = input.quantity >= 0 ? "+" : "-";
       const absQty = Math.abs(input.quantity);
+      // H-11: For deductions, verify sufficient stock atomically
+      if (input.quantity < 0) {
+        const [material] = await db.select({ currentStock: rawMaterials.currentStock })
+          .from(rawMaterials).where(eq(rawMaterials.id, input.materialId)).limit(1);
+        if (!material) throw new Error("Material not found.");
+        if (parseFloat(String(material.currentStock)) < absQty) {
+          throw new Error(`Insufficient stock. Available: ${material.currentStock}, requested: ${absQty}`);
+        }
+      }
       await db.update(rawMaterials)
         .set({ currentStock: sql`${rawMaterials.currentStock} ${sql.raw(op)} ${String(absQty)}` })
         .where(eq(rawMaterials.id, input.materialId));
@@ -277,6 +299,13 @@ export const inventoryRouter = router({
       const { purchaseOrders, purchaseOrderItems, rawMaterials, stockMovements } = await import("../../drizzle/schema");
       const { eq, sql } = await import("drizzle-orm");
       const { nanoid } = await import("nanoid");
+
+      // H-16: Verify PO belongs to this restaurant
+      const [po] = await db.select().from(purchaseOrders).where(eq(purchaseOrders.id, input.poId)).limit(1);
+      if (!po) throw new Error("Purchase order not found.");
+      if (po.restaurantId !== input.restaurantId) {
+        throw new Error("Purchase order does not belong to this restaurant.");
+      }
 
       await db.update(purchaseOrders)
         .set({ status: "RECEIVED", receivedAt: new Date() })
