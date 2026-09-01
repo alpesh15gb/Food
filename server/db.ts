@@ -910,7 +910,7 @@ async function fireAndForgetNotification(
     .where(eq(restaurants.id, order.restaurantId))
     .limit(1))[0];
 
-  const baseUrl = process.env.PUBLIC_URL || "https://order.9house.kitchen";
+  const baseUrl = process.env.PUBLIC_URL || "";
   const trackUrl = restaurant
     ? `${baseUrl}/${restaurant.slug}/track/${order.id}`
     : `${baseUrl}/track/${order.id}`;
@@ -1458,192 +1458,18 @@ export async function setSetting(key: string, value: string, category = "general
 }
 
 // =============================================================================
-// Seed Data
+// Seed Data — REMOVED
+// All restaurant data is managed through admin panel and self-serve signup.
+// No dummy/mock data is seeded automatically.
 // =============================================================================
 
+// ensureRestaurantSeed() removed — no dummy data.
+// Use /signup to create a real restaurant, or manage via admin panel.
+
 export async function ensureRestaurantSeed() {
-  const db = await requireDb();
-  const existing = await db.select().from(restaurants).where(eq(restaurants.slug, "spice-garden")).limit(1);
-  if (existing[0]) return existing[0];
-
-  const restaurantId = "rest_spice_garden";
-  const outletId = "outlet_sg_koramangala";
-  const outletId2 = "outlet_sg_indiranagar";
-
-  // Create restaurant
-  await db.insert(restaurants).values({
-    id: restaurantId,
-    slug: "spice-garden",
-    name: "Spice Garden",
-    description: "Authentic Indian cuisine crafted with love and the finest spices. From traditional curries to modern fusion dishes, every bite tells a story.",
-    cuisineSummary: "North Indian • Mughlai • Biryani • Kebabs",
-    logoUrl: "/assets/spice-garden-logo.png",
-    bannerImageUrl: "/assets/spice-garden-banner.jpg",
-    contactPhone: "+91 98765 43210",
-    address: "42, 100 Feet Road, Koramangala, Bengaluru",
-    latitude: "12.9352",
-    longitude: "77.6245",
-    deliveryFeePaise: 3000,
-    packagingFeePaise: 1500,
-    minOrderPaise: 19900,
-    isOpen: true,
-    allowScheduledOrders: true,
-    preparationMinutes: 25,
-  });
-
-  // Create outlets
-  await db.insert(outlets).values([
-    {
-      id: outletId,
-      restaurantId,
-      name: "Koramangala Kitchen",
-      address: "42, 100 Feet Road, Koramangala",
-      city: "Bengaluru",
-      postalCode: "560034",
-      latitude: "12.9352",
-      longitude: "77.6245",
-      preparationMinutes: 25,
-      isActive: true,
-      isOpen: true,
-    },
-    {
-      id: outletId2,
-      restaurantId,
-      name: "Indiranagar Kitchen",
-      address: "789, 12th Main, Indiranagar",
-      city: "Bengaluru",
-      postalCode: "560038",
-      latitude: "12.9784",
-      longitude: "77.6408",
-      preparationMinutes: 30,
-      isActive: true,
-      isOpen: true,
-    },
-  ]);
-
-  // Create restaurant schedules
-  const daysOfWeek = [0, 1, 2, 3, 4, 5, 6];
-  await db.insert(restaurantSchedules).values(
-    daysOfWeek.map(day => ({
-      id: id(),
-      restaurantId,
-      dayOfWeek: day,
-      openTime: day === 0 || day === 6 ? "10:00" : "09:00",
-      closeTime: day === 0 || day === 6 ? "01:00" : "23:00",
-      isActive: true,
-    }))
-  );
-
-  // Create categories
-  const categoryData = [
-    { name: "Starters & Appetizers", slug: "starters", sortOrder: 1, iconEmoji: "🥗" },
-    { name: "Tandoori Specials", slug: "tandoori", sortOrder: 2, iconEmoji: "🔥" },
-    { name: "Curries & Gravies", slug: "curries", sortOrder: 3, iconEmoji: "🍛" },
-    { name: "Biryani", slug: "biryani", sortOrder: 4, iconEmoji: "🍚" },
-    { name: "Breads & Rice", slug: "breads-rice", sortOrder: 5, iconEmoji: "🫓" },
-    { name: "Combos & Thalis", slug: "combos", sortOrder: 6, iconEmoji: "🍽️" },
-    { name: "Snacks & Chaat", slug: "snacks", sortOrder: 7, iconEmoji: "🥪" },
-    { name: "Desserts", slug: "desserts", sortOrder: 8, iconEmoji: "🍮" },
-    { name: "Beverages", slug: "beverages", sortOrder: 9, iconEmoji: "🥤" },
-  ];
-
-  const categories: Array<{ id: string; name: string; slug: string }> = [];
-  for (const cat of categoryData) {
-    const catId = id();
-    categories.push({ id: catId, ...cat });
-    await db.insert(menuCategories).values({
-      id: catId,
-      restaurantId,
-      ...cat,
-      isVisible: true,
-      isOpen: true,
-    });
-  }
-
-  // Create menu items
-  const menuData = [
-    // Starters
-    { name: "Paneer Tikka", categoryId: categories[0].id, pricePaise: 24900, dietaryType: "veg" as const, description: "Marinated paneer cubes grilled to perfection in a tandoor with bell peppers and onions.", isBestseller: true },
-    { name: "Chicken Malai Tikka", categoryId: categories[0].id, pricePaise: 29900, dietaryType: "nonveg" as const, description: "Creamy, tender chicken tikka marinated in a rich malai blend with mild spices.", isRecommended: true },
-    { name: "Veg Spring Rolls", categoryId: categories[0].id, pricePaise: 19900, dietaryType: "veg" as const, description: "Crispy rolls stuffed with mixed vegetables and served with sweet chilli sauce." },
-    { name: "Fish Amritsari", categoryId: categories[0].id, pricePaise: 34900, dietaryType: "nonveg" as const, description: "Batter-fried river fish with tangy masala and mint chutney." },
-
-    // Tandoori
-    { name: "Tandoori Chicken", categoryId: categories[1].id, pricePaise: 34900, dietaryType: "nonveg" as const, description: "Half chicken marinated for 24 hours and cooked in the clay oven. Served with mint chutney and onion rings.", isBestseller: true },
-    { name: "Paneer Seekh Kebab", categoryId: categories[1].id, pricePaise: 27900, dietaryType: "veg" as const, description: "Spiced paneer and vegetable kebabs cooked over charcoal." },
-    { name: "Chicken Reshmi Kebab", categoryId: categories[1].id, pricePaise: 32900, dietaryType: "nonveg" as const, description: "Silky smooth minced chicken kebabs with a delicate cream marinade." },
-
-    // Curries
-    { name: "Butter Chicken", categoryId: categories[2].id, pricePaise: 32900, dietaryType: "nonveg" as const, description: "Tender chicken pieces in a velvety tomato-cream sauce with aromatic spices.", isBestseller: true },
-    { name: "Paneer Butter Masala", categoryId: categories[2].id, pricePaise: 28900, dietaryType: "veg" as const, description: "Cottage cheese cubes in a rich, creamy tomato gravy with butter and spices.", isRecommended: true },
-    { name: "Dal Makhani", categoryId: categories[2].id, pricePaise: 24900, dietaryType: "veg" as const, description: "Black lentils slow-cooked overnight with butter, cream, and aromatic spices." },
-    { name: "Chicken Korma", categoryId: categories[2].id, pricePaise: 31900, dietaryType: "nonveg" as const, description: "Mild and creamy chicken curry with a blend of roasted nuts and whole spices." },
-    { name: "Palak Paneer", categoryId: categories[2].id, pricePaise: 26900, dietaryType: "veg" as const, description: "Fresh spinach puree with soft paneer cubes, seasoned with garlic and cumin." },
-    { name: "Mutton Rogan Josh", categoryId: categories[2].id, pricePaise: 44900, dietaryType: "nonveg" as const, description: "Slow-cooked mutton in a rich Kashmiri masala with aromatic whole spices." },
-
-    // Biryani
-    { name: "Hyderabadi Chicken Biryani", categoryId: categories[3].id, pricePaise: 29900, dietaryType: "nonveg" as const, description: "Fragrant basmati rice layered with spiced chicken, cooked dum-style with saffron.", isBestseller: true },
-    { name: "Veg Biryani", categoryId: categories[3].id, pricePaise: 24900, dietaryType: "veg" as const, description: "Aromatic rice layered with garden vegetables, mint, and saffron." },
-    { name: "Mutton Biryani", categoryId: categories[3].id, pricePaise: 42900, dietaryType: "nonveg" as const, description: "Slow-cooked mutton biryani with tender pieces and rich masala." },
-    { name: "Egg Biryani", categoryId: categories[3].id, pricePaise: 22900, dietaryType: "egg" as const, description: "Fluffy basmati rice with perfectly boiled eggs in a fragrant spice blend." },
-
-    // Breads
-    { name: "Butter Naan", categoryId: categories[4].id, pricePaise: 6900, dietaryType: "veg" as const, description: "Soft, fluffy naan brushed with butter, baked in the tandoor." },
-    { name: "Garlic Naan", categoryId: categories[4].id, pricePaise: 7900, dietaryType: "veg" as const, description: "Naan topped with garlic and cilantro, fresh from the clay oven." },
-    { name: "Jeera Rice", categoryId: categories[4].id, pricePaise: 14900, dietaryType: "veg" as const, description: "Fluffy basmati rice tempered with cumin seeds and ghee." },
-
-    // Combos
-    { name: "Paneer Thali", categoryId: categories[5].id, pricePaise: 39900, dietaryType: "veg" as const, description: "Complete meal with paneer butter masala, dal, rice, naan, raita, and dessert.", isRecommended: true },
-    { name: "Chicken Thali", categoryId: categories[5].id, pricePaise: 44900, dietaryType: "nonveg" as const, description: "Complete meal with chicken curry, dal, rice, naan, raita, and dessert." },
-
-    // Snacks
-    { name: "Pani Puri", categoryId: categories[6].id, pricePaise: 9900, dietaryType: "veg" as const, description: "Crispy puris with spiced mint water, tamarind, and tangy filling." },
-    { name: "Samosa Chaat", categoryId: categories[6].id, pricePaise: 14900, dietaryType: "veg" as const, description: "Crispy samosas topped with yogurt, chutneys, and crunchy sev." },
-
-    // Desserts
-    { name: "Gulab Jamun (2 pcs)", categoryId: categories[7].id, pricePaise: 12900, dietaryType: "veg" as const, description: "Soft, golden dumplings soaked in cardamom-flavored sugar syrup." },
-    { name: "Ras Malai", categoryId: categories[7].id, pricePaise: 14900, dietaryType: "veg" as const, description: "Delicate milk dumplings floating in saffron-flavored sweetened milk.", isBestseller: true },
-    { name: "Kheer", categoryId: categories[7].id, pricePaise: 11900, dietaryType: "veg" as const, description: "Creamy rice pudding slow-cooked with milk, sugar, and cardamom." },
-
-    // Beverages
-    { name: "Mango Lassi", categoryId: categories[8].id, pricePaise: 12900, dietaryType: "veg" as const, description: "Thick, creamy yogurt shake blended with ripe mangoes." },
-    { name: "Masala Chai", categoryId: categories[8].id, pricePaise: 5900, dietaryType: "veg" as const, description: "Traditional Indian tea brewed with aromatic spices and milk." },
-    { name: "Fresh Lime Soda", categoryId: categories[8].id, pricePaise: 7900, dietaryType: "veg" as const, description: "Refreshing lime soda with a hint of salt or sweet." },
-    { name: "Cold Coffee", categoryId: categories[8].id, pricePaise: 14900, dietaryType: "veg" as const, description: "Iced coffee blended with milk and a scoop of vanilla ice cream." },
-  ];
-
-  for (const item of menuData) {
-    await db.insert(menuItems).values({
-      id: id(),
-      restaurantId,
-      ...item,
-      slug: item.name.toLowerCase().replace(/[^a-z0-9]+/g, "-"),
-      availability: "AVAILABLE",
-      isOpen: true,
-      isCustomizable: false,
-      sortOrder: menuData.indexOf(item),
-    });
-  }
-
-  // Create default admin role
-  await db.insert(adminRoles).values({
-    id: "role_super_admin",
-    name: "Super Admin",
-    description: "Full access to all features",
-    isSystem: true,
-  });
-
-  await db.insert(adminRoles).values({
-    id: "role_ops_manager",
-    name: "Operations Manager",
-    description: "Order management and restaurant operations",
-  });
-
-  await db.insert(adminRoles).values({
-    id: "role_kitchen_manager",
-    name: "Kitchen Manager",
-    description: "Menu and order management, no financial access",
-  });
-
-  return (await db.select().from(restaurants).where(eq(restaurants.id, restaurantId)).limit(1))[0]!;
+  // Return the first restaurant from the database, or null if none exist.
+  const db = await getDb();
+  if (!db) return null;
+  const result = await db.select().from(restaurants).limit(1);
+  return result[0] ?? null;
 }

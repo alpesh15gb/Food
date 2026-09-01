@@ -76,8 +76,8 @@ function requiresMapConfirmation(level: AccuracyLevel): boolean {
   return level === "LOW" || level === "POOR" || level === "UNKNOWN";
 }
 
-// Default center for Hyderabad (restaurant location area) — NOT a customer fallback
-const DEFAULT_MAP_CENTER = { lat: 17.385, lng: 78.4867 };
+// Default map center: center of India (used only until GPS or search provides real coordinates)
+const DEFAULT_MAP_CENTER = { lat: 20.5937, lng: 78.9629 };
 
 // =============================================================================
 // Component

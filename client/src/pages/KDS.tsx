@@ -45,7 +45,7 @@ export default function KDSPage({ slug }: { slug?: string }) {
   const prevCountRef = useRef(0);
 
   const ordersQuery = trpc.kds.getActiveOrders.useQuery(
-    { slug: slug || "spice-garden", station: station === "all" ? undefined : station },
+    { slug: slug || "", station: station === "all" ? undefined : station },
     { refetchInterval: 5000 }
   );
 

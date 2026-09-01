@@ -175,7 +175,7 @@ export default function SignupPage() {
               <Label htmlFor="restaurantName">Restaurant Name</Label>
               <div className="relative">
                 <Store className="absolute left-3 top-3 w-4 h-4 text-[#a09080]" />
-                <Input id="restaurantName" placeholder="Spice Garden" className="pl-10" value={form.restaurantName} onChange={e => update("restaurantName", e.target.value)} />
+                <Input id="restaurantName" placeholder="Your Restaurant Name" className="pl-10" value={form.restaurantName} onChange={e => update("restaurantName", e.target.value)} />
               </div>
             </div>
             {form.restaurantSlug && (

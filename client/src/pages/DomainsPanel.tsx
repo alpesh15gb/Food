@@ -107,7 +107,7 @@ export default function DomainsPanel({ restaurantId }: { restaurantId: string })
                 <p className="text-xs text-[#6b5c52]">
                   {domain.isVerified
                     ? `SSL: ${domain.sslStatus} • Verified ${domain.verifiedAt ? new Date(domain.verifiedAt).toLocaleDateString() : ""}`
-                    : `CNAME → cname.9housekitchen.com`}
+                    : `CNAME → cname.yourdomain.com`}
                 </p>
               </div>
             </div>

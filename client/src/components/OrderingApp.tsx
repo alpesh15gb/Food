@@ -17,7 +17,7 @@ import DeliveryLocationDrawer, { type DeliveryLocation } from "@/components/Deli
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Drawer, DrawerContent, DrawerDescription, DrawerFooter, DrawerHeader, DrawerTitle } from "@/components/ui/drawer";
 import { Input } from "@/components/ui/input";
-import { formatINR, type MenuItem, type FoodKind } from "@/lib/mockApi";
+import { formatINR, type MenuItem, type FoodKind } from "@/lib/types";
 import { trpc } from "@/lib/trpc";
 import { adaptStorefront } from "@/lib/storefrontAdapter";
 
@@ -100,7 +100,7 @@ function Quantity({
 
 export default function OrderingApp({ slug }: { slug?: string }) {
   const [, navigate] = useLocation();
-  const storefrontSlug = slug || "spice-garden";
+  const storefrontSlug = slug || "";
   const storefrontQuery = trpc.storefront.get.useQuery({ slug: storefrontSlug });
   const paymentConfig = trpc.storefront.paymentConfig.useQuery();
   const localAdminMode = trpc.auth.localAdminEnabled.useQuery();

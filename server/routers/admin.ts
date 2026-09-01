@@ -886,7 +886,7 @@ export const adminRouter = router({
         sslStatus: "pending",
       });
 
-      return { cnameTarget: "cname.9housekitchen.com" };
+      return { cnameTarget: process.env.DOMAIN_CNAME_TARGET || "cname.yourdomain.com" };
     }),
 
   verifyDomain: requirePermission("settings:write").input(z.object({ domainId: z.string().min(4) }))
@@ -905,14 +905,15 @@ export const adminRouter = router({
 
       try {
         const records = await resolveCname(domain.domain);
-        const verified = records.some(r => r.includes("9housekitchen.com"));
+        const cnameTarget = process.env.DOMAIN_CNAME_TARGET || "cname.yourdomain.com";
+        const verified = records.some(r => r.includes(cnameTarget));
         if (verified) {
           await db.update(customDomains)
             .set({ isVerified: true, verifiedAt: new Date(), sslStatus: "active" })
             .where(eq(customDomains.id, input.domainId));
           return { verified: true };
         }
-        return { verified: false, message: "CNAME record not pointing to cname.9housekitchen.com" };
+        return { verified: false, message: `CNAME record not pointing to ${cnameTarget}` };
       } catch {
         return { verified: false, message: "DNS lookup failed. Ensure the CNAME record is configured." };
       }

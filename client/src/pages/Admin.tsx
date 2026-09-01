@@ -236,7 +236,7 @@ function AdminAccess() {
 // =============================================================================
 
 function MenuImportWorkspace({ slug }: { slug?: string }) {
-  const dashboard = trpc.admin.dashboard.useQuery({ slug: slug || "spice-garden" });
+  const dashboard = trpc.admin.dashboard.useQuery({ slug: slug || "" }, { enabled: !!slug });
   if (dashboard.isLoading) return <AdminLoading />;
   if (dashboard.isError || !dashboard.data)
     return (
@@ -273,7 +273,7 @@ function MenuImportWorkspace({ slug }: { slug?: string }) {
 
 function AdminWorkspace({ section, slug }: { section: string; slug?: string }) {
   const utils = trpc.useUtils();
-  const dashboard = trpc.admin.dashboard.useQuery({ slug: slug || "spice-garden" });
+  const dashboard = trpc.admin.dashboard.useQuery({ slug: slug || "" }, { enabled: !!slug });
   const [itemForm, setItemForm] = useState({
     name: "",
     price: "",

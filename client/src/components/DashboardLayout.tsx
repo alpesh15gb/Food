@@ -183,7 +183,7 @@ function DashboardLayoutContent({
               >
                 <PanelLeft className="h-4 w-4 text-muted-foreground" />
               </button>
-              {!isCollapsed ? <div className="min-w-0"><span className="font-display block text-lg tracking-tight text-[#3f2c20]">Spice Garden</span><span className="block text-[9px] font-extrabold uppercase tracking-[0.16em] text-[#a06e53]">Operations desk</span></div> : null}
+              {!isCollapsed ? <div className="min-w-0"><span className="font-display block text-lg tracking-tight text-[#3f2c20]">Kitchen Admin</span><span className="block text-[9px] font-extrabold uppercase tracking-[0.16em] text-[#a06e53]">Operations desk</span></div> : null}
             </div>
           </SidebarHeader>
 
@@ -255,7 +255,7 @@ function DashboardLayoutContent({
       <SidebarInset className="min-h-screen bg-[#f7f2eb]">
         {isMobile && (
           <div className="sticky top-0 z-40 flex h-16 items-center justify-between border-b border-[#eadccf] bg-[#fffdf9]/95 px-4 backdrop-blur">
-            <div className="min-w-0"><p className="text-[9px] font-extrabold uppercase tracking-[0.16em] text-[#a06e53]">Spice Garden</p><span className="font-display block truncate text-xl text-[#3f2c20]">{activeMenuItem?.label ?? "Operations"}</span></div>
+            <div className="min-w-0"><p className="text-[9px] font-extrabold uppercase tracking-[0.16em] text-[#a06e53]">Kitchen Admin</p><span className="font-display block truncate text-xl text-[#3f2c20]">{activeMenuItem?.label ?? "Operations"}</span></div>
             <SidebarTrigger className="h-10 w-10 rounded-xl border border-[#e4cdbb] bg-[#fff8f0] text-[#9d3727]" aria-label="Open operations navigation"><Menu className="h-5 w-5" /></SidebarTrigger>
           </div>
         )}

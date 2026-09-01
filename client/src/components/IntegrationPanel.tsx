@@ -13,7 +13,7 @@ export default function IntegrationPanel({ restaurantId }: { restaurantId?: stri
   const utils = trpc.useUtils();
   const [drafts, setDrafts] = useState<SecretDrafts>({});
   const [openProvider, setOpenProvider] = useState<Provider | null>(null);
-  const rid = restaurantId || "rest_spice_garden";
+  const rid = restaurantId || "";
 
   const integrationQuery = trpc.admin.integrationStatus.useQuery({ restaurantId: rid });
   const routeStatusQuery = trpc.admin.getRazorpayRouteStatus.useQuery({ restaurantId: rid });

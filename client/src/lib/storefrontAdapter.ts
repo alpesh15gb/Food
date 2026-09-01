@@ -1,5 +1,5 @@
 /** Cloud Kitchen adapter: server-backed restaurant data mapped to customer menu model. */
-import type { MenuItem } from "@/lib/mockApi";
+import type { MenuItem } from "@/lib/types";
 
 type StorefrontPayload = {
   restaurant: {
