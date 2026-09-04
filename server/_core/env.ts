@@ -70,4 +70,10 @@ export const ENV = {
   msg91AuthKey: process.env.MSG91_AUTH_KEY ?? "",
   // Custom-domain CNAME target shown in admin DNS instructions (wired from admin router).
   domainCnameTarget: process.env.DOMAIN_CNAME_TARGET ?? "cname.yourdomain.com",
+  // Platform brand domain (e.g. munchpro.in). Empty = single-restaurant mode:
+  // unknown hosts fall back to the generic no-storefront screen.
+  platformDomain: (process.env.PLATFORM_DOMAIN ?? "").trim().toLowerCase(),
+  // Featured restaurant hero link for the platform landing page.
+  featuredStorefrontName: process.env.FEATURED_STOREFRONT_NAME ?? "",
+  featuredStorefrontUrl: process.env.FEATURED_STOREFRONT_URL ?? "",
 } as const;
