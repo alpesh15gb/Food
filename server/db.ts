@@ -139,6 +139,12 @@ export async function upsertUser(user: InsertUser): Promise<void> {
     lastSignedInCache.set(user.openId, now);
   }
 
+  // Touch path (authenticateRequest) often has nothing to write when the
+  // throttle holds. An empty SET clause is a SQL error ("No values to set")
+  // that logged every authed user out within the hour — skip the query.
+  // Safe: that caller just loaded the row, so it is guaranteed to exist.
+  if (Object.keys(updateSet).length === 0) return;
+
   await db.insert(users).values(values).onConflictDoUpdate({ target: users.openId, set: updateSet });
 }
 
