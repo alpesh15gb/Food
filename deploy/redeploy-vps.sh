@@ -61,7 +61,10 @@ docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d --build app
 # 4. Apply pending migrations inside the new container.
 docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" exec -T app pnpm drizzle-kit migrate
 
-# 5. Local health check.
-curl -fsS "http://127.0.0.1:4300/api/trpc/storefront.get?batch=1&input=%7B%220%22%3A%7B%22json%22%3A%7B%22slug%22%3A%229house-kitchen%22%7D%7D%7D" >/dev/null
+# 5. Local health check (host-resolved slug proves custom-domain wiring).
+curl -fsS -H "Host: 9housekitchen.in" "http://127.0.0.1:4300/api/trpc/storefront.defaultSlug?batch=1&input=%7B%220%22%3A%7B%22json%22%3Anull%7D%7D" | grep -q '"slug":"' || {
+  echo "Health check failed: defaultSlug did not resolve; check custom_domains." >&2
+  exit 1
+}
 echo "Redeploy completed: app rebuilt, migrations applied, local health OK."
 echo "Next: bash deploy/acceptance.sh 9housekitchen.in"

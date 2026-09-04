@@ -16,7 +16,7 @@ request() {
 }
 
 request / 200
-request /burger-district 200
+request /9house 200
 request /admin 200
 request /assets/supperclub-mark.png 200
 request /assets/supperclub-hero-burger.jpg 200
