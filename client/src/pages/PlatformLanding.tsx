@@ -1,4 +1,5 @@
 /** MunchPro platform landing — served on the platform domain (no restaurant slug). */
+import { useEffect } from "react";
 import { Link } from "wouter";
 import { ArrowRight, Store, UtensilsCrossed } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -11,6 +12,13 @@ export default function PlatformLanding({
   featuredUrl: string;
 }) {
   const hasFeatured = featuredName.trim().length > 0 && featuredUrl.trim().length > 0;
+  useEffect(() => {
+    const prev = document.title;
+    document.title = "MunchPro — Direct ordering for independent kitchens";
+    return () => {
+      document.title = prev;
+    };
+  }, []);
   return (
     <main className="min-h-screen bg-[#fffaf3] text-[#382719]">
       <header className="mx-auto flex max-w-5xl items-center justify-between px-4 py-5 sm:px-6">

@@ -172,6 +172,15 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
   const offers = storefront?.offers ?? [];
 
   useEffect(() => {
+    if (!restaurant?.name) return;
+    const prev = document.title;
+    document.title = `${restaurant.name} | Direct Ordering`;
+    return () => {
+      document.title = prev;
+    };
+  }, [restaurant?.name]);
+
+  useEffect(() => {
     if (!storefront?.theme) return;
     const root = document.documentElement;
     const t = storefront.theme;
