@@ -22,6 +22,16 @@ export function isValidIndianPhone(phone: string): boolean {
   return /^[6-9]\d{9}$/.test(phone);
 }
 
+/**
+ * Strict normalization: strip/country-code handling via normalizePhone, then
+ * validate. Returns the 10-digit number, or null when invalid.
+ * (normalizePhone is kept as-is for backward compat.)
+ */
+export function normalizePhoneStrict(input: string): string | null {
+  const normalized = normalizePhone(input);
+  return isValidIndianPhone(normalized) ? normalized : null;
+}
+
 /** Mask phone for display: 98XXXXXX10 */
 export function maskPhone(phone: string): string {
   if (phone.length < 4) return phone;

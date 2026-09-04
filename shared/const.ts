@@ -1,4 +1,10 @@
-export const COOKIE_NAME = "app_session_id";
+export const ADMIN_COOKIE_NAME = "app_session_id";
+export const CUSTOMER_COOKIE_NAME = "app_session_id";
+// Compat alias: admin + customer sessions share one same-origin cookie name
+// (storefront and admin panel are same-origin). They are told apart by
+// server-side role checks, never by cookie name. Do NOT rename one without
+// migrating the other — logout clears both names.
+export const COOKIE_NAME = ADMIN_COOKIE_NAME;
 export const ONE_YEAR_MS = 1000 * 60 * 60 * 24 * 365;
 export const AXIOS_TIMEOUT_MS = 30_000;
 export const UNAUTHED_ERR_MSG = 'Please login (10001)';

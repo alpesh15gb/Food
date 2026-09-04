@@ -36,7 +36,7 @@ import { applyMenuImport, previewMenuImport } from "../menuImport";
 import { readIntegrationSecret, saveIntegrationSecret } from "../security/secretVault";
 import { getDeliveryProvider, createManualDelivery } from "../integrations/shadowfax";
 import { initiateRefund, createRazorpayLinkedAccount } from "../integrations/razorpay";
-import { orders, deliveries, outlets, restaurants, deliveryStatusHistory, orderStatusHistory } from "../../drizzle/schema";
+import { orders, deliveries, outlets, restaurants, deliveryStatusHistory } from "../../drizzle/schema";
 import { getDb } from "../db";
 import { nanoid } from "nanoid";
 import { eq } from "drizzle-orm";
@@ -83,12 +83,17 @@ export const adminRouter = router({
       limit: z.number().int().min(1).max(200).default(50),
       offset: z.number().int().min(0).default(0),
     }))
-    .query(({ input }) => getOrders(
-      input.restaurantId,
-      { status: input.status, startDate: input.startDate, endDate: input.endDate, customerId: input.customerId },
-      input.limit,
-      input.offset
-    )),
+    .query(({ ctx, input }) => {
+      if (ctx.restaurantId && input.restaurantId !== ctx.restaurantId) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Orders not found for this restaurant." });
+      }
+      return getOrders(
+        input.restaurantId,
+        { status: input.status, startDate: input.startDate, endDate: input.endDate, customerId: input.customerId },
+        input.limit,
+        input.offset
+      );
+    }),
 
   // H-13: Verify order belongs to caller's tenant
   orderDetail: adminProcedure
@@ -420,7 +425,13 @@ export const adminRouter = router({
     startDate: z.coerce.date(),
     endDate: z.coerce.date(),
   }))
-    .query(({ input }) => getSalesReport(input.restaurantId, input.startDate, input.endDate)),
+    .query(({ ctx, input }) => {
+      // Tenant scope: callers bound to a restaurant cannot query other tenants.
+      if (ctx.restaurantId && input.restaurantId !== ctx.restaurantId) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Report not found for this restaurant." });
+      }
+      return getSalesReport(input.restaurantId, input.startDate, input.endDate);
+    }),
 
   // =========================================================================
   // Integration Status & Settings — Issue 8: requires integrations:read
@@ -432,22 +443,24 @@ export const adminRouter = router({
   // Issue 17: Integration secret save with key whitelist
   saveIntegrationSecret: requirePermission("integrations:write").input(z.object({
     restaurantId: z.string().min(4),
-    provider: z.enum(["razorpay", "otp", "delivery"]),
+    // Canonical vault provider is "shadowfax"; "delivery" kept as deprecated alias.
+    provider: z.enum(["razorpay", "otp", "shadowfax", "delivery"]),
     keyName: z.string().min(3).max(96),
     value: z.string().min(1).max(4096),
   }))
     .mutation(async ({ ctx, input }) => {
+      const canonicalProvider = input.provider === "delivery" ? "shadowfax" : input.provider;
       // Issue 17: Validate key name against whitelist
-      const allowedKeys = INTEGRATION_KEY_WHITELIST[input.provider];
+      const allowedKeys = INTEGRATION_KEY_WHITELIST[canonicalProvider];
       if (allowedKeys && !allowedKeys.includes(input.keyName)) {
         throw new Error(`Key name \"${input.keyName}\" is not allowed for provider \"${input.provider}\". Allowed: ${allowedKeys.join(", ")}`);
       }
 
-      await saveIntegrationSecret({ ...input, userId: ctx.user.id });
+      await saveIntegrationSecret({ ...input, provider: canonicalProvider, userId: ctx.user.id });
       await logAudit({
         actorId: ctx.user.id,
         actorName: ctx.user.name ?? undefined,
-        action: `Integration secret saved for ${input.provider}/${input.keyName}`,
+        action: `Integration secret saved for ${canonicalProvider}/${input.keyName}`,
         targetType: "integration",
         targetId: input.restaurantId,
         restaurantId: input.restaurantId,
@@ -457,12 +470,15 @@ export const adminRouter = router({
 
   verifyIntegrationSecret: requirePermission("integrations:read").input(z.object({
     restaurantId: z.string().min(4),
-    provider: z.enum(["razorpay", "otp", "delivery"]),
+    provider: z.enum(["razorpay", "otp", "shadowfax", "delivery"]),
     keyName: z.string().min(3).max(96),
   }))
-    .mutation(async ({ input }) => ({
-      readable: Boolean(await readIntegrationSecret(input.restaurantId, input.provider, input.keyName)),
-    })),
+    .mutation(async ({ input }) => {
+      const canonical = input.provider === "delivery" ? "shadowfax" : input.provider;
+      const direct = await readIntegrationSecret(input.restaurantId, canonical, input.keyName);
+      const legacy = canonical === "shadowfax" ? await readIntegrationSecret(input.restaurantId, "delivery", input.keyName) : null;
+      return { readable: Boolean(direct ?? legacy) };
+    }),
 
   // =========================================================================
   // Razorpay Route — Split Settlement
@@ -631,12 +647,10 @@ export const adminRouter = router({
         throw new Error(`Order must be READY_FOR_PICKUP to dispatch. Current status: ${order.status}`);
       }
 
-      // 2. Check for existing active delivery (idempotency guard)
+      // 2. Check for existing live delivery (idempotency guard; live unique index on orderId).
       const existingDelivery = (await db.select().from(deliveries).where(eq(deliveries.orderId, input.orderId)).limit(1))[0];
-      if (existingDelivery && existingDelivery.provider !== "manual") {
-        if (["DISPATCHING", "PENDING", "ASSIGNED"].includes(existingDelivery.status ?? "")) {
-          throw new Error("Delivery already dispatched or in progress for this order.");
-        }
+      if (existingDelivery && !["CANCELLED", "FAILED"].includes(existingDelivery.status ?? "")) {
+        throw new Error("Delivery already dispatched or in progress for this order.");
       }
 
       // 3. Load outlet for pickup coordinates
@@ -647,31 +661,53 @@ export const adminRouter = router({
       const pickupLoc = validateGeoLocation({ latitude: outlet.latitude, longitude: outlet.longitude });
       if (!pickupLoc.valid) throw new Error("Outlet pickup coordinates are not configured. Please set outlet lat/lng.");
 
-      // 4. Validate drop coordinates from immutable order snapshot
+      // 4. Validate drop coordinates + phone/pincode from immutable order snapshot
       const addrSnapshot = order.addressSnapshot as Record<string, string>;
       const dropLoc = validateGeoLocation({ latitude: addrSnapshot.latitude, longitude: addrSnapshot.longitude });
       if (!dropLoc.valid) throw new Error("Order delivery coordinates are missing. Cannot dispatch without precise location.");
+      const dropPhone = String(order.customerPhone ?? "").replace(/\D/g, "").slice(-10);
+      if (!/^[6-9]\d{9}$/.test(dropPhone)) {
+        throw new Error("A valid 10-digit customer phone is required for dispatch.");
+      }
+      if (!/^\d{6}$/.test(String(addrSnapshot.postalCode ?? ""))) {
+        throw new Error("A valid 6-digit delivery pincode is required for dispatch.");
+      }
+      const pickupPhone = String(outlet.phone ?? "").replace(/\D/g, "").slice(-10);
+      if (outlet.phone && !/^[6-9]\d{9}$/.test(pickupPhone)) {
+        throw new Error("Outlet phone is invalid. Please fix outlet contact before dispatch.");
+      }
 
-      // 5. Create delivery record BEFORE external API call (idempotency)
+      // 5. Create delivery record BEFORE external API call (idempotency).
+      // Status REQUESTED satisfies the deliveries CHECK constraint.
       const deliveryId = nanoid(18);
-      await db.transaction(async (tx) => {
-        await tx.insert(deliveries).values({
-          id: deliveryId,
-          orderId: order.id,
-          provider: "shadowfax",
-          status: "DISPATCHING",
+      try {
+        await db.transaction(async (tx) => {
+          await tx.insert(deliveries).values({
+            id: deliveryId,
+            orderId: order.id,
+            provider: "shadowfax",
+            status: "REQUESTED",
+          });
+          await tx.insert(deliveryStatusHistory).values({
+            id: nanoid(18),
+            deliveryId,
+            status: "REQUESTED",
+            note: "Dispatch initiated — awaiting provider response.",
+          });
         });
-        await tx.insert(deliveryStatusHistory).values({
-          id: nanoid(18),
-          deliveryId,
-          status: "DISPATCHING",
-          note: "Dispatch initiated — awaiting provider response.",
-        });
-      });
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (msg.includes("23505") || msg.toLowerCase().includes("duplicate") || msg.toLowerCase().includes("unique")) {
+          throw new Error("Delivery already dispatched or in progress for this order.");
+        }
+        throw err;
+      }
 
       // 6. Call Shadowfax API — pass restaurantId for per-tenant isolation
       const provider = getDeliveryProvider(order.restaurantId);
       const restaurant = (await db.select().from(restaurants).where(eq(restaurants.id, order.restaurantId)).limit(1))[0];
+      const { orderItems } = await import("../../drizzle/schema");
+      const lineItems = await db.select().from(orderItems).where(eq(orderItems.orderId, order.id));
 
       let result;
       try {
@@ -697,9 +733,9 @@ export const adminRouter = router({
             latitude: dropLoc.latitude,
             longitude: dropLoc.longitude,
           },
-          items: [],
+          items: lineItems.map(li => ({ name: li.itemNameSnapshot, quantity: li.quantity })),
           totalAmountPaise: order.totalPaise,
-          estimatedPreparationMinutes: 0,
+          estimatedPreparationMinutes: outlet.preparationMinutes ?? restaurant?.preparationMinutes ?? 25,
           specialInstructions: order.specialInstructions ?? order.deliveryNotes ?? undefined,
         });
       } catch (error) {
@@ -751,16 +787,11 @@ export const adminRouter = router({
           status: "PENDING",
           note: "Shadowfax delivery created successfully.",
         });
-
-        await tx.update(orders).set({ status: "DELIVERY_REQUESTED" }).where(eq(orders.id, order.id));
-        await tx.insert(orderStatusHistory).values({
-          id: nanoid(18),
-          orderId: order.id,
-          status: "DELIVERY_REQUESTED",
-          note: `Shadowfax delivery dispatched. Tracking: ${result.trackingId ?? "N/A"}.`,
-          actorId: ctx.user.id,
-        });
       });
+
+      // Machine-gated order transition via the canonical helper (validates + history).
+      const { updateOrderStatus } = await import("../db");
+      await updateOrderStatus(order.id, "DELIVERY_REQUESTED", ctx.user.id, `Shadowfax delivery dispatched. Tracking: ${result.trackingId ?? "N/A"}.`);
 
       // 7. Audit
       await logAudit({
@@ -783,6 +814,80 @@ export const adminRouter = router({
       };
     }),
 
+  getDeliveryStatus: requirePermission("orders:read").input(z.object({
+    orderId: z.string().min(4),
+  }))
+    .query(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database not available." });
+      const order = (await db.select().from(orders).where(eq(orders.id, input.orderId)).limit(1))[0];
+      if (!order) throw new TRPCError({ code: "NOT_FOUND", message: "Order not found." });
+      if (ctx.restaurantId && order.restaurantId !== ctx.restaurantId) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Order not found for this restaurant." });
+      }
+      const delivery = (await db.select().from(deliveries).where(eq(deliveries.orderId, input.orderId)).limit(1))[0];
+      if (!delivery) return { delivery: null };
+      // Live provider verification (best-effort; DB row is source of truth).
+      let live: unknown = null;
+      if (delivery.providerDeliveryId && delivery.provider !== "manual") {
+        try {
+          const provider = getDeliveryProvider(order.restaurantId);
+          live = await provider.getDelivery(delivery.providerDeliveryId);
+        } catch {
+          live = null;
+        }
+      }
+      const history = await db.select().from(deliveryStatusHistory)
+        .where(eq(deliveryStatusHistory.deliveryId, delivery.id))
+        .orderBy(deliveryStatusHistory.createdAt);
+      return { delivery, history, live };
+    }),
+
+  cancelDelivery: requirePermission("orders:write").input(z.object({
+    orderId: z.string().min(4),
+    reason: z.string().max(500).optional(),
+  }))
+    .mutation(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database not available." });
+      const order = (await db.select().from(orders).where(eq(orders.id, input.orderId)).limit(1))[0];
+      if (!order) throw new TRPCError({ code: "NOT_FOUND", message: "Order not found." });
+      if (ctx.restaurantId && order.restaurantId !== ctx.restaurantId) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Order not found for this restaurant." });
+      }
+      const delivery = (await db.select().from(deliveries).where(eq(deliveries.orderId, input.orderId)).limit(1))[0];
+      if (!delivery) throw new TRPCError({ code: "NOT_FOUND", message: "No delivery found for this order." });
+      if (["DELIVERED", "CANCELLED", "FAILED"].includes(delivery.status ?? "")) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: `Delivery is already ${delivery.status}.` });
+      }
+      if (delivery.provider !== "manual" && delivery.providerDeliveryId) {
+        const provider = getDeliveryProvider(order.restaurantId);
+        const res = await provider.cancelDelivery(delivery.providerDeliveryId, input.reason);
+        if (!res.success) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: res.error ?? "Provider cancel failed." });
+        }
+      }
+      await db.transaction(async (tx) => {
+        await tx.update(deliveries).set({ status: "CANCELLED" }).where(eq(deliveries.id, delivery.id));
+        await tx.insert(deliveryStatusHistory).values({
+          id: nanoid(18),
+          deliveryId: delivery.id,
+          status: "CANCELLED",
+          note: input.reason ?? "Delivery cancelled by admin.",
+        });
+      });
+      await logAudit({
+        actorId: ctx.user.id,
+        actorName: ctx.user.name ?? undefined,
+        action: "Delivery cancelled",
+        targetType: "delivery",
+        targetId: order.id,
+        afterData: { deliveryId: delivery.id, reason: input.reason ?? null },
+        restaurantId: order.restaurantId,
+      });
+      return { success: true } as const;
+    }),
+
   // =========================================================================
   // Refunds — Issue 8: requires payments:refund
   // =========================================================================
@@ -796,6 +901,7 @@ export const adminRouter = router({
       const result = await initiateRefund({
         ...input,
         initiatedBy: ctx.user.id,
+        restaurantId: ctx.restaurantId ?? undefined,
       });
       await logAudit({
         actorId: ctx.user.id,
@@ -1089,32 +1195,46 @@ export const adminRouter = router({
   // GST Invoice Generation
   // =========================================================================
   generateInvoice: requirePermission("orders:read").input(z.object({ orderId: z.string().min(4) }))
-    .query(async ({ input }) => {
+    .query(async ({ ctx, input }) => {
       const db = await import("../db").then(m => m.getDb());
       if (!db) throw new Error("Database unavailable");
-      const { orders, orderItems, restaurants } = await import("../../drizzle/schema");
+      const { orders, orderItems, restaurants, payments } = await import("../../drizzle/schema");
       const { eq } = await import("drizzle-orm");
       const { generateInvoiceHtml } = await import("../domain/invoiceGenerator");
 
       const order = (await db.select().from(orders).where(eq(orders.id, input.orderId)).limit(1))[0];
       if (!order) throw new TRPCError({ code: "NOT_FOUND", message: "Order not found" });
+      // Tenant check: invoice must belong to caller's restaurant.
+      if (ctx.restaurantId && order.restaurantId !== ctx.restaurantId) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Order not found for this restaurant." });
+      }
 
       const items = await db.select().from(orderItems).where(eq(orderItems.orderId, input.orderId));
       const restaurant = (await db.select().from(restaurants).where(eq(restaurants.id, order.restaurantId)).limit(1))[0];
       if (!restaurant) throw new TRPCError({ code: "NOT_FOUND", message: "Restaurant not found" });
+      const payment = (await db.select().from(payments).where(eq(payments.orderId, input.orderId)).limit(1))[0];
 
-      const subtotalPaise = items.reduce((sum, it) => sum + it.unitPricePaise * it.quantity, 0);
-      const cgstPaise = Math.round(subtotalPaise * 0.025);
-      const sgstPaise = Math.round(subtotalPaise * 0.025);
+      const subtotalPaise = items.reduce((sum, it) => {
+        const mods = (it.selectedModifiers as Array<{ pricePaise?: number }> | null) ?? [];
+        const modTotal = mods.reduce((s, m) => s + (m.pricePaise ?? 0), 0) * it.quantity;
+        return sum + it.unitPricePaise * it.quantity + modTotal;
+      }, 0);
+      // Use authoritative order.taxPaise split evenly into CGST/SGST.
+      const taxPaise = order.taxPaise ?? 0;
+      const cgstPaise = Math.floor(taxPaise / 2);
+      const sgstPaise = taxPaise - cgstPaise;
 
       const addrSnap = order.addressSnapshot as Record<string, unknown> | null;
-      const deliveryAddress = [addrSnap?.address, addrSnap?.city, addrSnap?.pincode].filter(Boolean).join(", ") || "";
+      const deliveryAddress = [
+        addrSnap?.flatHouse, addrSnap?.building, addrSnap?.street, addrSnap?.area,
+        addrSnap?.city, addrSnap?.postalCode,
+      ].filter(v => typeof v === "string" && (v as string).trim()).join(", ") || "";
 
       const html = generateInvoiceHtml({
         restaurantName: restaurant.name,
         restaurantAddress: restaurant.address || "",
         restaurantPhone: restaurant.contactPhone || "",
-        restaurantGst: (restaurant as any).gstNumber || "",
+        restaurantGst: (restaurant as unknown as { gstNumber?: string }).gstNumber || "",
         logoUrl: restaurant.logoUrl || undefined,
         invoiceNumber: `INV-${order.orderNumber}`,
         orderNumber: order.orderNumber,
@@ -1122,20 +1242,26 @@ export const adminRouter = router({
         customerName: order.customerName || "",
         customerPhone: order.customerPhone || "",
         deliveryAddress,
-        items: items.map(it => ({
-          name: it.itemNameSnapshot,
-          quantity: it.quantity,
-          unitPricePaise: it.unitPricePaise,
-          totalPricePaise: it.unitPricePaise * it.quantity,
-        })),
+        items: items.map(it => {
+          const mods = (it.selectedModifiers as Array<{ optionName?: string; pricePaise?: number }> | null) ?? [];
+          const modSuffix = mods.length ? ` (${mods.map(m => m.optionName ?? "").filter(Boolean).join(", ")})` : "";
+          const variantSuffix = it.variantNameSnapshot ? ` [${it.variantNameSnapshot}]` : "";
+          const modTotal = mods.reduce((s, m) => s + (m.pricePaise ?? 0), 0) * it.quantity;
+          return {
+            name: `${it.itemNameSnapshot}${variantSuffix}${modSuffix}`,
+            quantity: it.quantity,
+            unitPricePaise: it.unitPricePaise,
+            totalPricePaise: it.unitPricePaise * it.quantity + modTotal,
+          };
+        }),
         subtotalPaise,
-        discountPaise: order.discountPaise ?? 0,
+        discountPaise: (order.couponDiscountPaise ?? 0) + (order.discountPaise ?? 0),
         packagingFeePaise: order.packagingFeePaise ?? 0,
         deliveryFeePaise: order.deliveryFeePaise ?? 0,
         cgstPaise,
         sgstPaise,
         totalPaise: order.totalPaise,
-        paymentMethod: order.fulfillmentType || "-",
+        paymentMethod: payment?.method ?? payment?.provider ?? order.fulfillmentType ?? "-",
         paymentStatus: order.paymentStatus || "PENDING",
       });
 
@@ -1187,62 +1313,129 @@ export const adminRouter = router({
     customerName: z.string().optional(),
     customerPhone: z.string().optional(),
     items: z.array(z.object({
+      menuItemId: z.string().min(4).optional(),
       name: z.string().min(1),
-      quantity: z.number().int().min(1),
+      quantity: z.number().int().min(1).max(50),
       unitPricePaise: z.number().int().min(0),
-    })).min(1),
+    })).min(1).max(50),
+    priceOverrideReason: z.string().max(500).optional(),
     paymentStatus: z.enum(["PAID", "COD"]).default("PAID"),
     notes: z.string().optional(),
   }))
     .mutation(async ({ input, ctx }) => {
+      if (ctx.restaurantId && input.restaurantId !== ctx.restaurantId) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Order not found for this restaurant." });
+      }
       const db = await import("../db").then(m => m.getDb());
       if (!db) throw new Error("Database unavailable");
-      const { orders, orderItems, restaurants } = await import("../../drizzle/schema");
+      const { orders, orderItems, restaurants, outlets, menuItems, payments, orderStatusHistory } = await import("../../drizzle/schema");
+      const { logAudit } = await import("../db");
       const { nanoid } = await import("nanoid");
-      const { eq } = await import("drizzle-orm");
+      const { eq, inArray } = await import("drizzle-orm");
 
-      // H-08: Compute total from items server-side
-      const computedItemTotal = input.items.reduce((sum, it) => sum + it.unitPricePaise * it.quantity, 0);
-      // Add restaurant packaging fee
+      // Verify outlet belongs to this restaurant.
+      const outlet = (await db.select().from(outlets).where(eq(outlets.id, input.outletId)).limit(1))[0];
+      if (!outlet || outlet.restaurantId !== input.restaurantId) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Outlet does not belong to this restaurant." });
+      }
       const restaurant = (await db.select().from(restaurants).where(eq(restaurants.id, input.restaurantId)).limit(1))[0];
-      const packagingFee = restaurant?.packagingFeePaise ?? 0;
-      const totalPaise = computedItemTotal + packagingFee;
+      if (!restaurant) throw new TRPCError({ code: "NOT_FOUND", message: "Restaurant not found." });
+
+      // P0: lookup menu prices; overrides require priceOverrideReason + audit.
+      const ids = input.items.map(i => i.menuItemId).filter((v): v is string => Boolean(v));
+      const menuRows = ids.length
+        ? await db.select().from(menuItems).where(inArray(menuItems.id, ids))
+        : [];
+      const menuById = new Map(menuRows.map(m => [m.id, m]));
+      const resolved = input.items.map(it => {
+        if (it.menuItemId) {
+          const menu = menuById.get(it.menuItemId);
+          if (!menu || menu.restaurantId !== input.restaurantId) {
+            throw new TRPCError({ code: "BAD_REQUEST", message: `Menu item "${it.name}" not found for this restaurant.` });
+          }
+          const listPrice = menu.offerPricePaise ?? menu.pricePaise;
+          if (it.unitPricePaise !== listPrice && !input.priceOverrideReason) {
+            throw new TRPCError({ code: "BAD_REQUEST", message: `Price override for "${menu.name}" requires priceOverrideReason.` });
+          }
+          return { name: menu.name, menuItemId: menu.id, unitPricePaise: it.unitPricePaise, quantity: it.quantity };
+        }
+        // Free-form aggregator line (no menu link) — requires override reason for audit.
+        if (!input.priceOverrideReason) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: `Custom price for "${it.name}" requires priceOverrideReason.` });
+        }
+        return { name: it.name, menuItemId: null, unitPricePaise: it.unitPricePaise, quantity: it.quantity };
+      });
+
+      // Tax/packaging via server quote (restaurant GST + packaging fee).
+      const computedItemTotal = resolved.reduce((sum, it) => sum + it.unitPricePaise * it.quantity, 0);
+      const packagingFee = restaurant.packagingFeePaise ?? 0;
+      const taxPercent = parseFloat(String(restaurant.gstPercentage ?? "5")) || 0;
+      const taxPaise = Math.round((computedItemTotal * taxPercent) / 100);
+      const totalPaise = computedItemTotal + packagingFee + taxPaise;
 
       const orderId = nanoid();
       const orderNumber = `AGG-${Date.now().toString(36).toUpperCase()}`;
 
-      await db.insert(orders).values({
-        id: orderId,
-        orderNumber,
-        trackingToken: nanoid(),
-        restaurantId: input.restaurantId,
-        outletId: input.outletId,
-        status: "PLACED",
-        paymentStatus: input.paymentStatus === "PAID" ? "PAID" : "PENDING",
-        fulfillmentType: "DELIVERY",
-        orderSource: input.source,
-        customerName: input.customerName || null,
-        customerPhone: input.customerPhone || null,
-        addressSnapshot: { source: input.source, note: "Manual aggregator entry" },
-        itemTotalPaise: computedItemTotal,
-        discountPaise: 0,
-        packagingFeePaise: packagingFee,
-        deliveryFeePaise: 0,
-        taxPaise: 0,
-        totalPaise: totalPaise,
-        specialInstructions: input.notes || null,
+      await db.transaction(async (tx) => {
+        await tx.insert(orders).values({
+          id: orderId,
+          orderNumber,
+          trackingToken: nanoid(),
+          restaurantId: input.restaurantId,
+          outletId: input.outletId,
+          status: "PLACED",
+          paymentStatus: input.paymentStatus === "PAID" ? "PAID" : "PENDING",
+          fulfillmentType: "DELIVERY",
+          orderSource: input.source,
+          customerName: input.customerName || null,
+          customerPhone: input.customerPhone || null,
+          addressSnapshot: { source: input.source, note: "Manual aggregator entry" },
+          itemTotalPaise: computedItemTotal,
+          discountPaise: 0,
+          packagingFeePaise: packagingFee,
+          deliveryFeePaise: 0,
+          taxPaise,
+          totalPaise,
+          specialInstructions: input.notes || null,
+        });
+
+        for (const item of resolved) {
+          await tx.insert(orderItems).values({
+            id: nanoid(),
+            orderId,
+            menuItemId: item.menuItemId,
+            itemNameSnapshot: item.name,
+            unitPricePaise: item.unitPricePaise,
+            quantity: item.quantity,
+            selectedModifiers: [],
+          });
+        }
+
+        await tx.insert(payments).values({
+          id: nanoid(18),
+          orderId,
+          amountPaise: totalPaise,
+          status: input.paymentStatus === "PAID" ? "CAPTURED" : "CREATED",
+        });
+
+        await tx.insert(orderStatusHistory).values({
+          id: nanoid(18),
+          orderId,
+          status: "PLACED",
+          note: `Manual ${input.source} order created by admin.${input.priceOverrideReason ? ` Price override: ${input.priceOverrideReason}` : ""}`,
+          actorId: ctx.user.id,
+        });
       });
 
-      for (const item of input.items) {
-        await db.insert(orderItems).values({
-          id: nanoid(),
-          orderId,
-          itemNameSnapshot: item.name,
-          unitPricePaise: item.unitPricePaise,
-          quantity: item.quantity,
-          selectedModifiers: [],
-        });
-      }
+      await logAudit({
+        actorId: ctx.user.id,
+        actorName: ctx.user.name ?? undefined,
+        action: `Manual order created (${input.source})`,
+        targetType: "order",
+        targetId: orderId,
+        afterData: { orderNumber, itemTotalPaise: computedItemTotal, totalPaise, priceOverrideReason: input.priceOverrideReason ?? null },
+        restaurantId: input.restaurantId,
+      });
 
       return { orderId, orderNumber };
     }),

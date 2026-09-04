@@ -1,6 +1,7 @@
 import { trpc } from "@/lib/trpc";
-import { BarChart3, CalendarDays, Loader2, TrendingUp, Users } from "lucide-react";
+import { BarChart3, CalendarDays, TrendingUp, Users } from "lucide-react";
 import { useMemo, useState } from "react";
+import { AdminError } from "@/components/DashboardLayout";
 import {
   Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Legend,
   Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
@@ -25,24 +26,33 @@ function getDefaultRange() {
 export default function AnalyticsPanel({ restaurantId }: { restaurantId: string }) {
   const [range, setRange] = useState(getDefaultRange);
 
-  const { data: summary, isLoading: summaryLoading } = trpc.analytics.summaryStats.useQuery({
+  const summaryQuery = trpc.analytics.summaryStats.useQuery({
     restaurantId, startDate: range.start, endDate: range.end,
-  });
-  const { data: revenueData, isLoading: revenueLoading } = trpc.analytics.revenueTrend.useQuery({
+  }, { retry: false });
+  const revenueQuery = trpc.analytics.revenueTrend.useQuery({
     restaurantId, startDate: range.start, endDate: range.end, granularity: "daily",
-  });
-  const { data: itemData } = trpc.analytics.itemPerformance.useQuery({
+  }, { retry: false });
+  const itemQuery = trpc.analytics.itemPerformance.useQuery({
     restaurantId, startDate: range.start, endDate: range.end, limit: 10,
-  });
-  const { data: heatmapData } = trpc.analytics.hourlyHeatmap.useQuery({
+  }, { retry: false });
+  const heatmapQuery = trpc.analytics.hourlyHeatmap.useQuery({
     restaurantId, days: 30,
-  });
-  const { data: categoryData } = trpc.analytics.categoryBreakdown.useQuery({
+  }, { retry: false });
+  const categoryQuery = trpc.analytics.categoryBreakdown.useQuery({
     restaurantId, startDate: range.start, endDate: range.end,
-  });
-  const { data: retentionData } = trpc.analytics.customerRetention.useQuery({
+  }, { retry: false });
+  const retentionQuery = trpc.analytics.customerRetention.useQuery({
     restaurantId, startDate: range.start, endDate: range.end,
-  });
+  }, { retry: false });
+
+  const summary = summaryQuery.data;
+  const revenueData = revenueQuery.data;
+  const itemData = itemQuery.data;
+  const heatmapData = heatmapQuery.data;
+  const categoryData = categoryQuery.data;
+  const retentionData = retentionQuery.data;
+  const summaryLoading = summaryQuery.isLoading;
+  const revenueLoading = revenueQuery.isLoading;
 
   const heatmapGrid = useMemo(() => {
     if (!heatmapData) return [];
@@ -58,41 +68,59 @@ export default function AnalyticsPanel({ restaurantId }: { restaurantId: string 
 
   const maxHeatmap = Math.max(...heatmapGrid.map(g => g.count), 1);
 
-  if (summaryLoading || revenueLoading) {
-    return (
-      <div className="flex items-center justify-center py-20">
-        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-      </div>
-    );
-  }
+  const refetchAll = () => {
+    summaryQuery.refetch();
+    revenueQuery.refetch();
+    itemQuery.refetch();
+    heatmapQuery.refetch();
+    categoryQuery.refetch();
+    retentionQuery.refetch();
+  };
 
   return (
-    <div className="space-y-8 p-6">
+    <div className="space-y-8">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Analytics</h1>
           <p className="mt-1 text-sm text-muted-foreground">Revenue, orders, and customer insights</p>
         </div>
         <div className="flex items-center gap-2">
-          <CalendarDays className="h-4 w-4 text-muted-foreground" />
+          <CalendarDays className="h-4 w-4 text-muted-foreground" aria-hidden />
+          <label htmlFor="analytics-start" className="sr-only">Start date</label>
           <input
+            id="analytics-start"
             type="date"
             value={range.start}
             onChange={(e: React.ChangeEvent<HTMLInputElement>) => setRange(r => ({ ...r, start: e.target.value }))}
-            className="rounded-md border px-2 py-1.5 text-sm"
+            className="min-h-11 rounded-md border px-2 py-1.5 text-sm"
           />
           <span className="text-muted-foreground">to</span>
+          <label htmlFor="analytics-end" className="sr-only">End date</label>
           <input
+            id="analytics-end"
             type="date"
             value={range.end}
             onChange={(e: React.ChangeEvent<HTMLInputElement>) => setRange(r => ({ ...r, end: e.target.value }))}
-            className="rounded-md border px-2 py-1.5 text-sm"
+            className="min-h-11 rounded-md border px-2 py-1.5 text-sm"
           />
         </div>
       </div>
 
+      {(summaryQuery.isError || revenueQuery.isError) && (
+        <AdminError
+          message="We couldn't load analytics for this range. Please retry."
+          onRetry={refetchAll}
+        />
+      )}
+
       {/* Summary Cards */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {summaryLoading ? (
+          [1, 2, 3, 4].map(i => (
+            <div key={i} className="h-28 animate-pulse rounded-xl border bg-card p-5" aria-label="Loading summary" />
+          ))
+        ) : (
+          <>
         <SummaryCard
           label="Total Revenue"
           value={formatCurrency(summary?.totalRevenuePaise ?? 0)}
@@ -122,11 +150,16 @@ export default function AnalyticsPanel({ restaurantId }: { restaurantId: string 
           color="text-orange-700"
           bg="bg-orange-100"
         />
+          </>
+        )}
       </div>
 
       {/* Revenue Trend Chart */}
       <div className="rounded-xl border bg-card p-6">
         <h2 className="mb-4 font-semibold">Revenue Trend</h2>
+        {revenueLoading ? (
+          <div className="h-72 animate-pulse rounded-lg bg-muted" aria-label="Loading revenue trend" />
+        ) : (
         <div className="h-72">
           <ResponsiveContainer width="100%" height="100%">
             <AreaChart data={revenueData ?? []}>
@@ -151,12 +184,16 @@ export default function AnalyticsPanel({ restaurantId }: { restaurantId: string 
             </AreaChart>
           </ResponsiveContainer>
         </div>
+        )}
       </div>
 
       <div className="grid gap-6 lg:grid-cols-2">
         {/* Top Items */}
         <div className="rounded-xl border bg-card p-6">
           <h2 className="mb-4 font-semibold">Top Performing Items</h2>
+          {itemQuery.isLoading ? (
+            <div className="h-72 animate-pulse rounded-lg bg-muted" aria-label="Loading top items" />
+          ) : (
           <div className="h-72">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={itemData ?? []} layout="vertical" margin={{ left: 20 }}>
@@ -172,11 +209,15 @@ export default function AnalyticsPanel({ restaurantId }: { restaurantId: string 
               </BarChart>
             </ResponsiveContainer>
           </div>
+          )}
         </div>
 
         {/* Category Breakdown */}
         <div className="rounded-xl border bg-card p-6">
           <h2 className="mb-4 font-semibold">Sales by Category</h2>
+          {categoryQuery.isLoading ? (
+            <div className="h-72 animate-pulse rounded-lg bg-muted" aria-label="Loading category breakdown" />
+          ) : (
           <div className="h-72">
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
@@ -199,6 +240,7 @@ export default function AnalyticsPanel({ restaurantId }: { restaurantId: string 
               </PieChart>
             </ResponsiveContainer>
           </div>
+          )}
         </div>
       </div>
 

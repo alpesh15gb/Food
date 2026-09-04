@@ -1,5 +1,5 @@
 /** CSV menu importer: validate all rows first, then publish as one all-or-nothing restaurant update. */
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { menuCategories, menuItems } from "../drizzle/schema";
 import { getDb } from "./db";
@@ -19,10 +19,12 @@ const slugify = (value: string) => value.toLowerCase().trim().replace(/[^a-z0-9]
 export function previewMenuImport(csv: string) {
   const matrix = readCsv(csv.replace(/^\uFEFF/, ""));
   if (matrix.length < 2) return { columns: expectedHeaders, rows: [], valid: 0, invalid: 1, errors: ["Add a header row and at least one menu item."] };
-  const headers = matrix[0].map(value => value.toLowerCase().replace(/\s+/g, "_"));
+  // Case-insensitive header match: trim + lowercase + collapse whitespace.
+  const headers = matrix[0].map(value => value.trim().toLowerCase().replace(/\s+/g, "_"));
   const missing = expectedHeaders.filter(header => !headers.includes(header));
   if (missing.length) return { columns: expectedHeaders, rows: [], valid: 0, invalid: 1, errors: [`Missing column${missing.length > 1 ? "s" : ""}: ${missing.join(", ")}.`] };
-  if (matrix.length > 1000) return { columns: expectedHeaders, rows: [], valid: 0, invalid: 1, errors: ["Import a maximum of 1,000 dishes at a time."] };
+  // Header row excluded from dish count (-1): allow 1000 dishes + 1 header row.
+  if (matrix.length - 1 > 1000) return { columns: expectedHeaders, rows: [], valid: 0, invalid: 1, errors: ["Import a maximum of 1,000 dishes at a time."] };
   const index = (header: string) => headers.indexOf(header);
   const rows: ImportRow[] = matrix.slice(1).map((values, rowIndex) => {
     const errors: string[] = []; const category = values[index("category")]?.trim() ?? ""; const name = values[index("name")]?.trim() ?? ""; const description = values[index("description")]?.trim() ?? ""; const price = Number(values[index("price")]?.replace(/[^0-9.]/g, "")); const dietaryRaw = (values[index("dietary_type")] || "veg").trim().toLowerCase(); const availabilityRaw = (values[index("availability")] || "AVAILABLE").trim().toUpperCase(); const imageUrl = values[index("image_url")]?.trim() || undefined; const tag = values[index("tag")]?.trim() || undefined; const customRaw = (values[index("customizable")] || "no").trim().toLowerCase();
@@ -37,33 +39,65 @@ export async function applyMenuImport(restaurantId: string, csv: string) {
   if (preview.errors.length || preview.invalid) throw new Error(preview.errors[0] ?? "Correct each highlighted row before publishing the menu.");
   const db = await getDb(); if (!db) throw new Error("The database connection is not available.");
   const categories = await db.select().from(menuCategories).where(eq(menuCategories.restaurantId, restaurantId));
-  const categoryByName = new Map(categories.map(category => [category.name.toLowerCase(), category]));
-  let created = 0; let updated = 0;
-  for (const row of preview.rows) {
-    const categoryKey = row.category.toLowerCase();
-    let category = categoryByName.get(categoryKey);
-    if (!category) {
-      const newCat = {
-        id: nanoid(18),
-        restaurantId,
-        name: row.category,
-        slug: slugify(row.category) || nanoid(8),
-        description: null,
-        imageUrl: null,
-        iconEmoji: null,
-        sortOrder: categoryByName.size + 1,
-        isVisible: true,
-        isOpen: true,
-        createdAt: new Date(),
-      };
-      await db.insert(menuCategories).values(newCat);
-      categoryByName.set(categoryKey, newCat);
-      category = newCat;
+  // Case-insensitive category match; track slugs for dedup.
+  const categoryByName = new Map(categories.map(category => [category.name.trim().toLowerCase(), category]));
+  const usedSlugs = new Set(categories.map(c => c.slug.toLowerCase()));
+  const dedupSlug = (base: string) => {
+    let slug = base || nanoid(8);
+    let candidate = slug;
+    let n = 2;
+    while (usedSlugs.has(candidate.toLowerCase())) {
+      candidate = `${slug}-${n++}`;
     }
-    const existing = (await db.select().from(menuItems).where(and(eq(menuItems.restaurantId, restaurantId), eq(menuItems.categoryId, category.id), eq(menuItems.name, row.name))).limit(1))[0];
-    const values = { description: row.description || null, pricePaise: row.pricePaise, imageUrl: row.imageUrl ?? null, dietaryType: row.dietaryType, availability: row.availability, availableNote: null, tag: row.tag ?? null, isCustomizable: row.customizable, sortOrder: row.rowNumber };
-    if (existing) { await db.update(menuItems).set(values).where(eq(menuItems.id, existing.id)); updated += 1; }
-    else { await db.insert(menuItems).values({ id: nanoid(18), restaurantId, categoryId: category.id, name: row.name, ...values }); created += 1; }
-  }
+    usedSlugs.add(candidate.toLowerCase());
+    return candidate;
+  };
+  let created = 0; let updated = 0;
+  // All-or-nothing publish: wrap the entire apply in a transaction.
+  await db.transaction(async (tx) => {
+    // Preserve existing sortOrder: track max for new items only.
+    const existingItems = await tx.select().from(menuItems).where(eq(menuItems.restaurantId, restaurantId));
+    let maxSort = existingItems.reduce((m, it) => Math.max(m, it.sortOrder ?? 0), categories.length);
+    const itemsByCatAndName = new Map(
+      existingItems.map(it => [`${it.categoryId}::${it.name.trim().toLowerCase()}`, it])
+    );
+    for (const row of preview.rows) {
+      const categoryKey = row.category.trim().toLowerCase();
+      let category = categoryByName.get(categoryKey);
+      if (!category) {
+        const newCat = {
+          id: nanoid(18),
+          restaurantId,
+          name: row.category.trim(),
+          slug: dedupSlug(slugify(row.category) || nanoid(8)),
+          description: null,
+          imageUrl: null,
+          iconEmoji: null,
+          sortOrder: categoryByName.size + 1,
+          isVisible: true,
+          isOpen: true,
+          createdAt: new Date(),
+        };
+        await tx.insert(menuCategories).values(newCat);
+        categoryByName.set(categoryKey, newCat);
+        category = newCat;
+      }
+      // Case-insensitive item match within category.
+      const existing = itemsByCatAndName.get(`${category.id}::${row.name.trim().toLowerCase()}`);
+      if (existing) {
+        // Preserve sortOrder on update — do not overwrite manual ordering.
+        const values = { description: row.description || null, pricePaise: row.pricePaise, imageUrl: row.imageUrl ?? null, dietaryType: row.dietaryType, availability: row.availability, availableNote: null, tag: row.tag ?? null, isCustomizable: row.customizable };
+        await tx.update(menuItems).set(values).where(eq(menuItems.id, existing.id));
+        updated += 1;
+      } else {
+        maxSort += 1;
+        const values = { description: row.description || null, pricePaise: row.pricePaise, imageUrl: row.imageUrl ?? null, dietaryType: row.dietaryType, availability: row.availability, availableNote: null, tag: row.tag ?? null, isCustomizable: row.customizable, sortOrder: maxSort };
+        const newId = nanoid(18);
+        await tx.insert(menuItems).values({ id: newId, restaurantId, categoryId: category.id, name: row.name.trim(), ...values });
+        itemsByCatAndName.set(`${category.id}::${row.name.trim().toLowerCase()}`, { ...values, id: newId, restaurantId, categoryId: category.id, name: row.name.trim() } as typeof existing & {});
+        created += 1;
+      }
+    }
+  });
   return { created, updated, total: preview.rows.length };
 }

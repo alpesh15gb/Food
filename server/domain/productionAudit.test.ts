@@ -162,7 +162,7 @@ describe("Issue 6 — Payment Idempotency", () => {
     let paymentStatus = "PENDING";
     let callCount = 0;
 
-    function confirmPaymentIdempotent(existingStatus: string, existingPaymentStatus: string): { success: boolean; alreadyConfirmed?: boolean } {
+    function confirmPaymentIdempotent(existingStatus: string, existingPaymentStatus: string): { success: boolean; alreadyConfirmed?: boolean; error?: string } {
       callCount++;
       // Already confirmed
       if (existingPaymentStatus === "PAID" && existingStatus !== "PENDING_PAYMENT") {
@@ -214,8 +214,8 @@ describe("Issue 7 — Webhook HMAC Verification", () => {
   it("rejects webhook with null external_id for idempotency", () => {
     // Issue 16: PostgreSQL UNIQUE allows multiple NULLs
     // We must reject events without proper IDs
-    const eventId = null;
-    const isValid = eventId !== null && typeof eventId === "string" && eventId.length > 0;
+    const eventId = null as unknown as string | null;
+    const isValid = typeof eventId === "string" && (eventId as string).length > 0;
     expect(isValid).toBe(false);
   });
 });

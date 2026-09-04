@@ -16,6 +16,10 @@ function Router() {
       <Route path="/admin/:restaurantSlug" component={Admin} />
       <Route path="/admin/:restaurantSlug/:section" component={Admin} />
       <Route path="/" component={Home} />
+      <Route path="/:slug/cart" component={Home} />
+      <Route path="/:slug/checkout" component={Home} />
+      <Route path="/:slug/confirmation" component={Home} />
+      <Route path="/order/:number" component={Home} />
       <Route path="/:slug" component={Home} />
       <Route path="/:slug/:rest*" component={Home} />
       <Route component={Home} />

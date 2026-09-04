@@ -24,9 +24,12 @@ export default function SignupPage() {
   });
 
   const register = trpc.auth.register.useMutation({
-    onSuccess: () => {
+    onSuccess: (result) => {
       toast.success("Welcome! Your restaurant has been created.");
-      setLocation("/admin");
+      // Prefer the slug returned by the server; fall back to the slug preview.
+      const returned = (result ?? {}) as { slug?: string; restaurantSlug?: string; restaurantId?: string };
+      const slug = returned.slug || returned.restaurantSlug || form.restaurantSlug;
+      setLocation(slug ? `/admin/${slug}/overview` : "/admin");
     },
     onError: (err) => toast.error(err.message),
   });
@@ -34,6 +37,7 @@ export default function SignupPage() {
   const login = trpc.auth.login.useMutation({
     onSuccess: () => {
       toast.success("Signed in successfully.");
+      // Slug is unknown at login time; /admin resolves it via redirect helper.
       setLocation("/admin");
     },
     onError: (err) => toast.error(err.message),
@@ -117,6 +121,15 @@ export default function SignupPage() {
             Don't have an account?{" "}
             <button onClick={() => setIsLogin(false)} className="text-[#38271F] font-semibold hover:underline">
               Create one
+            </button>
+          </p>
+          <p className="text-center text-sm text-[#6b5c52]">
+            <button onClick={() => toast.info("Password resets are handled by your restaurant owner.")} className="hover:underline">
+              Forgot your password?
+            </button>
+            {" · "}
+            <button onClick={() => setLocation("/")} className="hover:underline">
+              Back to storefront
             </button>
           </p>
         </div>
@@ -217,6 +230,11 @@ export default function SignupPage() {
           Already have an account?{" "}
           <button onClick={() => setIsLogin(true)} className="text-[#38271F] font-semibold hover:underline">
             Sign in
+          </button>
+        </p>
+        <p className="text-center text-sm text-[#6b5c52]">
+          <button onClick={() => setLocation("/")} className="hover:underline">
+            Back to storefront
           </button>
         </p>
       </div>

@@ -7,30 +7,70 @@ import { useEffect, useMemo, useState } from "react";
 import { useLocation } from "wouter";
 import { toast } from "sonner";
 import {
-  ArrowLeft, ArrowRight, Bike, Check, ChevronDown, ChevronRight, Clock3,
-  FileText, Home, LocateFixed, MapPin, Minus, PackageCheck, Phone,
-  Plus, Search, ShoppingBag, SlidersHorizontal, Sparkles, Store,
-  TicketPercent, UserRound, Utensils, X, Zap,
+  ArrowLeft, ArrowRight, Bike, Check, ChevronRight, Clock3,
+  MapPin, Minus, PackageCheck,
+  Plus, Search, ShoppingBag, Sparkles, Store,
+  TicketPercent, UserRound, Utensils, X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import DeliveryLocationDrawer, { type DeliveryLocation } from "@/components/DeliveryLocationDrawer";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Drawer, DrawerContent, DrawerDescription, DrawerFooter, DrawerHeader, DrawerTitle } from "@/components/ui/drawer";
 import { Input } from "@/components/ui/input";
-import { formatINR, type MenuItem, type FoodKind } from "@/lib/types";
+import { formatINR, type FoodKind } from "@/lib/types";
 import { trpc } from "@/lib/trpc";
-import { adaptStorefront } from "@/lib/storefrontAdapter";
+import {
+  adaptStorefront,
+  type StorefrontAddonGroup,
+  type StorefrontMenuItem,
+  type StorefrontVariant,
+} from "@/lib/storefrontAdapter";
 
 type CartLine = {
   id: string;
-  item: MenuItem;
+  item: StorefrontMenuItem;
   quantity: number;
   note?: string;
+  /** Display names for the chosen variant + options. */
   modifiers?: string[];
+  /** Real modifier option IDs sent to the server (DB-resolved pricing). */
+  modifierOptionIds?: string[];
+  /** Real variant ID sent to the server (DB-resolved pricing). */
+  selectedVariantId?: string;
   unitPrice: number;
 };
 
 type Filter = "all" | FoodKind | "bestseller";
+
+/** Normalize to the 10-digit national number; shared by send + verify. */
+function normalizePhone(raw: string): string {
+  return raw.replace(/[^\d]/g, "").slice(-10);
+}
+
+function newIdempotencyKey(): string {
+  try {
+    if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+      return crypto.randomUUID();
+    }
+  } catch {
+    // fall through to the random fallback below
+  }
+  return `ck-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 14)}`;
+}
+
+function useIsDesktop(breakpoint = "(min-width: 640px)"): boolean {
+  const [desktop, setDesktop] = useState<boolean>(
+    () => typeof window !== "undefined" && window.matchMedia(breakpoint).matches,
+  );
+  useEffect(() => {
+    const query = window.matchMedia(breakpoint);
+    const onChange = (event: MediaQueryListEvent) => setDesktop(event.matches);
+    query.addEventListener("change", onChange);
+    setDesktop(query.matches);
+    return () => query.removeEventListener("change", onChange);
+  }, [breakpoint]);
+  return desktop;
+}
 
 const kindCopy: Record<FoodKind, string> = {
   veg: "Vegetarian",
@@ -45,12 +85,18 @@ function FoodDot({ kind }: { kind: FoodKind }) {
       : kind === "egg"
       ? "border-amber-500 before:bg-amber-500"
       : "border-red-600 before:bg-red-600";
+  const shortLabel = kind === "veg" ? "V" : kind === "egg" ? "E" : "NV";
   return (
     <span
+      role="img"
       aria-label={kindCopy[kind]}
       title={kindCopy[kind]}
       className={`relative inline-grid h-4 w-4 place-items-center border ${colour} before:h-1.5 before:w-1.5 before:rounded-full`}
-    />
+    >
+      <span className="sr-only">
+        {shortLabel} — {kindCopy[kind]}
+      </span>
+    </span>
   );
 }
 
@@ -66,31 +112,37 @@ function Quantity({
   value,
   onChange,
   compact = false,
+  allowZero = false,
 }: {
   value: number;
   onChange: (next: number) => void;
   compact?: boolean;
+  /** When true, decrementing at 1 removes the line (qty → 0 delete). */
+  allowZero?: boolean;
 }) {
+  const atMinimum = value <= 1;
   return (
     <div
-      className={`inline-flex items-center rounded-full border border-[#e7d2bf] bg-[#fffdf8] ${
-        compact ? "h-9" : "h-11"
+      className={`inline-flex min-h-[44px] items-center rounded-full border border-[#e7d2bf] bg-[#fffdf8] ${
+        compact ? "h-11" : "h-11"
       }`}
     >
       <button
-        aria-label="Decrease quantity"
-        onClick={() => onChange(Math.max(1, value - 1))}
-        className="grid h-full w-9 place-items-center text-[#7f5a45] hover:text-[#c84630]"
+        type="button"
+        aria-label={atMinimum && allowZero ? "Remove item" : "Decrease quantity"}
+        onClick={() => onChange(atMinimum ? (allowZero ? 0 : 1) : value - 1)}
+        className="grid h-full min-h-[44px] w-11 place-items-center rounded-l-full text-[#7f5a45] hover:text-[#c84630] focus-visible:outline-2 focus-visible:outline-[#c84630]"
       >
         <Minus className="h-3.5 w-3.5" />
       </button>
-      <span className="w-5 text-center text-sm font-extrabold tabular-nums">
+      <span aria-live="polite" aria-atomic="true" className="w-5 text-center text-sm font-extrabold tabular-nums">
         {value}
       </span>
       <button
+        type="button"
         aria-label="Increase quantity"
         onClick={() => onChange(value + 1)}
-        className="grid h-full w-9 place-items-center text-[#7f5a45] hover:text-[#c84630]"
+        className="grid h-full min-h-[44px] w-11 place-items-center rounded-r-full text-[#7f5a45] hover:text-[#c84630] focus-visible:outline-2 focus-visible:outline-[#c84630]"
       >
         <Plus className="h-3.5 w-3.5" />
       </button>
@@ -98,12 +150,15 @@ function Quantity({
   );
 }
 
-export default function OrderingApp({ slug }: { slug?: string }) {
-  const [, navigate] = useLocation();
+export default function OrderingApp({ slug, trackingNumber }: { slug?: string; trackingNumber?: string }) {
+  const [location, navigate] = useLocation();
   const storefrontSlug = slug || "";
-  const storefrontQuery = trpc.storefront.get.useQuery({ slug: storefrontSlug });
+  const hasSlug = storefrontSlug.length >= 2;
+  const storefrontQuery = trpc.storefront.get.useQuery(
+    { slug: storefrontSlug },
+    { enabled: hasSlug },
+  );
   const paymentConfig = trpc.storefront.paymentConfig.useQuery();
-  const localAdminMode = trpc.auth.localAdminEnabled.useQuery();
   const initiatePayment = trpc.storefront.initiatePayment.useMutation();
   const verifyPayment = trpc.storefront.verifyPayment.useMutation();
   const storefront = storefrontQuery.data
@@ -119,8 +174,8 @@ export default function OrderingApp({ slug }: { slug?: string }) {
     if (!storefront?.theme) return;
     const root = document.documentElement;
     const t = storefront.theme;
-    root.style.setProperty("--color-primary", t.primaryColor);
-    root.style.setProperty("--color-accent", t.accentColor);
+    root.style.setProperty("--theme-primary", t.primaryColor);
+    root.style.setProperty("--theme-accent", t.accentColor);
     root.style.setProperty("--font-display", t.fontFamily);
     root.style.setProperty("--font-body", t.bodyFontFamily);
     if (t.faviconUrl) {
@@ -129,34 +184,50 @@ export default function OrderingApp({ slug }: { slug?: string }) {
       link.href = t.faviconUrl;
     }
     return () => {
-      root.style.removeProperty("--color-primary");
-      root.style.removeProperty("--color-accent");
+      root.style.removeProperty("--theme-primary");
+      root.style.removeProperty("--theme-accent");
       root.style.removeProperty("--font-display");
       root.style.removeProperty("--font-body");
     };
   }, [storefront?.theme]);
 
-  const path = window.location.pathname;
-  const screen = path.includes("/cart")
-    ? "cart"
-    : path.includes("/checkout")
-    ? "checkout"
-    : path.includes("/confirmation")
-    ? "confirmation"
-    : path.includes("/order/")
-    ? "tracking"
-    : "menu";
+  // Route from wouter's location (pathname only) — never window.location.pathname,
+  // so in-app navigation updates the screen without a full reload.
+  const path = location;
+  const segments = path.split("/").filter(Boolean);
+  const tail = segments.length > 1 ? segments[segments.length - 1] : "";
+  const screen =
+    tail === "cart"
+      ? "cart"
+      : tail === "checkout"
+      ? "checkout"
+      : tail === "confirmation"
+      ? "confirmation"
+      : segments[0] === "order"
+      ? "tracking"
+      : "menu";
+  const pathOrderNumber = screen === "tracking" ? segments[1] ?? "" : "";
+  const activeOrderNumber = trackingNumber || pathOrderNumber;
+  const queryParams = useMemo(
+    () => new URLSearchParams(typeof window !== "undefined" ? window.location.search : ""),
+    // Re-parse when the route changes (confirmation/tracking carry ?order=&token=).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [location],
+  );
 
   const [cart, setCart] = useState<CartLine[]>([]);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
   const [activeCategory, setActiveCategory] = useState("Menu");
-  const [selected, setSelected] = useState<MenuItem | null>(null);
+  const [selected, setSelected] = useState<StorefrontMenuItem | null>(null);
   const [customQty, setCustomQty] = useState(1);
-  const [size, setSize] = useState("Regular");
-  const [extras, setExtras] = useState<string[]>([]);
+  // Real modifier state — variant + option IDs resolved against DB prices.
+  const [selectedVariantId, setSelectedVariantId] = useState<string | null>(null);
+  const [selectedOptionIds, setSelectedOptionIds] = useState<string[]>([]);
   const [note, setNote] = useState("");
-  const [couponOpen, setCouponOpen] = useState(false);
+  const [couponCode, setCouponCode] = useState("");
+  const [deliveryNotes, setDeliveryNotes] = useState("");
+  const [cutlery, setCutlery] = useState(false);
   const [processing, setProcessing] = useState(false);
   // Issue 4: Delivery address and phone for checkout
   const [deliveryAddress, setDeliveryAddress] = useState<DeliveryLocation | null>(null);
@@ -169,12 +240,54 @@ export default function OrderingApp({ slug }: { slug?: string }) {
   const [otpCode, setOtpCode] = useState("");
   const [otpLoading, setOtpLoading] = useState(false);
   const [otpError, setOtpError] = useState("");
+  const [resendCooldown, setResendCooldown] = useState(0);
+  const isDesktop = useIsDesktop();
   const sendOtp = trpc.storefront.sendOtp.useMutation();
   const verifyOtp = trpc.storefront.verifyOtp.useMutation();
   const customerLogout = trpc.storefront.customerLogout.useMutation();
   // Fix 2: customerMe reads identity from session cookie, NOT localStorage
   const customerMe = trpc.storefront.customerMe.useQuery();
   const loggedInPhone = customerMe.data?.phone ?? null;
+
+  // Default to the first live category once the menu loads.
+  useEffect(() => {
+    if (categories.length > 0 && !categories.some((c) => c.name === activeCategory)) {
+      setActiveCategory(categories[0].name);
+    }
+  }, [categories, activeCategory]);
+
+  // Checkout phone: prefill from the device default, plus any unmasked
+  // identity the session exposes (the masked display value is never reused).
+  useEffect(() => {
+    const prefill = localStorage.getItem("ck_phone_prefill");
+    if (prefill && !customerPhone) setCustomerPhone(prefill);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => {
+    const sessionPhone = customerMe.data?.phone;
+    if (sessionPhone && !sessionPhone.includes("*")) setCustomerPhone(sessionPhone);
+  }, [customerMe.data?.phone]);
+
+  // Resend-cooldown countdown (driven by the server's retryAfterSeconds).
+  useEffect(() => {
+    if (resendCooldown <= 0) return;
+    const timer = setTimeout(() => setResendCooldown((value) => value - 1), 1000);
+    return () => clearTimeout(timer);
+  }, [resendCooldown]);
+
+  // Coordinate-based serviceability (server-authoritative) — gates checkout.
+  const serviceability = trpc.storefront.checkServiceability.useQuery(
+    {
+      slug: storefrontSlug,
+      latitude: deliveryAddress?.latitude ?? 0,
+      longitude: deliveryAddress?.longitude ?? 0,
+    },
+    { enabled: hasSlug && !!deliveryAddress?.confirmed },
+  );
+  const serviceBlocked = serviceability.data?.serviceable === false;
+  const serviceReason = !serviceability.data || serviceability.data.serviceable
+    ? null
+    : (serviceability.data as { reason?: string }).reason ?? null;
 
   // Pricing (server-side will validate on checkout)
   const itemTotal = cart.reduce(
@@ -194,7 +307,7 @@ export default function OrderingApp({ slug }: { slug?: string }) {
         const needle = query.toLowerCase().trim();
         const matchesSearch =
           !needle ||
-          [item.name, item.description, item.category, item.tag]
+          [item.name, item.description, item.category, item.tag, ...(item.tags ?? [])]
             .join(" ")
             .toLowerCase()
             .includes(needle);
@@ -207,6 +320,11 @@ export default function OrderingApp({ slug }: { slug?: string }) {
     [liveMenu, query, filter]
   );
 
+  const restaurantOpen = restaurant?.isOpen !== false;
+  const closureMessage =
+    restaurant?.tempClosureMessage ||
+    (restaurant?.opensAt ? `Closed right now · opens ${restaurant.opensAt}` : "Closed right now");
+
   const changeQty = (id: string, quantity: number) =>
     setCart((current) =>
       quantity < 1
@@ -216,7 +334,11 @@ export default function OrderingApp({ slug }: { slug?: string }) {
           )
     );
 
-  const simpleAdd = (item: MenuItem) => {
+  const simpleAdd = (item: StorefrontMenuItem) => {
+    if (!restaurantOpen) {
+      toast.error("The kitchen is closed right now.", { description: closureMessage });
+      return;
+    }
     if (item.availability !== "AVAILABLE") return;
     setCart((current) => {
       const found = current.find(
@@ -241,28 +363,70 @@ export default function OrderingApp({ slug }: { slug?: string }) {
     toast.success(`${item.name} added to your order`);
   };
 
-  const openItem = (item: MenuItem) => {
+  const openItem = (item: StorefrontMenuItem) => {
+    if (!restaurantOpen) {
+      toast.error("The kitchen is closed right now.", { description: closureMessage });
+      return;
+    }
     if (item.customizable) {
       setSelected(item);
       setCustomQty(1);
-      setSize("Regular");
-      setExtras([]);
+      setSelectedVariantId(null);
+      setSelectedOptionIds([]);
       setNote("");
     } else {
       simpleAdd(item);
     }
   };
 
+  const toggleOption = (group: StorefrontAddonGroup, optionId: string) => {
+    setSelectedOptionIds((current) => {
+      if (current.includes(optionId)) {
+        return current.filter((id) => id !== optionId);
+      }
+      if (group.selectionType === "single") {
+        const inGroup = new Set(group.options.map((option) => option.id));
+        return [...current.filter((id) => !inGroup.has(id)), optionId];
+      }
+      const chosenInGroup = group.options.filter((option) => current.includes(option.id)).length;
+      if (chosenInGroup >= group.maxSelections) {
+        toast.error(`You can pick up to ${group.maxSelections} in ${group.name}.`);
+        return current;
+      }
+      return [...current, optionId];
+    });
+  };
+
   const addCustomItem = () => {
     if (!selected) return;
-    const sizeUpcharge =
-      size === "Medium" ? 100 : size === "Large" ? 200 : 0;
-    const extraUpcharge = extras.reduce(
-      (sum, extra) =>
-        sum + (extra === "Extra cheese" ? 70 : extra === "Jalapeño" ? 40 : 50),
-      0
-    );
-    const unitPrice = selected.price + sizeUpcharge + extraUpcharge;
+    const variant = selected.variants?.find((v) => v.id === selectedVariantId) ?? null;
+    if (variant && !variant.isAvailable) {
+      toast.error(`"${variant.name}" is currently unavailable.`);
+      return;
+    }
+    for (const group of selected.addonGroups ?? []) {
+      const chosen = group.options.filter((option) => selectedOptionIds.includes(option.id));
+      if (chosen.some((option) => !option.isAvailable)) {
+        toast.error("One of the selected add-ons is unavailable.");
+        return;
+      }
+      if (group.isRequired && chosen.length === 0) {
+        toast.error(`Please choose an option for "${group.name}".`);
+        return;
+      }
+    }
+    const chosenOptions = (selected.addonGroups ?? [])
+      .flatMap((group) => group.options)
+      .filter((option) => selectedOptionIds.includes(option.id));
+    // Display estimate only — the server reprices from DB (paise) authoritatively.
+    const unitPrice =
+      selected.price +
+      (variant ? variant.pricePaise / 100 : 0) +
+      chosenOptions.reduce((sum, option) => sum + option.pricePaise / 100, 0);
+    const displayNames = [
+      ...(variant ? [variant.name] : []),
+      ...chosenOptions.map((option) => option.name),
+    ];
     setCart((current) => [
       ...current,
       {
@@ -271,7 +435,9 @@ export default function OrderingApp({ slug }: { slug?: string }) {
         quantity: customQty,
         unitPrice,
         note,
-        modifiers: [size, ...extras],
+        modifiers: displayNames,
+        modifierOptionIds: chosenOptions.map((option) => option.id),
+        selectedVariantId: variant ? variant.id : undefined,
       },
     ]);
     toast.success(`${selected.name} added to your order`);
@@ -279,9 +445,16 @@ export default function OrderingApp({ slug }: { slug?: string }) {
   };
 
   // --- Customer Auth Handlers ---
+  const cooldownFromError = (err: unknown): string => {
+    const message = err instanceof Error ? err.message : "Failed to send code.";
+    const match = message.match(/(\d+)\s*seconds?/i);
+    if (match) setResendCooldown(Number.parseInt(match[1], 10));
+    return message;
+  };
+
   const handleSendOtp = async () => {
-    const phone = otpPhone.replace(/[^\d]/g, "");
-    if (phone.length < 10) {
+    const phone = normalizePhone(otpPhone);
+    if (phone.length !== 10) {
       setOtpError("Enter a valid 10-digit phone number.");
       return;
     }
@@ -291,7 +464,7 @@ export default function OrderingApp({ slug }: { slug?: string }) {
       await sendOtp.mutateAsync({ phone });
       setOtpStep("verify");
     } catch (err) {
-      setOtpError(err instanceof Error ? err.message : "Failed to send code.");
+      setOtpError(cooldownFromError(err));
     } finally {
       setOtpLoading(false);
     }
@@ -305,14 +478,17 @@ export default function OrderingApp({ slug }: { slug?: string }) {
     setOtpLoading(true);
     setOtpError("");
     try {
-      // Server sets HttpOnly session cookie — no localStorage auth
-      const result = await verifyOtp.mutateAsync({ phone: otpPhone, code: otpCode });
+      // Server sets HttpOnly session cookie — no localStorage auth.
+      // Same normalization as send: the server keys the OTP by normalized phone.
+      const result = await verifyOtp.mutateAsync({ phone: normalizePhone(otpPhone), code: otpCode });
       // Only remember phone for convenience (pre-fill), NOT for auth
-      localStorage.setItem("ck_phone_prefill", otpPhone);
+      localStorage.setItem("ck_phone_prefill", normalizePhone(otpPhone));
+      setCustomerPhone(normalizePhone(otpPhone));
       setAuthOpen(false);
       setOtpStep("phone");
       setOtpPhone("");
       setOtpCode("");
+      setResendCooldown(0);
       // Refetch customer session
       customerMe.refetch();
       toast.success(result.isNewUser ? "Welcome! Your account is ready." : "Welcome back!");
@@ -341,6 +517,10 @@ export default function OrderingApp({ slug }: { slug?: string }) {
       });
       return;
     }
+    if (!restaurantOpen) {
+      toast.error("The kitchen is closed right now.", { description: closureMessage });
+      return;
+    }
     if (cart.length === 0) return toast.error("Add items to your cart first.");
     if (grandTotal < (restaurant?.minOrder ?? 0)) {
       return toast.error(
@@ -354,22 +534,18 @@ export default function OrderingApp({ slug }: { slug?: string }) {
         description: "Tap on the delivery address bar to set your location.",
       });
     }
-    if (!customerPhone || customerPhone.length < 10) {
-      return toast.error("Please enter your phone number.");
+    if (normalizePhone(customerPhone).length !== 10) {
+      return toast.error("Please enter your 10-digit phone number.");
     }
 
-    // Serviceability pre-check — block payment if outside delivery area
+    // Serviceability pre-check — server-authoritative, blocks out-of-area orders.
     setProcessing(true);
     try {
-      const svcRes = await fetch(
-        `/api/trpc/storefront.checkServiceability?input=${encodeURIComponent(JSON.stringify({ slug: storefrontSlug, latitude: deliveryAddress.latitude, longitude: deliveryAddress.longitude }))}`,
-        { credentials: "include" }
-      );
-      const svcJson = await svcRes.json();
-      const serviceability = svcJson?.result?.data ?? svcJson;
-      if (!serviceability?.serviceable) {
+      const svcResult = await serviceability.refetch();
+      const service = svcResult.data;
+      if (!service?.serviceable) {
         setProcessing(false);
-        const reason = serviceability?.reason ?? "";
+        const reason = (service as { reason?: string } | undefined)?.reason ?? "";
         toast.error("Sorry, we can't deliver to this location.", {
           description: reason === "OUTSIDE_DELIVERY_RADIUS"
             ? "Your location is outside our current delivery area."
@@ -389,8 +565,9 @@ export default function OrderingApp({ slug }: { slug?: string }) {
         lines: cart.map((line) => ({
           menuItemId: line.item.id,
           quantity: line.quantity,
-          // Issue 5: Send only modifier option IDs — server resolves prices
-          modifierOptionIds: line.modifiers?.length ? line.modifiers.map((name, i) => `${line.item.id}_opt_${i}`) : undefined,
+          // Real IDs only — the server resolves prices from the DB.
+          modifierOptionIds: line.modifierOptionIds?.length ? line.modifierOptionIds : undefined,
+          selectedVariantId: line.selectedVariantId ?? undefined,
           specialInstructions: line.note,
         })),
         // Issue 4: Address with precise coordinates — NO fallbacks
@@ -407,8 +584,28 @@ export default function OrderingApp({ slug }: { slug?: string }) {
           accuracyMeters: deliveryAddress.accuracyMeters,
           locationSource: deliveryAddress.locationSource,
         },
-        customerPhone,
+        customerPhone: normalizePhone(customerPhone),
+        couponCode: couponCode.trim() ? couponCode.trim().toUpperCase() : undefined,
+        deliveryNotes: deliveryNotes.trim() ? deliveryNotes.trim() : undefined,
+        cutleryPreference: cutlery || undefined,
+        idempotencyKey: newIdempotencyKey(),
       });
+
+      if (created.alreadyExists) {
+        setProcessing(false);
+        toast.success("This order was already placed — opening it now.");
+        navigate(`/${storefrontSlug}/confirmation?order=${created.orderNumber}`);
+        return;
+      }
+
+      // The client total is an estimate: the server repriced everything.
+      // Never charge blindly on a mismatch — show the authoritative amount.
+      const clientEstimatePaise = Math.round(grandTotal * 100);
+      if (Math.abs(created.amountPaise - clientEstimatePaise) > 1) {
+        toast.info("Total updated to match kitchen pricing.", {
+          description: `Payable ${formatINR(created.amountPaise / 100)} (estimated ${formatINR(grandTotal)}).`,
+        });
+      }
 
       // Load Razorpay checkout
       if (!window.Razorpay) {
@@ -438,8 +635,9 @@ export default function OrderingApp({ slug }: { slug?: string }) {
               providerPaymentId: response.razorpay_payment_id,
               signature: response.razorpay_signature,
             });
+            // Persist the tracking token so confirmation/tracking can authenticate.
             navigate(
-              `/${storefrontSlug}/confirmation?order=${created.orderNumber}`
+              `/${storefrontSlug}/confirmation?order=${created.orderNumber}&token=${created.trackingToken}`
             );
           } catch (error) {
             toast.error(
@@ -463,14 +661,24 @@ export default function OrderingApp({ slug }: { slug?: string }) {
     }
   };
 
-  if (storefrontQuery.isLoading || !restaurant)
-    return <MenuSkeleton />;
+  if (hasSlug && storefrontQuery.isLoading) return <MenuSkeleton />;
+
+  // Tracking / confirmation authenticate via ?order=&token= and don't need
+  // the storefront to render; every other screen needs a live restaurant.
+  if (!restaurant && screen !== "tracking" && screen !== "confirmation") {
+    return hasSlug ? (
+      <StorefrontUnavailable onRetry={() => storefrontQuery.refetch()} />
+    ) : (
+      <NoSlugScreen />
+    );
+  }
 
   const goMenu = () => navigate(`/${storefrontSlug}`);
 
   if (["cart", "checkout", "confirmation", "tracking"].includes(screen)) {
     return (
-      <ServiceSetupScreen
+      <>
+        <ServiceSetupScreen
         onMenu={goMenu}
         screen={screen}
         cart={cart}
@@ -483,9 +691,46 @@ export default function OrderingApp({ slug }: { slug?: string }) {
         onCheckout={startSecurePayment}
         processing={processing}
         restaurant={restaurant}
+        deliveryAddress={deliveryAddress}
+        onEditLocation={() => setLocationOpen(true)}
+        customerPhone={customerPhone}
+        onCustomerPhone={setCustomerPhone}
+        couponCode={couponCode}
+        onCouponCode={setCouponCode}
+        deliveryNotes={deliveryNotes}
+        onDeliveryNotes={setDeliveryNotes}
+        cutlery={cutlery}
+        onCutlery={setCutlery}
+        serviceBlocked={serviceBlocked}
+        serviceChecking={serviceability.isFetching}
+        serviceReason={serviceReason}
+        restaurantOpen={restaurantOpen}
+        closureMessage={closureMessage}
+        slug={storefrontSlug}
+        eta={restaurant?.eta}
+        activeOrderNumber={activeOrderNumber}
+        queryOrder={queryParams.get("order") ?? ""}
+        queryToken={queryParams.get("token") ?? ""}
       />
+        {/* Location picker must stay mounted on sub-screens: the checkout
+            form's address buttons open it from here too. */}
+        <DeliveryLocationDrawer
+          open={locationOpen}
+          onOpenChange={setLocationOpen}
+          onConfirm={(loc) => setDeliveryAddress(loc)}
+          existingLocation={deliveryAddress}
+          initialCenter={
+            storefront?.outlet?.latitude != null && storefront?.outlet?.longitude != null
+              ? { lat: storefront.outlet.latitude, lng: storefront.outlet.longitude }
+              : null
+          }
+          cityBias={storefront?.outlet?.city}
+        />
+      </>
     );
   }
+
+  if (!restaurant) return <MenuSkeleton />;
 
   return (
     <>
@@ -494,7 +739,7 @@ export default function OrderingApp({ slug }: { slug?: string }) {
         <TopBar
           restaurantName={restaurant.name}
           itemCount={totalQuantity}
-          onCart={() => {}}
+          onCart={() => navigate(`/${storefrontSlug}/cart`)}
           onAccount={() => setAuthOpen(true)}
           customerPhone={loggedInPhone ?? undefined}
         />
@@ -554,6 +799,18 @@ export default function OrderingApp({ slug }: { slug?: string }) {
 
         {/* Delivery Address Bar */}
         <div className="mx-auto max-w-[1440px] px-4 sm:px-6 lg:px-10">
+          {!restaurantOpen && (
+            <div
+              role="alert"
+              className="mt-4 flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-bold text-amber-800"
+            >
+              <Clock3 className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>
+                The kitchen is closed right now — {closureMessage}. Browse the
+                menu, and ordering will unlock when we're back.
+              </span>
+            </div>
+          )}
           <section className="relative -mt-1 border-x border-b border-[#eadac9] bg-[#fffdf9] px-4 py-3 shadow-sm sm:px-5 lg:rounded-b-2xl">
             <button
               onClick={() => setLocationOpen(true)}
@@ -564,7 +821,7 @@ export default function OrderingApp({ slug }: { slug?: string }) {
                   <MapPin className="h-4 w-4" />
                 </span>
                 <div className="min-w-0">
-                  <p className="text-[11px] font-extrabold uppercase tracking-[0.14em] text-[#9a7660]">
+                  <p className="text-xs font-extrabold uppercase tracking-[0.14em] text-[#9a7660]">
                     {deliveryAddress?.confirmed ? "Delivering to" : "Set delivery location"}
                   </p>
                   {deliveryAddress?.confirmed ? (
@@ -597,7 +854,7 @@ export default function OrderingApp({ slug }: { slug?: string }) {
                     <p className="text-sm font-extrabold text-[#c84630]">
                       {offer.code}
                     </p>
-                    <p className="text-[11px] text-[#8d6b55]">
+                    <p className="text-xs text-[#8d6b55]">
                       {offer.description}
                     </p>
                   </div>
@@ -611,7 +868,7 @@ export default function OrderingApp({ slug }: { slug?: string }) {
             {/* Desktop Category Sidebar */}
             <aside className="hidden lg:block">
               <div className="sticky top-24">
-                <p className="mb-3 text-[11px] font-extrabold uppercase tracking-[0.16em] text-[#9a7660]">
+                <p className="mb-3 text-xs font-extrabold uppercase tracking-[0.16em] text-[#9a7660]">
                   On the menu
                 </p>
                 <nav className="space-y-1">
@@ -619,6 +876,7 @@ export default function OrderingApp({ slug }: { slug?: string }) {
                     <button
                       key={category.id}
                       onClick={() => setActiveCategory(category.name)}
+                      aria-pressed={activeCategory === category.name}
                       className={`block w-full rounded-xl px-3 py-2.5 text-left text-sm font-semibold ${
                         activeCategory === category.name
                           ? "bg-[#f5e4d4] text-[#b63d2d]"
@@ -638,11 +896,16 @@ export default function OrderingApp({ slug }: { slug?: string }) {
             {/* Main Menu Content */}
             <section className="min-w-0">
               {/* Search & Filters */}
-              <div className="sticky top-0 z-20 -mx-4 bg-[#fffaf3]/95 px-4 pb-3 pt-5 backdrop-blur sm:-mx-6 sm:px-6 lg:static lg:mx-0 lg:bg-transparent lg:px-0 lg:pt-0">
+              <div className="sticky top-16 z-20 -mx-4 bg-[#fffaf3]/95 px-4 pb-3 pt-5 backdrop-blur sm:-mx-6 sm:px-6 lg:static lg:mx-0 lg:bg-transparent lg:px-0 lg:pt-0">
                 <div className="flex gap-2">
                   <div className="relative flex-1">
                     <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-[#a37d64]" />
+                    <label htmlFor="dish-search" className="sr-only">
+                      Search dishes, cuisines, or categories
+                    </label>
                     <Input
+                      id="dish-search"
+                      type="search"
                       value={query}
                       onChange={(event) => setQuery(event.target.value)}
                       placeholder="Search dishes, cuisines, or categories"
@@ -657,6 +920,7 @@ export default function OrderingApp({ slug }: { slug?: string }) {
                     <button
                       key={category.id}
                       onClick={() => setActiveCategory(category.name)}
+                      aria-pressed={activeCategory === category.name}
                       className={`whitespace-nowrap rounded-full px-3.5 py-2 text-xs font-extrabold ${
                         activeCategory === category.name
                           ? "bg-[#382719] text-white"
@@ -684,6 +948,7 @@ export default function OrderingApp({ slug }: { slug?: string }) {
                     <button
                       key={value}
                       onClick={() => setFilter(value)}
+                      aria-pressed={filter === value}
                       className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-3.5 py-2 text-xs font-extrabold ${
                         filter === value
                           ? "bg-[#c84630] text-white"
@@ -733,6 +998,7 @@ export default function OrderingApp({ slug }: { slug?: string }) {
                               key={item.id}
                               item={item}
                               onAdd={() => openItem(item)}
+                              disabled={!restaurantOpen}
                             />
                           ))}
                         </div>
@@ -747,6 +1013,7 @@ export default function OrderingApp({ slug }: { slug?: string }) {
                 activeCategory={activeCategory}
                 query={query}
                 onAdd={openItem}
+                orderingDisabled={!restaurantOpen}
               />
             </section>
 
@@ -763,6 +1030,14 @@ export default function OrderingApp({ slug }: { slug?: string }) {
                 onCheckout={startSecurePayment}
                 processing={processing}
                 restaurant={restaurant}
+                checkoutBlocked={!restaurantOpen || serviceBlocked}
+                checkoutHint={
+                  !restaurantOpen
+                    ? closureMessage
+                    : serviceBlocked
+                    ? "This address is outside our delivery area."
+                    : undefined
+                }
               />
             </aside>
           </div>
@@ -774,7 +1049,7 @@ export default function OrderingApp({ slug }: { slug?: string }) {
         <MobileCartBar
           quantity={totalQuantity}
           total={grandTotal}
-          onCart={() => {}}
+          onCart={() => navigate(`/${storefrontSlug}/cart`)}
         />
       )}
 
@@ -782,13 +1057,13 @@ export default function OrderingApp({ slug }: { slug?: string }) {
       <CustomizationDrawer
         item={selected}
         quantity={customQty}
-        size={size}
-        extras={extras}
         note={note}
+        selectedVariantId={selectedVariantId}
+        selectedOptionIds={selectedOptionIds}
         onClose={() => setSelected(null)}
         onQuantity={setCustomQty}
-        onSize={setSize}
-        onExtras={setExtras}
+        onVariantChange={setSelectedVariantId}
+        onToggleOption={toggleOption}
         onNote={setNote}
         onAdd={addCustomItem}
       />
@@ -799,106 +1074,82 @@ export default function OrderingApp({ slug }: { slug?: string }) {
         onOpenChange={setLocationOpen}
         onConfirm={(loc) => setDeliveryAddress(loc)}
         existingLocation={deliveryAddress}
+        initialCenter={
+          storefront?.outlet?.latitude != null && storefront?.outlet?.longitude != null
+            ? { lat: storefront.outlet.latitude, lng: storefront.outlet.longitude }
+            : null
+        }
+        cityBias={storefront?.outlet?.city}
       />
 
-      {/* Customer Auth Drawer */}
-      <Drawer open={authOpen} onOpenChange={setAuthOpen}>
-        <DrawerContent className="max-h-[85vh]">
-          <DrawerHeader className="px-6 pb-2 text-left">
-            <DrawerTitle className="font-display text-2xl text-[#382719]">
-              {loggedInPhone ? "Your Account" : "Sign in to order"}
-            </DrawerTitle>
-            <DrawerDescription className="text-[#91725e]">
-              {loggedInPhone
-                ? `Logged in as ${loggedInPhone}`
-                : "Enter your phone number to get started"}
-            </DrawerDescription>
-          </DrawerHeader>
-          <div className="px-6 pb-6">
-            {loggedInPhone ? (
-              <div className="space-y-4">
-                {customerMe.data && (
-                  <div className="rounded-xl border border-[#eadccf] bg-[#fff9f3] p-4">
-                    <div className="grid grid-cols-2 gap-4 text-sm">
-                      <div>
-                        <p className="text-[10px] font-extrabold uppercase tracking-wider text-[#a77d63]">Phone</p>
-                        <p className="mt-1 font-bold text-[#382719]">{loggedInPhone}</p>
-                      </div>
-                      <div>
-                        <p className="text-[10px] font-extrabold uppercase tracking-wider text-[#a77d63]">Total Orders</p>
-                        <p className="mt-1 font-bold text-[#382719]">{customerMe.data.totalOrders}</p>
-                      </div>
-                    </div>
-                  </div>
-                )}
-                <Button
-                  onClick={handleLogout}
-                  variant="outline"
-                  className="w-full rounded-xl border-[#ddc6b5] text-[#c84630] font-extrabold"
-                >
-                  Sign out
-                </Button>
-              </div>
-            ) : otpStep === "phone" ? (
-              <div className="space-y-4">
-                <Input
-                  value={otpPhone}
-                  onChange={(e) => { setOtpPhone(e.target.value); setOtpError(""); }}
-                  placeholder="10-digit phone number"
-                  type="tel"
-                  inputMode="numeric"
-                  maxLength={15}
-                  className="h-12 rounded-xl border-[#ddc6b5] text-base"
-                />
-                {otpError && (
-                  <p className="text-sm font-bold text-[#c84630]">{otpError}</p>
-                )}
-                <Button
-                  onClick={handleSendOtp}
-                  disabled={otpLoading || otpPhone.replace(/[^\d]/g, "").length < 10}
-                  className="h-12 w-full rounded-xl bg-[#c84630] font-extrabold text-base hover:bg-[#ad3627]"
-                >
-                  {otpLoading ? "Sending..." : "Send verification code"}
-                </Button>
-                <p className="text-center text-xs text-[#a77d63]">
-                  We'll send a 6-digit code to verify your number.
-                </p>
-              </div>
-            ) : (
-              <div className="space-y-4">
-                <p className="text-sm text-[#76523e]">
-                  Enter the 6-digit code sent to {otpPhone}
-                </p>
-                <Input
-                  value={otpCode}
-                  onChange={(e) => { setOtpCode(e.target.value); setOtpError(""); }}
-                  placeholder="000000"
-                  type="text"
-                  inputMode="numeric"
-                  maxLength={6}
-                  className="h-12 rounded-xl border-[#ddc6b5] text-center text-2xl font-mono tracking-[0.3em]"
-                />
-                {otpError && (
-                  <p className="text-sm font-bold text-[#c84630]">{otpError}</p>
-                )}
-                <Button
-                  onClick={handleVerifyOtp}
-                  disabled={otpLoading || otpCode.length !== 6}
-                  className="h-12 w-full rounded-xl bg-[#c84630] font-extrabold text-base hover:bg-[#ad3627]"
-                >
-                  {otpLoading ? "Verifying..." : "Verify & continue"}
-                </Button>
-                <button
-                  onClick={() => { setOtpStep("phone"); setOtpCode(""); setOtpError(""); }}
-                  className="w-full text-center text-xs font-bold text-[#a77d63] underline"
-                >
-                  Change phone number
-                </button>
-              </div>
-            )}
-          </div>
-        </DrawerContent>
-      </Drawer>
+      {/* Customer Auth — Dialog on sm+ screens, Drawer on mobile */}
+      {isDesktop ? (
+        <Dialog open={authOpen} onOpenChange={setAuthOpen}>
+          <DialogContent className="border-[#dfcbb9] bg-[#fffaf3] sm:max-w-md">
+            <DialogHeader className="text-left">
+              <DialogTitle className="font-display text-2xl text-[#382719]">
+                {loggedInPhone ? "Your Account" : "Sign in to order"}
+              </DialogTitle>
+              <DialogDescription className="text-[#91725e]">
+                {loggedInPhone
+                  ? `Logged in as ${loggedInPhone}`
+                  : "Enter your phone number to get started"}
+              </DialogDescription>
+            </DialogHeader>
+            <AuthBody
+              loggedInPhone={loggedInPhone}
+              totalOrders={customerMe.data?.totalOrders}
+              otpStep={otpStep}
+              otpPhone={otpPhone}
+              otpCode={otpCode}
+              otpError={otpError}
+              otpLoading={otpLoading}
+              resendCooldown={resendCooldown}
+              onOtpPhone={setOtpPhone}
+              onOtpCode={setOtpCode}
+              onClearError={() => setOtpError("")}
+              onSendOtp={handleSendOtp}
+              onVerifyOtp={handleVerifyOtp}
+              onBackToPhone={() => { setOtpStep("phone"); setOtpCode(""); setOtpError(""); }}
+              onLogout={handleLogout}
+            />
+          </DialogContent>
+        </Dialog>
+      ) : (
+        <Drawer open={authOpen} onOpenChange={setAuthOpen}>
+          <DrawerContent className="max-h-[85vh]">
+            <DrawerHeader className="px-6 pb-2 text-left">
+              <DrawerTitle className="font-display text-2xl text-[#382719]">
+                {loggedInPhone ? "Your Account" : "Sign in to order"}
+              </DrawerTitle>
+              <DrawerDescription className="text-[#91725e]">
+                {loggedInPhone
+                  ? `Logged in as ${loggedInPhone}`
+                  : "Enter your phone number to get started"}
+              </DrawerDescription>
+            </DrawerHeader>
+            <div className="px-6 pb-6">
+              <AuthBody
+                loggedInPhone={loggedInPhone}
+                totalOrders={customerMe.data?.totalOrders}
+                otpStep={otpStep}
+                otpPhone={otpPhone}
+                otpCode={otpCode}
+                otpError={otpError}
+                otpLoading={otpLoading}
+                resendCooldown={resendCooldown}
+                onOtpPhone={setOtpPhone}
+                onOtpCode={setOtpCode}
+                onClearError={() => setOtpError("")}
+                onSendOtp={handleSendOtp}
+                onVerifyOtp={handleVerifyOtp}
+                onBackToPhone={() => { setOtpStep("phone"); setOtpCode(""); setOtpError(""); }}
+                onLogout={handleLogout}
+              />
+            </div>
+          </DrawerContent>
+        </Drawer>
+      )}
     </>
   );
 }
@@ -906,6 +1157,151 @@ export default function OrderingApp({ slug }: { slug?: string }) {
 // =============================================================================
 // Sub-components
 // =============================================================================
+
+function AuthBody({
+  loggedInPhone,
+  totalOrders,
+  otpStep,
+  otpPhone,
+  otpCode,
+  otpError,
+  otpLoading,
+  resendCooldown,
+  onOtpPhone,
+  onOtpCode,
+  onClearError,
+  onSendOtp,
+  onVerifyOtp,
+  onBackToPhone,
+  onLogout,
+}: {
+  loggedInPhone: string | null;
+  totalOrders?: number;
+  otpStep: "phone" | "verify";
+  otpPhone: string;
+  otpCode: string;
+  otpError: string;
+  otpLoading: boolean;
+  resendCooldown: number;
+  onOtpPhone: (value: string) => void;
+  onOtpCode: (value: string) => void;
+  onClearError: () => void;
+  onSendOtp: () => void;
+  onVerifyOtp: () => void;
+  onBackToPhone: () => void;
+  onLogout: () => void;
+}) {
+  if (loggedInPhone) {
+    return (
+      <div className="space-y-4">
+        <div className="rounded-xl border border-[#eadccf] bg-[#fff9f3] p-4">
+          <div className="grid grid-cols-2 gap-4 text-sm">
+            <div>
+              <p className="text-xs font-extrabold uppercase tracking-wider text-[#a77d63]">Phone</p>
+              <p className="mt-1 font-bold text-[#382719]">{loggedInPhone}</p>
+            </div>
+            <div>
+              <p className="text-xs font-extrabold uppercase tracking-wider text-[#a77d63]">Total Orders</p>
+              <p className="mt-1 font-bold text-[#382719]">{totalOrders ?? 0}</p>
+            </div>
+          </div>
+        </div>
+        <Button
+          onClick={onLogout}
+          variant="outline"
+          className="min-h-[44px] w-full rounded-xl border-[#ddc6b5] text-[#c84630] font-extrabold"
+        >
+          Sign out
+        </Button>
+      </div>
+    );
+  }
+
+  if (otpStep === "phone") {
+    return (
+      <div className="space-y-4">
+        <label htmlFor="auth-phone" className="sr-only">
+          10-digit phone number
+        </label>
+        <Input
+          id="auth-phone"
+          value={otpPhone}
+          onChange={(e) => { onOtpPhone(e.target.value); onClearError(); }}
+          placeholder="10-digit phone number"
+          type="tel"
+          inputMode="numeric"
+          autoComplete="tel"
+          maxLength={15}
+          className="h-12 rounded-xl border-[#ddc6b5] text-base"
+        />
+        {otpError && (
+          <p role="alert" className="text-sm font-bold text-[#c84630]">{otpError}</p>
+        )}
+        <Button
+          onClick={onSendOtp}
+          disabled={otpLoading || normalizePhone(otpPhone).length !== 10}
+          className="h-12 min-h-[44px] w-full rounded-xl bg-[#c84630] font-extrabold text-base hover:bg-[#ad3627]"
+        >
+          {otpLoading ? "Sending..." : "Send verification code"}
+        </Button>
+        <p className="text-center text-xs text-[#a77d63]">
+          We'll send a 6-digit code to verify your number.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <p className="text-sm text-[#76523e]">
+        Enter the 6-digit code sent to {otpPhone}
+      </p>
+      <label htmlFor="auth-otp" className="sr-only">
+        6-digit verification code
+      </label>
+      <Input
+        id="auth-otp"
+        value={otpCode}
+        onChange={(e) => { onOtpCode(e.target.value.replace(/[^\d]/g, "")); onClearError(); }}
+        placeholder="000000"
+        type="text"
+        inputMode="numeric"
+        autoComplete="one-time-code"
+        maxLength={6}
+        className="h-12 rounded-xl border-[#ddc6b5] text-center text-2xl font-mono tracking-[0.3em]"
+      />
+      {otpError && (
+        <p role="alert" className="text-sm font-bold text-[#c84630]">{otpError}</p>
+      )}
+      <Button
+        onClick={onVerifyOtp}
+        disabled={otpLoading || otpCode.length !== 6}
+        className="h-12 min-h-[44px] w-full rounded-xl bg-[#c84630] font-extrabold text-base hover:bg-[#ad3627]"
+      >
+        {otpLoading ? "Verifying..." : "Verify & continue"}
+      </Button>
+      {resendCooldown > 0 ? (
+        <p aria-live="polite" className="text-center text-xs font-bold text-[#a77d63]">
+          Resend code in {resendCooldown}s
+        </p>
+      ) : (
+        <button
+          onClick={onSendOtp}
+          disabled={otpLoading}
+          className="min-h-[44px] w-full text-center text-xs font-bold text-[#a77d63] underline disabled:opacity-50"
+        >
+          Resend code
+        </button>
+      )}
+      <button
+        onClick={onBackToPhone}
+        className="min-h-[44px] w-full text-center text-xs font-bold text-[#a77d63] underline"
+      >
+        Change phone number
+      </button>
+    </div>
+  );
+}
 
 function TopBar({
   restaurantName,
@@ -932,7 +1328,7 @@ function TopBar({
             <span className="font-display block text-xl leading-none text-[#382719]">
               {restaurantName}
             </span>
-            <span className="mt-1 block text-[9px] font-extrabold uppercase tracking-[0.18em] text-[#a77d63]">
+            <span className="mt-1 block text-xs font-extrabold uppercase tracking-[0.18em] text-[#a77d63]">
               Direct ordering
             </span>
           </span>
@@ -953,7 +1349,7 @@ function TopBar({
           >
             <ShoppingBag className="h-4 w-4" />
             {itemCount > 0 && (
-              <span className="absolute -right-1 -top-1 grid h-5 min-w-5 place-items-center rounded-full bg-[#c84630] px-1 text-[10px] font-extrabold">
+              <span aria-live="polite" aria-atomic="true" className="absolute -right-1 -top-1 grid h-5 min-w-5 place-items-center rounded-full bg-[#c84630] px-1 text-xs font-extrabold">
                 {itemCount}
               </span>
             )}
@@ -976,9 +1372,11 @@ function MetaPill({ icon, text }: { icon: React.ReactNode; text: string }) {
 function CollectionCard({
   item,
   onAdd,
+  disabled,
 }: {
-  item: MenuItem;
+  item: StorefrontMenuItem;
   onAdd: () => void;
+  disabled?: boolean;
 }) {
   return (
     <div className="flex shrink-0 w-[200px] overflow-hidden rounded-2xl border border-[#ead8c6] bg-[#fffdf9] shadow-sm">
@@ -986,7 +1384,8 @@ function CollectionCard({
         <div className="h-24 w-24 shrink-0 overflow-hidden">
           <img
             src={item.image}
-            alt=""
+            alt={item.name}
+            loading="lazy"
             className="h-full w-full object-cover"
           />
         </div>
@@ -1002,9 +1401,10 @@ function CollectionCard({
         </div>
         <button
           onClick={onAdd}
-          className="mt-1 w-full rounded-lg border border-[#c84630] bg-white px-2 py-1 text-[10px] font-extrabold text-[#c84630] hover:bg-[#c84630] hover:text-white"
+          disabled={disabled}
+          className="mt-1 min-h-[44px] w-full rounded-lg border border-[#c84630] bg-white px-2 py-1 text-xs font-extrabold text-[#c84630] hover:bg-[#c84630] hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
         >
-          ADD
+          {disabled ? "Closed" : "ADD"}
         </button>
       </div>
     </div>
@@ -1016,42 +1416,42 @@ function MenuStream({
   activeCategory,
   query,
   onAdd,
+  orderingDisabled,
 }: {
-  items: MenuItem[];
+  items: StorefrontMenuItem[];
   activeCategory: string;
   query: string;
-  onAdd: (item: MenuItem) => void;
+  onAdd: (item: StorefrontMenuItem) => void;
+  orderingDisabled?: boolean;
 }) {
-  if (!items.length)
+  // Category stream only — no fallback to the full menu, no Bestsellers
+  // special-case: an empty category honestly renders empty.
+  const shown = query
+    ? items
+    : items.filter((item) => item.category === activeCategory);
+
+  if (!shown.length)
     return (
       <div className="ticket-edge mt-5 bg-[#fffdf8] p-9 text-center shadow-sm">
         <div className="mx-auto grid h-14 w-14 place-items-center rounded-full bg-[#faede0] text-[#c84630]">
           <Utensils className="h-6 w-6" />
         </div>
         <h2 className="font-display mt-4 text-2xl">
-          The menu is being prepared
+          {query ? "No dishes found" : `Nothing in ${activeCategory} yet`}
         </h2>
         <p className="mt-2 text-sm text-[#856855]">
-          The kitchen team will publish dishes shortly.
+          {query
+            ? "Try a different search, or browse the categories below."
+            : "The kitchen team will publish dishes here shortly."}
         </p>
       </div>
     );
-
-  const shown = query
-    ? items
-    : items.filter((item) =>
-        activeCategory === "Bestsellers"
-          ? item.isBestseller
-          : item.category === activeCategory
-      );
-
-  const display = shown.length ? shown : items;
 
   return (
     <div className="space-y-3 pb-3">
       <div className="mb-4 flex items-end justify-between">
         <div>
-          <p className="text-[11px] font-extrabold uppercase tracking-[0.16em] text-[#a37960]">
+          <p className="text-xs font-extrabold uppercase tracking-[0.16em] text-[#a37960]">
             Fresh from the kitchen
           </p>
           <h2 className="font-display mt-1 text-3xl text-[#382719]">
@@ -1059,11 +1459,11 @@ function MenuStream({
           </h2>
         </div>
         <span className="text-xs font-bold text-[#94715c]">
-          {display.length} dishes
+          {shown.length} dish{shown.length !== 1 ? "es" : ""}
         </span>
       </div>
-      {display.map((item) => (
-        <MenuCard key={item.id} item={item} onAdd={() => onAdd(item)} />
+      {shown.map((item) => (
+        <MenuCard key={item.id} item={item} onAdd={() => onAdd(item)} disabled={orderingDisabled} />
       ))}
     </div>
   );
@@ -1072,11 +1472,13 @@ function MenuStream({
 function MenuCard({
   item,
   onAdd,
+  disabled,
 }: {
-  item: MenuItem;
+  item: StorefrontMenuItem;
   onAdd: () => void;
+  disabled?: boolean;
 }) {
-  const unavailable = item.availability !== "AVAILABLE";
+  const unavailable = item.availability !== "AVAILABLE" || disabled;
   const hasDiscount = item.originalPrice && item.originalPrice > item.price;
 
   return (
@@ -1090,12 +1492,12 @@ function MenuCard({
           <div className="flex items-start gap-2">
             <FoodDot kind={item.kind} />
             {item.isBestseller && (
-              <span className="rounded-full bg-[#f7e6ca] px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-[0.08em] text-[#9c5a21]">
+              <span className="rounded-full bg-[#f7e6ca] px-2 py-0.5 text-xs font-extrabold uppercase tracking-[0.08em] text-[#9c5a21]">
                 Bestseller
               </span>
             )}
             {item.tag && item.tag !== "Bestseller" && (
-              <span className="rounded-full bg-[#e8f5e9] px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-[0.08em] text-[#2e7d32]">
+              <span className="rounded-full bg-[#e8f5e9] px-2 py-0.5 text-xs font-extrabold uppercase tracking-[0.08em] text-[#2e7d32]">
                 {item.tag}
               </span>
             )}
@@ -1122,8 +1524,8 @@ function MenuCard({
             )}
           </div>
           {unavailable && (
-            <p className="mt-2 inline-flex rounded-md bg-[#f3e4d6] px-2 py-1 text-[11px] font-bold text-[#9d523e]">
-              {item.availableNote || "Unavailable"}
+            <p className="mt-2 inline-flex rounded-md bg-[#f3e4d6] px-2 py-1 text-xs font-bold text-[#9d523e]">
+              {disabled ? "Kitchen closed" : item.availableNote || "Unavailable"}
             </p>
           )}
         </div>
@@ -1132,12 +1534,15 @@ function MenuCard({
             <div className="relative aspect-square overflow-hidden rounded-2xl bg-[#f3e5d4]">
               <img
                 src={item.image}
-                alt=""
+                alt={item.name}
+                loading="lazy"
                 className="h-full w-full object-cover"
               />
               {unavailable && (
-                <div className="absolute inset-0 grid place-items-center bg-[#3a251b]/45 px-2 text-center text-[11px] font-extrabold text-white">
-                  {item.availability === "SOLD_OUT"
+                <div className="absolute inset-0 grid place-items-center bg-[#3a251b]/45 px-2 text-center text-xs font-extrabold text-white">
+                  {disabled
+                    ? "Kitchen closed"
+                    : item.availability === "SOLD_OUT"
                     ? "Sold out"
                     : "Unavailable"}
                 </div>
@@ -1146,9 +1551,9 @@ function MenuCard({
             <button
               disabled={unavailable}
               onClick={onAdd}
-              className="-mt-3 mx-auto flex h-8 min-w-20 items-center justify-center rounded-lg border border-[#c84630] bg-[#fffdf9] px-3 text-xs font-extrabold text-[#c84630] shadow-sm hover:bg-[#c84630] hover:text-white disabled:cursor-not-allowed disabled:border-[#bfae9f] disabled:text-[#9d8d80]"
+              className="-mt-3 mx-auto flex h-11 min-h-[44px] min-w-20 items-center justify-center rounded-lg border border-[#c84630] bg-[#fffdf9] px-3 text-xs font-extrabold text-[#c84630] shadow-sm hover:bg-[#c84630] hover:text-white disabled:cursor-not-allowed disabled:border-[#bfae9f] disabled:text-[#9d8d80]"
             >
-              {unavailable ? "Unavailable" : item.customizable ? "CUSTOMIZE" : "ADD +"}
+              {item.availability !== "AVAILABLE" ? "Unavailable" : disabled ? "Closed" : item.customizable ? "CUSTOMIZE" : "ADD +"}
             </button>
           </div>
         )}
@@ -1156,14 +1561,14 @@ function MenuCard({
           <button
             disabled={unavailable}
             onClick={onAdd}
-            className="self-end rounded-lg border border-[#c84630] bg-[#fffdf9] px-4 py-2 text-xs font-extrabold text-[#c84630] shadow-sm hover:bg-[#c84630] hover:text-white disabled:cursor-not-allowed disabled:border-[#bfae9f] disabled:text-[#9d8d80]"
+            className="min-h-[44px] self-end rounded-lg border border-[#c84630] bg-[#fffdf9] px-4 py-2 text-xs font-extrabold text-[#c84630] shadow-sm hover:bg-[#c84630] hover:text-white disabled:cursor-not-allowed disabled:border-[#bfae9f] disabled:text-[#9d8d80]"
           >
-            {unavailable ? "Unavailable" : item.customizable ? "CUSTOMIZE" : "ADD +"}
+            {item.availability !== "AVAILABLE" ? "Unavailable" : disabled ? "Closed" : item.customizable ? "CUSTOMIZE" : "ADD +"}
           </button>
         )}
       </div>
       {item.customizable && !unavailable && (
-        <p className="mt-3 border-t border-dashed border-[#ead8c6] pt-2 text-[11px] font-bold text-[#9d7b64]">
+        <p className="mt-3 border-t border-dashed border-[#ead8c6] pt-2 text-xs font-bold text-[#9d7b64]">
           Customizable
         </p>
       )}
@@ -1183,7 +1588,7 @@ function MobileCartBar({
   return (
     <button
       onClick={onCart}
-      className="fixed bottom-4 left-4 right-4 z-40 flex items-center justify-between rounded-2xl bg-[#382719] px-4 py-3.5 text-left text-white shadow-[0_18px_45px_rgba(54,35,24,0.25)] lg:hidden"
+      className="safe-bottom fixed left-4 right-4 z-40 flex min-h-[44px] items-center justify-between rounded-2xl bg-[#382719] px-4 py-3.5 text-left text-white shadow-[0_18px_45px_rgba(54,35,24,0.25)] lg:hidden"
     >
       <span>
         <span className="block text-xs font-semibold text-white/70">
@@ -1209,6 +1614,9 @@ function CartTicket({
   onCheckout,
   processing,
   restaurant,
+  checkoutBlocked,
+  checkoutHint,
+  estimated,
 }: {
   cart: CartLine[];
   total: number;
@@ -1220,13 +1628,19 @@ function CartTicket({
   onCheckout: () => void;
   processing: boolean;
   restaurant: any;
+  checkoutBlocked?: boolean;
+  checkoutHint?: string;
+  /** Label the client-computed total as an estimate (server reprices). */
+  estimated?: boolean;
 }) {
+  const belowMinimum = (restaurant?.minOrder ?? 0) > 0 && total < restaurant.minOrder;
+  const checkoutDisabled = processing || belowMinimum || checkoutBlocked;
   return (
     <div className="ticket-edge sticky top-24 overflow-hidden bg-[#fffdf8] shadow-[0_15px_35px_rgba(84,48,26,0.1)]">
       <div className="paper-grain border-b border-[#ead8c6] p-5">
         <div className="flex items-center justify-between">
           <div>
-            <p className="text-[11px] font-extrabold uppercase tracking-[0.15em] text-[#a37960]">
+            <p className="text-xs font-extrabold uppercase tracking-[0.15em] text-[#a37960]">
               Your order
             </p>
             <h2 className="font-display mt-1 text-2xl">
@@ -1245,15 +1659,24 @@ function CartTicket({
                   <p className="text-sm font-extrabold text-[#442f20]">
                     {line.item.name}
                   </p>
-                  <p className="mt-0.5 text-[11px] text-[#967762]">
+                  <p className="mt-0.5 text-xs text-[#967762]">
                     {line.modifiers?.join(" · ") || "As listed"}
                   </p>
                   <p className="mt-1 text-xs font-bold">
                     {formatINR(line.unitPrice * line.quantity)}
                   </p>
+                  <button
+                    type="button"
+                    onClick={() => onQuantity(line.id, 0)}
+                    aria-label={`Remove ${line.item.name} from cart`}
+                    className="mt-1 min-h-[44px] text-xs font-bold text-[#a26d50] hover:text-[#c84630]"
+                  >
+                    Remove
+                  </button>
                 </div>
                 <Quantity
                   compact
+                  allowZero
                   value={line.quantity}
                   onChange={(next) => onQuantity(line.id, next)}
                 />
@@ -1277,19 +1700,29 @@ function CartTicket({
                 <span>{formatINR(taxes)}</span>
               </div>
               <div className="dotted-rule pt-3 flex justify-between text-base font-extrabold">
-                <span>To pay</span>
+                <span>{estimated ? "Estimated total" : "To pay"}</span>
                 <span>{formatINR(total)}</span>
               </div>
+              {estimated && (
+                <p className="text-xs text-[#94715c]">
+                  Final amount is confirmed by the kitchen at payment.
+                </p>
+              )}
             </div>
-            {restaurant?.minOrder > 0 && total < restaurant.minOrder && (
-              <p className="text-xs font-bold text-[#c84630]">
+            {belowMinimum && (
+              <p role="alert" className="text-xs font-bold text-[#c84630]">
                 Add {formatINR(restaurant.minOrder - total)} more for minimum order
+              </p>
+            )}
+            {checkoutHint && (
+              <p role="alert" className="text-xs font-bold text-[#c84630]">
+                {checkoutHint}
               </p>
             )}
             <Button
               onClick={onCheckout}
-              disabled={processing || (restaurant?.minOrder > 0 && total < restaurant.minOrder)}
-              className="h-12 w-full rounded-xl bg-[#c84630] text-sm font-extrabold hover:bg-[#ae3426]"
+              disabled={checkoutDisabled}
+              className="h-12 min-h-[44px] w-full rounded-xl bg-[#c84630] text-sm font-extrabold hover:bg-[#ae3426]"
             >
               {processing ? "Processing..." : "Checkout"}
               {!processing && <ArrowRight className="ml-2 h-4 w-4" />}
@@ -1308,44 +1741,42 @@ function CartTicket({
 function CustomizationDrawer({
   item,
   quantity,
-  size,
-  extras,
   note,
+  selectedVariantId,
+  selectedOptionIds,
   onClose,
   onQuantity,
-  onSize,
-  onExtras,
+  onVariantChange,
+  onToggleOption,
   onNote,
   onAdd,
 }: {
-  item: MenuItem | null;
+  item: StorefrontMenuItem | null;
   quantity: number;
-  size: string;
-  extras: string[];
   note: string;
+  selectedVariantId: string | null;
+  selectedOptionIds: string[];
   onClose: () => void;
   onQuantity: (value: number) => void;
-  onSize: (value: string) => void;
-  onExtras: (value: string[]) => void;
+  onVariantChange: (value: string | null) => void;
+  onToggleOption: (group: StorefrontAddonGroup, optionId: string) => void;
   onNote: (value: string) => void;
   onAdd: () => void;
 }) {
   if (!item) return null;
 
-  const sizeUpcharge = size === "Medium" ? 100 : size === "Large" ? 200 : 0;
-  const extraUpcharge = extras.reduce(
-    (sum, extra) =>
-      sum + (extra === "Extra cheese" ? 70 : extra === "Jalapeño" ? 40 : 50),
-    0
-  );
-  const displayTotal = (item.price + sizeUpcharge + extraUpcharge) * quantity;
+  const variant = item.variants?.find((v) => v.id === selectedVariantId) ?? null;
+  const chosenOptions = (item.addonGroups ?? [])
+    .flatMap((group) => group.options)
+    .filter((option) => selectedOptionIds.includes(option.id));
+  // Display estimate from DB prices only (paise → ₹). Server reprices authoritatively.
+  const displayTotal =
+    (item.price +
+      (variant ? variant.pricePaise / 100 : 0) +
+      chosenOptions.reduce((sum, option) => sum + option.pricePaise / 100, 0)) *
+    quantity;
 
-  const toggleExtra = (extra: string) =>
-    onExtras(
-      extras.includes(extra)
-        ? extras.filter((choice) => choice !== extra)
-        : [...extras, extra]
-    );
+  const hasRealModifiers = (item.variants?.length ?? 0) > 0 || (item.addonGroups?.length ?? 0) > 0;
 
   return (
     <Drawer open={!!item} onOpenChange={(open) => !open && onClose()}>
@@ -1356,7 +1787,7 @@ function CustomizationDrawer({
               <div>
                 <div className="flex items-center gap-2">
                   <FoodDot kind={item.kind} />
-                  <span className="rounded-full bg-[#f7e6ca] px-2 py-0.5 text-[10px] font-extrabold text-[#97591f]">
+                  <span className="rounded-full bg-[#f7e6ca] px-2 py-0.5 text-xs font-extrabold text-[#97591f]">
                     CUSTOMIZE
                   </span>
                 </div>
@@ -1369,58 +1800,37 @@ function CustomizationDrawer({
               </div>
               <button
                 onClick={onClose}
-                className="grid h-9 w-9 place-items-center rounded-full bg-[#f5e7da] text-[#805a43]"
+                aria-label="Close customization"
+                className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-[#f5e7da] text-[#805a43]"
               >
                 <X className="h-4 w-4" />
               </button>
             </div>
           </DrawerHeader>
 
-          <OptionGroup
-            title="Choose size"
-            required
-            values={["Regular", "Medium +₹100", "Large +₹200"]}
-            selected={size}
-            onSelect={(value) => onSize(value.split(" ")[0])}
-          />
+          {item.variants && item.variants.length > 0 && (
+            <VariantGroup
+              variants={item.variants}
+              selectedId={selectedVariantId}
+              onSelect={(id) => onVariantChange(id === selectedVariantId ? null : id)}
+            />
+          )}
 
-          <div className="mt-6">
-            <p className="text-sm font-extrabold text-[#382719]">
-              Add extras{" "}
-              <span className="font-medium text-[#967762]">(optional)</span>
+          {(item.addonGroups ?? []).map((group) => (
+            <AddonGroupBlock
+              key={group.id}
+              group={group}
+              selectedIds={selectedOptionIds}
+              onToggle={(optionId) => onToggleOption(group, optionId)}
+            />
+          ))}
+
+          {!hasRealModifiers && (
+            <p className="mt-6 rounded-xl border border-dashed border-[#e5d0bd] bg-white p-3 text-xs leading-relaxed text-[#967762]">
+              This dish has no extra options right now — add a note below if the
+              kitchen should know something.
             </p>
-            <div className="mt-3 grid gap-2">
-              {["Extra cheese", "Jalapeño"].map((extra) => (
-                <button
-                  key={extra}
-                  onClick={() => toggleExtra(extra)}
-                  className={`flex items-center justify-between rounded-xl border px-3.5 py-3 text-left text-sm font-bold ${
-                    extras.includes(extra)
-                      ? "border-[#c84630] bg-[#fff0e9] text-[#9f392a]"
-                      : "border-[#ead7c5] bg-white text-[#5f4534]"
-                  }`}
-                >
-                  <span className="flex items-center gap-3">
-                    <span
-                      className={`grid h-5 w-5 place-items-center rounded-md border ${
-                        extras.includes(extra)
-                          ? "border-[#c84630] bg-[#c84630] text-white"
-                          : "border-[#d8c3b1]"
-                      }`}
-                    >
-                      {extras.includes(extra) && (
-                        <Check className="h-3.5 w-3.5" />
-                      )}
-                    </span>
-                    {extra}
-                  </span>
-                  <span className="text-xs">
-                    +₹{extra === "Extra cheese" ? 70 : 40}
-                  </span>
-                </button>
-              ))}
-            </div>
-          </div>
+          )}
 
           <div className="mt-6">
             <label
@@ -1439,13 +1849,13 @@ function CustomizationDrawer({
           </div>
 
           <div className="mt-5">
-            <Quantity value={quantity} onChange={onQuantity} />
+            <Quantity value={quantity} onChange={(next) => onQuantity(Math.max(1, next))} />
           </div>
         </div>
         <DrawerFooter className="border-t border-[#ead8c6] bg-[#fffdf9] px-5 pb-5 pt-4">
           <Button
             onClick={onAdd}
-            className="h-13 w-full rounded-xl bg-[#c84630] text-sm font-extrabold hover:bg-[#ad3627]"
+            className="h-13 min-h-[44px] w-full rounded-xl bg-[#c84630] text-sm font-extrabold hover:bg-[#ad3627]"
           >
             Add item{" "}
             <span className="ml-auto">{formatINR(displayTotal)}</span>
@@ -1456,48 +1866,129 @@ function CustomizationDrawer({
   );
 }
 
-function OptionGroup({
-  title,
-  required,
-  values,
-  selected,
+function VariantGroup({
+  variants,
+  selectedId,
   onSelect,
 }: {
-  title: string;
-  required?: boolean;
-  values: string[];
-  selected: string;
-  onSelect: (value: string) => void;
+  variants: StorefrontVariant[];
+  selectedId: string | null;
+  onSelect: (id: string) => void;
 }) {
   return (
-    <div className="mt-6">
+    <div className="mt-6" role="radiogroup" aria-label="Choose a variant">
       <p className="text-sm font-extrabold text-[#382719]">
-        {title}{" "}
-        {required && <span className="font-medium text-[#c84630]">Required</span>}
+        Choose a variant{" "}
+        <span className="font-medium text-[#967762]">(optional)</span>
       </p>
       <div className="mt-3 grid gap-2">
-        {values.map((value) => {
-          const active = selected === value.split(" ")[0];
+        {variants.map((variant) => {
+          const active = selectedId === variant.id;
           return (
             <button
-              key={value}
-              onClick={() => onSelect(value)}
-              className={`flex items-center gap-3 rounded-xl border px-3.5 py-3 text-left text-sm font-bold ${
+              key={variant.id}
+              type="button"
+              role="radio"
+              aria-checked={active}
+              disabled={!variant.isAvailable}
+              onClick={() => onSelect(variant.id)}
+              className={`flex min-h-[44px] items-center justify-between rounded-xl border px-3.5 py-3 text-left text-sm font-bold disabled:cursor-not-allowed disabled:opacity-50 ${
                 active
                   ? "border-[#c84630] bg-[#fff0e9] text-[#9f392a]"
                   : "border-[#ead7c5] bg-white text-[#5f4534]"
               }`}
             >
-              <span
-                className={`grid h-5 w-5 place-items-center rounded-full border ${
-                  active ? "border-[#c84630]" : "border-[#d8c3b1]"
-                }`}
-              >
-                {active && (
-                  <span className="h-2.5 w-2.5 rounded-full bg-[#c84630]" />
+              <span className="flex items-center gap-3">
+                <span
+                  className={`grid h-5 w-5 place-items-center rounded-full border ${
+                    active ? "border-[#c84630]" : "border-[#d8c3b1]"
+                  }`}
+                >
+                  {active && (
+                    <span className="h-2.5 w-2.5 rounded-full bg-[#c84630]" />
+                  )}
+                </span>
+                {variant.name}
+                {!variant.isAvailable && (
+                  <span className="text-xs font-bold text-[#9d8d80]">(Unavailable)</span>
                 )}
               </span>
-              {value}
+              <span className="text-xs">
+                {variant.pricePaise > 0 ? `+${formatINR(variant.pricePaise / 100)}` : "Included"}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function AddonGroupBlock({
+  group,
+  selectedIds,
+  onToggle,
+}: {
+  group: StorefrontAddonGroup;
+  selectedIds: string[];
+  onToggle: (optionId: string) => void;
+}) {
+  const single = group.selectionType === "single";
+  return (
+    <div className="mt-6" role={single ? "radiogroup" : "group"} aria-label={group.name}>
+      <p className="text-sm font-extrabold text-[#382719]">
+        {group.name}{" "}
+        {group.isRequired ? (
+          <span className="font-medium text-[#c84630]">Required</span>
+        ) : (
+          <span className="font-medium text-[#967762]">(optional)</span>
+        )}
+      </p>
+      {!single && group.maxSelections > 1 && (
+        <p className="mt-1 text-xs text-[#967762]">Pick up to {group.maxSelections}</p>
+      )}
+      <div className="mt-3 grid gap-2">
+        {group.options.map((option) => {
+          const active = selectedIds.includes(option.id);
+          return (
+            <button
+              key={option.id}
+              type="button"
+              role={single ? "radio" : "checkbox"}
+              aria-checked={active}
+              disabled={!option.isAvailable}
+              onClick={() => onToggle(option.id)}
+              className={`flex min-h-[44px] items-center justify-between rounded-xl border px-3.5 py-3 text-left text-sm font-bold disabled:cursor-not-allowed disabled:opacity-50 ${
+                active
+                  ? "border-[#c84630] bg-[#fff0e9] text-[#9f392a]"
+                  : "border-[#ead7c5] bg-white text-[#5f4534]"
+              }`}
+            >
+              <span className="flex items-center gap-3">
+                <span
+                  className={`grid h-5 w-5 place-items-center border ${
+                    single ? "rounded-full" : "rounded-md"
+                  } ${
+                    active
+                      ? "border-[#c84630] bg-[#c84630] text-white"
+                      : "border-[#d8c3b1]"
+                  }`}
+                >
+                  {active &&
+                    (single ? (
+                      <span className="h-2.5 w-2.5 rounded-full bg-white" />
+                    ) : (
+                      <Check className="h-3.5 w-3.5" />
+                    ))}
+                </span>
+                {option.name}
+                {!option.isAvailable && (
+                  <span className="text-xs font-bold text-[#9d8d80]">(Unavailable)</span>
+                )}
+              </span>
+              <span className="text-xs">
+                {option.pricePaise > 0 ? `+${formatINR(option.pricePaise / 100)}` : "Included"}
+              </span>
             </button>
           );
         })}
@@ -1519,6 +2010,26 @@ function ServiceSetupScreen({
   onCheckout,
   processing,
   restaurant,
+  deliveryAddress,
+  onEditLocation,
+  customerPhone,
+  onCustomerPhone,
+  couponCode,
+  onCouponCode,
+  deliveryNotes,
+  onDeliveryNotes,
+  cutlery,
+  onCutlery,
+  serviceBlocked,
+  serviceChecking,
+  serviceReason,
+  restaurantOpen,
+  closureMessage,
+  slug,
+  eta,
+  activeOrderNumber,
+  queryOrder,
+  queryToken,
 }: {
   onMenu: () => void;
   screen: string;
@@ -1532,6 +2043,26 @@ function ServiceSetupScreen({
   onCheckout: () => void;
   processing: boolean;
   restaurant: any;
+  deliveryAddress: DeliveryLocation | null;
+  onEditLocation: () => void;
+  customerPhone: string;
+  onCustomerPhone: (value: string) => void;
+  couponCode: string;
+  onCouponCode: (value: string) => void;
+  deliveryNotes: string;
+  onDeliveryNotes: (value: string) => void;
+  cutlery: boolean;
+  onCutlery: (value: boolean) => void;
+  serviceBlocked: boolean;
+  serviceChecking: boolean;
+  serviceReason: string | null;
+  restaurantOpen: boolean;
+  closureMessage: string;
+  slug: string;
+  eta?: string;
+  activeOrderNumber: string;
+  queryOrder: string;
+  queryToken: string;
 }) {
   if (screen === "cart") {
     return (
@@ -1540,12 +2071,13 @@ function ServiceSetupScreen({
           <div className="relative mx-auto flex min-h-20 max-w-5xl items-center gap-4 px-4 py-4 sm:px-6">
             <button
               onClick={onMenu}
-              className="grid h-10 w-10 shrink-0 place-items-center rounded-full border border-[#e7d2c0] bg-[#fffdf9] text-[#684d3c] hover:bg-[#f8ecdf]"
+              aria-label="Back to menu"
+              className="grid h-11 w-11 shrink-0 place-items-center rounded-full border border-[#e7d2c0] bg-[#fffdf9] text-[#684d3c] hover:bg-[#f8ecdf]"
             >
               <ArrowLeft className="h-4 w-4" />
             </button>
             <div>
-              <p className="text-[10px] font-extrabold uppercase tracking-[0.16em] text-[#a37960]">
+              <p className="text-xs font-extrabold uppercase tracking-[0.16em] text-[#a37960]">
                 Your order
               </p>
               <h1 className="font-display mt-1 text-3xl leading-none text-[#382719]">
@@ -1554,6 +2086,13 @@ function ServiceSetupScreen({
             </div>
           </div>
         </header>
+        {!restaurantOpen && (
+          <div className="mx-auto max-w-5xl px-4 sm:px-6">
+            <div role="alert" className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-bold text-amber-800">
+              The kitchen is closed — {closureMessage}. Checkout is paused until we reopen.
+            </div>
+          </div>
+        )}
         <div className="mx-auto grid max-w-5xl gap-5 px-4 py-6 sm:px-6 md:grid-cols-[1fr_360px]">
           <section className="ticket-edge bg-[#fffdf9] p-5 shadow-sm">
             <div className="mb-5 flex items-center justify-between">
@@ -1562,51 +2101,83 @@ function ServiceSetupScreen({
               </p>
               <button
                 onClick={onMenu}
-                className="text-xs font-extrabold text-[#c84630]"
+                className="min-h-[44px] text-xs font-extrabold text-[#c84630]"
               >
                 + Add more items
               </button>
             </div>
-            <div className="space-y-5">
-              {cart.map((line) => (
-                <div
-                  key={line.id}
-                  className="flex gap-3 border-b border-dashed border-[#ead8c6] pb-5 last:border-0 last:pb-0"
+            {cart.length === 0 ? (
+              <div className="py-6 text-center">
+                <p className="text-sm font-bold text-[#9b7a66]">
+                  Your cart is empty — let's fix that.
+                </p>
+                <Button
+                  onClick={onMenu}
+                  className="mt-4 h-12 min-h-[44px] rounded-xl bg-[#c84630] px-6 font-extrabold hover:bg-[#ad3627]"
                 >
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-extrabold text-[#382719]">
-                      {line.item.name}
-                    </p>
-                    <p className="mt-1 text-xs text-[#8d705c]">
-                      {line.modifiers?.join(" · ") || "No customizations"}
-                    </p>
-                    {line.note && (
-                      <p className="mt-1 text-xs italic text-[#8d705c]">
-                        "{line.note}"
+                  Browse the menu
+                </Button>
+              </div>
+            ) : (
+              <div className="space-y-5">
+                {cart.map((line) => (
+                  <div
+                    key={line.id}
+                    className="flex gap-3 border-b border-dashed border-[#ead8c6] pb-5 last:border-0 last:pb-0"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-extrabold text-[#382719]">
+                        {line.item.name}
                       </p>
-                    )}
-                    <button
-                      onClick={() => onQuantity(line.id, 0)}
-                      className="mt-2 text-xs font-bold text-[#a26d50] hover:text-[#c84630]"
-                    >
-                      Remove
-                    </button>
+                      <p className="mt-1 text-xs text-[#8d705c]">
+                        {line.modifiers?.join(" · ") || "No customizations"}
+                      </p>
+                      {line.note && (
+                        <p className="mt-1 text-xs italic text-[#8d705c]">
+                          "{line.note}"
+                        </p>
+                      )}
+                      <button
+                        onClick={() => onQuantity(line.id, 0)}
+                        aria-label={`Remove ${line.item.name} from cart`}
+                        className="mt-2 min-h-[44px] text-xs font-bold text-[#a26d50] hover:text-[#c84630]"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                    <div className="text-right">
+                      <p className="mb-2 text-sm font-extrabold">
+                        {formatINR(line.unitPrice * line.quantity)}
+                      </p>
+                      <Quantity
+                        compact
+                        allowZero
+                        value={line.quantity}
+                        onChange={(next) => onQuantity(line.id, next)}
+                      />
+                    </div>
                   </div>
-                  <div className="text-right">
-                    <p className="mb-2 text-sm font-extrabold">
-                      {formatINR(line.unitPrice * line.quantity)}
-                    </p>
-                    <Quantity
-                      compact
-                      value={line.quantity}
-                      onChange={(next) => onQuantity(line.id, next)}
-                    />
-                  </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </section>
           <aside className="space-y-4">
+            <CheckoutDetailsForm
+              deliveryAddress={deliveryAddress}
+              onEditLocation={onEditLocation}
+              customerPhone={customerPhone}
+              onCustomerPhone={onCustomerPhone}
+              couponCode={couponCode}
+              onCouponCode={onCouponCode}
+              deliveryNotes={deliveryNotes}
+              onDeliveryNotes={onDeliveryNotes}
+              cutlery={cutlery}
+              onCutlery={onCutlery}
+              serviceBlocked={serviceBlocked}
+              serviceChecking={serviceChecking}
+              serviceReason={serviceReason}
+              disabled={processing}
+            />
             <CartTicket
               cart={cart}
               total={total}
@@ -1618,6 +2189,88 @@ function ServiceSetupScreen({
               onCheckout={onCheckout}
               processing={processing}
               restaurant={restaurant}
+              checkoutBlocked={!restaurantOpen || serviceBlocked}
+              checkoutHint={
+                !restaurantOpen
+                  ? closureMessage
+                  : serviceBlocked
+                  ? "This address is outside our delivery area."
+                  : undefined
+              }
+            />
+          </aside>
+        </div>
+      </main>
+    );
+  }
+
+  if (screen === "checkout") {
+    return (
+      <main className="min-h-screen bg-[#fffaf3]">
+        <header className="paper-grain relative overflow-hidden border-b border-[#ead8c6] bg-[#fffdf9]">
+          <div className="relative mx-auto flex min-h-20 max-w-5xl items-center gap-4 px-4 py-4 sm:px-6">
+            <button
+              onClick={onMenu}
+              aria-label="Back to menu"
+              className="grid h-11 w-11 shrink-0 place-items-center rounded-full border border-[#e7d2c0] bg-[#fffdf9] text-[#684d3c] hover:bg-[#f8ecdf]"
+            >
+              <ArrowLeft className="h-4 w-4" />
+            </button>
+            <div>
+              <p className="text-xs font-extrabold uppercase tracking-[0.16em] text-[#a37960]">
+                Almost there
+              </p>
+              <h1 className="font-display mt-1 text-3xl leading-none text-[#382719]">
+                Checkout
+              </h1>
+            </div>
+          </div>
+        </header>
+        {!restaurantOpen && (
+          <div className="mx-auto max-w-5xl px-4 sm:px-6">
+            <div role="alert" className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-bold text-amber-800">
+              The kitchen is closed — {closureMessage}. Checkout is paused until we reopen.
+            </div>
+          </div>
+        )}
+        <div className="mx-auto grid max-w-5xl gap-5 px-4 py-6 sm:px-6 md:grid-cols-[1fr_360px]">
+          <CheckoutDetailsForm
+            deliveryAddress={deliveryAddress}
+            onEditLocation={onEditLocation}
+            customerPhone={customerPhone}
+            onCustomerPhone={onCustomerPhone}
+            couponCode={couponCode}
+            onCouponCode={onCouponCode}
+            deliveryNotes={deliveryNotes}
+            onDeliveryNotes={onDeliveryNotes}
+            cutlery={cutlery}
+            onCutlery={onCutlery}
+            serviceBlocked={serviceBlocked}
+            serviceChecking={serviceChecking}
+            serviceReason={serviceReason}
+            disabled={processing}
+          />
+          <aside>
+            <CartTicket
+              cart={cart}
+              total={total}
+              itemTotal={itemTotal}
+              packaging={packaging}
+              delivery={delivery}
+              taxes={taxes}
+              onQuantity={onQuantity}
+              onCheckout={onCheckout}
+              processing={processing}
+              restaurant={restaurant}
+              estimated
+              checkoutBlocked={!restaurantOpen || serviceBlocked}
+              checkoutHint={
+                !restaurantOpen
+                  ? closureMessage
+                  : serviceBlocked
+                  ? "This address is outside our delivery area."
+                  : undefined
+              }
             />
           </aside>
         </div>
@@ -1627,29 +2280,402 @@ function ServiceSetupScreen({
 
   if (screen === "confirmation") {
     return (
-      <main className="grid min-h-screen place-items-center bg-[#fffaf3] px-4">
-        <section className="ticket-edge w-full max-w-lg bg-[#fffdf9] p-8 text-center shadow-sm">
-          <div className="mx-auto grid h-16 w-16 place-items-center rounded-full bg-[#e5f1e5] text-[#42774b]">
-            <Check className="h-7 w-7" />
-          </div>
-          <h1 className="font-display mt-5 text-4xl text-[#382719]">
-            Order confirmed!
-          </h1>
-          <p className="mt-3 text-sm leading-relaxed text-[#856653]">
-            Your order has been placed. The kitchen is preparing your food.
-          </p>
-          <Button
-            onClick={onMenu}
-            className="mt-6 h-12 rounded-xl bg-[#c84630] px-6 font-extrabold hover:bg-[#ad3627]"
-          >
-            Back to menu
-          </Button>
-        </section>
-      </main>
+      <OrderStatusView
+        orderNumber={queryOrder}
+        trackingToken={queryToken}
+        restaurantName={restaurant?.name}
+        etaFallback={restaurant?.eta ?? eta}
+        onMenu={onMenu}
+        variant="confirmation"
+      />
     );
   }
 
-  return <ServiceSetupScreen onMenu={onMenu} screen="menu" cart={[]} total={0} itemTotal={0} packaging={0} delivery={0} taxes={0} onQuantity={() => {}} onCheckout={() => {}} processing={false} restaurant={null} />;
+  if (screen === "tracking") {
+    return (
+      <OrderStatusView
+        orderNumber={activeOrderNumber}
+        trackingToken={queryToken}
+        restaurantName={restaurant?.name}
+        etaFallback={restaurant?.eta ?? eta}
+        onMenu={slug ? onMenu : undefined}
+        variant="tracking"
+      />
+    );
+  }
+
+  // Safe fallback — never render ServiceSetupScreen from itself.
+  return (
+    <main className="grid min-h-screen place-items-center bg-[#fffaf3] px-4">
+      <section className="w-full max-w-md rounded-2xl bg-[#fffdf9] p-8 text-center shadow-sm">
+        <h1 className="font-display text-3xl text-[#382719]">Back to the menu</h1>
+        <p className="mt-3 text-sm leading-relaxed text-[#856653]">
+          This page isn't part of ordering — let's get you back to the good stuff.
+        </p>
+        <Button
+          onClick={onMenu}
+          className="mt-6 h-12 min-h-[44px] rounded-xl bg-[#c84630] px-6 font-extrabold hover:bg-[#ad3627]"
+        >
+          Back to menu
+        </Button>
+      </section>
+    </main>
+  );
+}
+
+function CheckoutDetailsForm({
+  deliveryAddress,
+  onEditLocation,
+  customerPhone,
+  onCustomerPhone,
+  couponCode,
+  onCouponCode,
+  deliveryNotes,
+  onDeliveryNotes,
+  cutlery,
+  onCutlery,
+  serviceBlocked,
+  serviceChecking,
+  serviceReason,
+  disabled,
+}: {
+  deliveryAddress: DeliveryLocation | null;
+  onEditLocation: () => void;
+  customerPhone: string;
+  onCustomerPhone: (value: string) => void;
+  couponCode: string;
+  onCouponCode: (value: string) => void;
+  deliveryNotes: string;
+  onDeliveryNotes: (value: string) => void;
+  cutlery: boolean;
+  onCutlery: (value: boolean) => void;
+  serviceBlocked: boolean;
+  serviceChecking: boolean;
+  serviceReason: string | null;
+  disabled?: boolean;
+}) {
+  return (
+    <section aria-label="Checkout details" className="space-y-4 rounded-2xl border border-[#ead8c6] bg-[#fffdf9] p-5 shadow-sm">
+      <div>
+        <p className="text-xs font-extrabold uppercase tracking-[0.15em] text-[#a37960]">
+          Delivery address
+        </p>
+        {deliveryAddress?.confirmed ? (
+          <div className="mt-2 flex items-start justify-between gap-3">
+            <p className="text-sm font-bold leading-relaxed text-[#382719]">
+              {deliveryAddress.flatHouse}, {deliveryAddress.area}, {deliveryAddress.city}{" "}
+              {deliveryAddress.postalCode}
+            </p>
+            <button
+              type="button"
+              onClick={onEditLocation}
+              disabled={disabled}
+              className="min-h-[44px] shrink-0 text-xs font-extrabold text-[#c84630] disabled:opacity-50"
+            >
+              Change
+            </button>
+          </div>
+        ) : (
+          <Button
+            type="button"
+            onClick={onEditLocation}
+            disabled={disabled}
+            variant="outline"
+            className="mt-2 h-11 min-h-[44px] w-full rounded-xl border-[#ddc6b5] font-extrabold text-[#c84630]"
+          >
+            <MapPin className="mr-2 h-4 w-4" />
+            Set delivery location
+          </Button>
+        )}
+        {serviceChecking && (
+          <p aria-live="polite" className="mt-2 text-xs font-bold text-[#94715c]">
+            Checking delivery availability…
+          </p>
+        )}
+        {serviceBlocked && (
+          <p role="alert" className="mt-2 text-xs font-bold text-[#c84630]">
+            {serviceReason === "OUTSIDE_DELIVERY_RADIUS"
+              ? "This address is outside our delivery area — try a closer address."
+              : "We can't deliver to this address right now."}
+          </p>
+        )}
+      </div>
+
+      <div>
+        <label htmlFor="checkout-phone" className="text-xs font-extrabold uppercase tracking-[0.15em] text-[#a37960]">
+          Phone number
+        </label>
+        <Input
+          id="checkout-phone"
+          value={customerPhone}
+          onChange={(event) => onCustomerPhone(event.target.value)}
+          placeholder="10-digit mobile number"
+          type="tel"
+          inputMode="numeric"
+          autoComplete="tel"
+          maxLength={15}
+          disabled={disabled}
+          className="mt-2 h-12 min-h-[44px] rounded-xl border-[#ddc6b5] text-base"
+        />
+        <p className="mt-1 text-xs text-[#94715c]">
+          Order updates and the delivery partner reach you here.
+        </p>
+      </div>
+
+      <div>
+        <label htmlFor="checkout-coupon" className="text-xs font-extrabold uppercase tracking-[0.15em] text-[#a37960]">
+          Coupon code
+        </label>
+        <Input
+          id="checkout-coupon"
+          value={couponCode}
+          onChange={(event) => onCouponCode(event.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ""))}
+          placeholder="e.g. WELCOME10"
+          type="text"
+          autoComplete="off"
+          maxLength={48}
+          disabled={disabled}
+          className="mt-2 h-12 min-h-[44px] rounded-xl border-[#ddc6b5] uppercase"
+        />
+      </div>
+
+      <div>
+        <label htmlFor="checkout-notes" className="text-xs font-extrabold uppercase tracking-[0.15em] text-[#a37960]">
+          Delivery notes
+        </label>
+        <textarea
+          id="checkout-notes"
+          value={deliveryNotes}
+          onChange={(event) => onDeliveryNotes(event.target.value)}
+          placeholder="Gate code, floor, ring the bell twice…"
+          disabled={disabled}
+          maxLength={1000}
+          className="mt-2 min-h-20 w-full resize-none rounded-xl border border-[#ddc6b5] bg-white p-3 text-sm outline-none ring-[#c84630] focus:ring-2 disabled:opacity-50"
+        />
+      </div>
+
+      <label htmlFor="checkout-cutlery" className="flex min-h-[44px] cursor-pointer items-center gap-3 text-sm font-bold text-[#553d2c]">
+        <input
+          id="checkout-cutlery"
+          type="checkbox"
+          checked={cutlery}
+          onChange={(event) => onCutlery(event.target.checked)}
+          disabled={disabled}
+          className="h-5 w-5 accent-[#c84630]"
+        />
+        Include cutlery with my order
+      </label>
+    </section>
+  );
+}
+
+function OrderStatusView({
+  orderNumber,
+  trackingToken,
+  restaurantName,
+  etaFallback,
+  onMenu,
+  variant,
+}: {
+  orderNumber: string;
+  trackingToken: string;
+  restaurantName?: string;
+  etaFallback?: string;
+  onMenu?: () => void;
+  variant: "confirmation" | "tracking";
+}) {
+  const hasCredentials = orderNumber.length >= 5 && trackingToken.length >= 16;
+  const tracking = trpc.storefront.orderTracking.useQuery(
+    { orderNumber, trackingToken },
+    { enabled: hasCredentials },
+  );
+
+  const eta = tracking.data?.estimatedMinutes
+    ? `~${tracking.data.estimatedMinutes} min`
+    : tracking.data?.delivery?.estimatedDelivery
+    ? new Date(tracking.data.delivery.estimatedDelivery).toLocaleTimeString("en-IN", {
+        hour: "numeric",
+        minute: "2-digit",
+      })
+    : etaFallback;
+
+  return (
+    <main className="grid min-h-screen place-items-center bg-[#fffaf3] px-4 py-10">
+      <section aria-live="polite" className="ticket-edge w-full max-w-lg bg-[#fffdf9] p-8 text-center shadow-sm">
+        {!hasCredentials ? (
+          <>
+            <div className="mx-auto grid h-16 w-16 place-items-center rounded-full bg-[#faede0] text-[#c84630]">
+              <PackageCheck className="h-7 w-7" />
+            </div>
+            <h1 className="font-display mt-5 text-4xl text-[#382719]">
+              {variant === "confirmation" ? "Thank you!" : "Track your order"}
+            </h1>
+            <p role="alert" className="mt-3 text-sm leading-relaxed text-[#856653]">
+              We couldn't find your secure order link. Please open tracking from
+              your confirmation page or receipt.
+            </p>
+            {onMenu && (
+              <Button
+                onClick={onMenu}
+                className="mt-6 h-12 min-h-[44px] rounded-xl bg-[#c84630] px-6 font-extrabold hover:bg-[#ad3627]"
+              >
+                Back to menu
+              </Button>
+            )}
+          </>
+        ) : tracking.isLoading ? (
+          <>
+            <div className="mx-auto grid h-16 w-16 place-items-center rounded-full bg-[#faede0] text-[#c84630]">
+              <Clock3 className="h-7 w-7 animate-pulse" />
+            </div>
+            <h1 className="font-display mt-5 text-4xl text-[#382719]">Fetching your order…</h1>
+            <p className="mt-3 text-sm text-[#856653]">One moment while we check the kitchen.</p>
+          </>
+        ) : tracking.isError || !tracking.data ? (
+          <>
+            <div className="mx-auto grid h-16 w-16 place-items-center rounded-full bg-[#fbe3dc] text-[#c84630]">
+              <X className="h-7 w-7" />
+            </div>
+            <h1 className="font-display mt-5 text-4xl text-[#382719]">Couldn't load your order</h1>
+            <p role="alert" className="mt-3 text-sm leading-relaxed text-[#856653]">
+              {tracking.isError
+                ? "Something went wrong while fetching your order. Please try again."
+                : "We couldn't find this order — the link may be incomplete."}
+            </p>
+            <div className="mt-6 flex justify-center gap-2">
+              <Button
+                onClick={() => tracking.refetch()}
+                variant="outline"
+                className="h-12 min-h-[44px] rounded-xl border-[#ddc6b5] px-6 font-extrabold text-[#553d2c]"
+              >
+                Try again
+              </Button>
+              {onMenu && (
+                <Button
+                  onClick={onMenu}
+                  className="h-12 min-h-[44px] rounded-xl bg-[#c84630] px-6 font-extrabold hover:bg-[#ad3627]"
+                >
+                  Back to menu
+                </Button>
+              )}
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="mx-auto grid h-16 w-16 place-items-center rounded-full bg-[#e5f1e5] text-[#42774b]">
+              <Check className="h-7 w-7" />
+            </div>
+            <h1 className="font-display mt-5 text-4xl text-[#382719]">
+              {variant === "confirmation" ? "Thank you — order confirmed!" : "Your order"}
+            </h1>
+            <p className="mt-3 text-sm leading-relaxed text-[#856653]">
+              {variant === "confirmation"
+                ? `The kitchen ${restaurantName ? `at ${restaurantName} ` : ""}has your order and the burners are already warming up. Sit back — we'll take it from here.`
+                : `Here's the latest from the kitchen${restaurantName ? ` at ${restaurantName}` : ""}.`}
+            </p>
+            <div className="mt-5 flex flex-wrap items-center justify-center gap-2 text-xs font-extrabold">
+              <span className="rounded-full bg-[#382719] px-3 py-1.5 text-white">
+                Order {tracking.data.orderNumber}
+              </span>
+              <span className="rounded-full bg-[#f7e6ca] px-3 py-1.5 uppercase tracking-wide text-[#9c5a21]">
+                {String(tracking.data.status).replace(/_/g, " ")}
+              </span>
+              {eta && (
+                <span className="inline-flex items-center gap-1 rounded-full bg-[#e5f1e5] px-3 py-1.5 text-[#42774b]">
+                  <Clock3 className="h-3.5 w-3.5" />
+                  ETA {eta}
+                </span>
+              )}
+            </div>
+            <div className="mt-5 space-y-2 border-t border-dashed border-[#ead8c6] pt-4 text-left">
+              {tracking.data.items.map((item: { id: string; itemNameSnapshot: string; quantity: number; unitPricePaise: number }) => (
+                <div key={item.id} className="flex items-center justify-between gap-3 text-sm">
+                  <span className="font-bold text-[#442f20]">
+                    {item.quantity} × {item.itemNameSnapshot}
+                  </span>
+                  <span className="font-bold text-[#94715c]">
+                    {formatINR((item.unitPricePaise / 100) * item.quantity)}
+                  </span>
+                </div>
+              ))}
+              <div className="flex items-center justify-between gap-3 border-t border-dashed border-[#ead8c6] pt-3 text-base font-extrabold text-[#382719]">
+                <span>Paid total</span>
+                <span>{formatINR(tracking.data.totalPaise / 100)}</span>
+              </div>
+              {(tracking.data.deliveryArea || tracking.data.deliveryCity) && (
+                <p className="flex items-center gap-1.5 text-xs text-[#94715c]">
+                  <MapPin className="h-3.5 w-3.5" />
+                  Delivering to {[tracking.data.deliveryArea, tracking.data.deliveryCity].filter(Boolean).join(", ")}
+                </p>
+              )}
+            </div>
+            {tracking.data.history.length > 0 && (
+              <ol className="mt-5 space-y-2 border-t border-dashed border-[#ead8c6] pt-4 text-left">
+                {tracking.data.history.map((entry: { status: string; note: string | null; createdAt: Date | string }, index: number) => (
+                  <li key={`${entry.status}-${index}`} className="flex items-start gap-2 text-xs text-[#856653]">
+                    <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#42774b]" />
+                    <span>
+                      <span className="font-extrabold text-[#553d2c]">
+                        {String(entry.status).replace(/_/g, " ")}
+                      </span>
+                      {entry.note ? ` — ${entry.note}` : ""}
+                    </span>
+                  </li>
+                ))}
+              </ol>
+            )}
+            {onMenu && (
+              <Button
+                onClick={onMenu}
+                className="mt-6 h-12 min-h-[44px] rounded-xl bg-[#c84630] px-6 font-extrabold hover:bg-[#ad3627]"
+              >
+                Back to menu
+              </Button>
+            )}
+          </>
+        )}
+      </section>
+    </main>
+  );
+}
+
+function NoSlugScreen() {
+  return (
+    <main className="grid min-h-screen place-items-center bg-[#fffaf3] px-4">
+      <section className="w-full max-w-md rounded-2xl bg-[#fffdf9] p-8 text-center shadow-sm">
+        <div className="mx-auto grid h-14 w-14 place-items-center rounded-full bg-[#faede0] text-[#c84630]">
+          <Store className="h-6 w-6" />
+        </div>
+        <h1 className="font-display mt-4 text-3xl text-[#382719]">Pick a kitchen to start</h1>
+        <p className="mt-3 text-sm leading-relaxed text-[#856653]">
+          This link doesn't point at a restaurant. Ask the restaurant for their
+          direct ordering link.
+        </p>
+      </section>
+    </main>
+  );
+}
+
+function StorefrontUnavailable({ onRetry }: { onRetry: () => void }) {
+  return (
+    <main className="grid min-h-screen place-items-center bg-[#fffaf3] px-4">
+      <section className="w-full max-w-md rounded-2xl bg-[#fffdf9] p-8 text-center shadow-sm">
+        <div className="mx-auto grid h-14 w-14 place-items-center rounded-full bg-[#faede0] text-[#c84630]">
+          <Utensils className="h-6 w-6" />
+        </div>
+        <h1 className="font-display mt-4 text-3xl text-[#382719]">This kitchen isn't available</h1>
+        <p role="alert" className="mt-3 text-sm leading-relaxed text-[#856653]">
+          We couldn't load this storefront. It may have moved or be offline.
+        </p>
+        <Button
+          onClick={onRetry}
+          className="mt-6 h-12 min-h-[44px] rounded-xl bg-[#c84630] px-6 font-extrabold hover:bg-[#ad3627]"
+        >
+          Try again
+        </Button>
+      </section>
+    </main>
+  );
 }
 
 function MenuSkeleton() {

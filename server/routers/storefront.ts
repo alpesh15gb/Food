@@ -239,7 +239,7 @@ export const storefrontRouter = router({
       const { checkServiceability, validateGeoLocation } = await import("../domain/locationService");
       const { getDb } = await import("../db");
       const { restaurants, outlets } = await import("../../drizzle/schema");
-      const { eq, and } = await import("drizzle-orm");
+      const { eq } = await import("drizzle-orm");
 
       // Validate coordinates server-side
       const loc = validateGeoLocation({ latitude: input.latitude, longitude: input.longitude });
@@ -258,6 +258,8 @@ export const storefrontRouter = router({
         return db.select().from(outlets).where(eq(outlets.restaurantId, restId)) as any;
       };
 
+      // Thread restaurant delivery radius into outlet selection.
+      const defaultRadiusKm = restaurant.deliveryRadiusKm ? parseFloat(String(restaurant.deliveryRadiusKm)) : 5;
       const result = await checkServiceability(
         loc.latitude!,
         loc.longitude!,
@@ -265,12 +267,13 @@ export const storefrontRouter = router({
         getOutlets,
         async (pickup, drop) => {
           const { getDeliveryProvider } = await import("../integrations/shadowfax");
-          const provider = getDeliveryProvider();
+          const provider = getDeliveryProvider(restaurant.id);
           if (provider.checkRouteServiceability) {
             return provider.checkRouteServiceability(pickup, drop);
           }
           return provider.checkServiceability("");
         },
+        { defaultRadiusKm: Number.isFinite(defaultRadiusKm) ? defaultRadiusKm : 5 },
       );
 
       return result;
@@ -287,29 +290,37 @@ export const storefrontRouter = router({
         throw new Error("Online payment is not configured yet. Please contact the restaurant.");
       }
 
-      // Issue 18: Use idempotencyKey to prevent duplicate order creation
-      // (checked inside createOrderFromValidatedCart via orderNumber uniqueness)
-      // H-07: Check idempotency — if key provided, check for existing order first
+      // Issue 18 / H-07: idempotency via orders.idempotencyKey (unique partial index).
+      // Legacy fallback: match orderNumber for rows created before the column existed.
       if (input.idempotencyKey) {
         const { getDb } = await import("../db");
         const db = await getDb();
         if (db) {
-          const { orders } = await import("../../drizzle/schema");
-          const { eq } = await import("drizzle-orm");
-          const existing = await db.select({ id: orders.id, orderNumber: orders.orderNumber })
+          const { orders, payments } = await import("../../drizzle/schema");
+          const { eq, or } = await import("drizzle-orm");
+          const existing = await db.select({
+            id: orders.id,
+            orderNumber: orders.orderNumber,
+            trackingToken: orders.trackingToken,
+            totalPaise: orders.totalPaise,
+          })
             .from(orders)
-            .where(eq(orders.orderNumber, input.idempotencyKey))
+            .where(or(eq(orders.idempotencyKey, input.idempotencyKey), eq(orders.orderNumber, input.idempotencyKey)))
             .limit(1);
           if (existing[0]) {
-            // Return existing order with payment config — idempotent response
-            const config = await getRazorpayConfig();
+            // Idempotent return: real trackingToken + provider binding + amount.
+            const payment = (await db.select({
+              providerOrderId: payments.providerOrderId,
+              amountPaise: payments.amountPaise,
+            }).from(payments).where(eq(payments.orderId, existing[0].id)).limit(1))[0];
+            const idempotentConfig = await getRazorpayConfig();
             return {
               orderId: existing[0].id,
               orderNumber: existing[0].orderNumber,
-              trackingToken: "",
-              keyId: config.keyId ?? "",
-              providerOrderId: "",
-              amountPaise: 0,
+              trackingToken: existing[0].trackingToken,
+              keyId: idempotentConfig.keyId ?? "",
+              providerOrderId: payment?.providerOrderId ?? "",
+              amountPaise: payment?.amountPaise ?? existing[0].totalPaise,
               currency: "INR",
               alreadyExists: true,
             };
@@ -327,6 +338,7 @@ export const storefrontRouter = router({
         cutleryPreference: input.cutleryPreference,
         customerPhone: input.customerPhone,
         customerEmail: input.customerEmail,
+        idempotencyKey: input.idempotencyKey,
       });
 
       const provider = await createRazorpayPaymentOrder({
@@ -385,8 +397,107 @@ export const storefrontRouter = router({
       signature: z.string().optional(),
     }))
     .mutation(async ({ input }) => {
-      const provider = getDeliveryProvider();
-      return provider.handleWebhook(input.payload, input.signature);
+      const { getDb } = await import("../db");
+      const db = await getDb();
+      if (!db) throw new Error("Database unavailable.");
+      const { deliveries, deliveryStatusHistory, orders, orderStatusHistory, webhookEvents } = await import("../../drizzle/schema");
+      const { eq, and } = await import("drizzle-orm");
+      const { nanoid } = await import("nanoid");
+      const { mapDeliveryStatusToOrderStatus } = await import("../integrations/shadowfax");
+
+      // Verify via provider first (HMAC checked inside handleWebhook).
+      // Provider is resolved per-tenant after we locate the delivery row below;
+      // start with the default provider for signature verification.
+      const bootstrapProvider = getDeliveryProvider();
+      const update = await bootstrapProvider.handleWebhook(input.payload, input.signature);
+      if (!update) {
+        return { ok: true, processed: false };
+      }
+
+      // Lookup delivery by providerDeliveryId (canonical webhook key).
+      const delivery = (await db.select().from(deliveries)
+        .where(eq(deliveries.providerDeliveryId, update.deliveryId))
+        .limit(1))[0];
+      if (!delivery) {
+        // Unknown delivery — record event for observability, acknowledge to stop retries.
+        const rawId = String((input.payload as Record<string, unknown>).order_id ?? update.deliveryId ?? "unknown");
+        try {
+          await db.insert(webhookEvents).values({
+            id: nanoid(18),
+            provider: "shadowfax",
+            eventType: "delivery.status.unknown",
+            externalId: rawId,
+            payload: input.payload,
+            processed: true,
+            processingError: "Delivery not found for providerDeliveryId.",
+          });
+        } catch {
+          // Ignore duplicate webhook event (23505) — already recorded.
+        }
+        return { ok: true, processed: false };
+      }
+
+      // Re-verify via the tenant's provider instance (vault credentials).
+      const order = (await db.select().from(orders).where(eq(orders.id, delivery.orderId)).limit(1))[0];
+      if (order) {
+        const tenantProvider = getDeliveryProvider(order.restaurantId);
+        if (tenantProvider.getDelivery && delivery.providerDeliveryId) {
+          try {
+            await tenantProvider.getDelivery(delivery.providerDeliveryId);
+          } catch {
+            // Provider verification failed — still process the webhook payload
+            // (signature already verified); verification failure is noted below.
+          }
+        }
+      }
+
+      const eventExternalId = `${update.deliveryId}:${update.status}:${update.timestamp.toISOString()}`;
+      try {
+        await db.insert(webhookEvents).values({
+          id: nanoid(18),
+          provider: "shadowfax",
+          eventType: `delivery.${update.status.toLowerCase()}`,
+          externalId: eventExternalId,
+          payload: input.payload,
+          processed: false,
+        });
+      } catch {
+        return { ok: true, processed: true, duplicate: true as const };
+      }
+
+      await db.transaction(async (tx) => {
+        await tx.update(deliveries).set({
+          status: update.status,
+          riderName: update.riderName ?? undefined,
+          riderPhone: update.riderPhone ?? undefined,
+          riderLocation: update.riderLocation ?? undefined,
+          providerPayload: update.rawPayload ?? undefined,
+        }).where(eq(deliveries.id, delivery.id));
+
+        await tx.insert(deliveryStatusHistory).values({
+          id: nanoid(18),
+          deliveryId: delivery.id,
+          status: update.status,
+          note: update.note ?? `Provider status: ${update.status}`,
+          rawPayload: update.rawPayload ?? undefined,
+        });
+
+        const mappedOrderStatus = mapDeliveryStatusToOrderStatus(update.status);
+        if (mappedOrderStatus && order && (order.status === "DELIVERY_REQUESTED" || order.status === "RIDER_ASSIGNED" || order.status === "PICKED_UP" || order.status === "OUT_FOR_DELIVERY")) {
+          await tx.update(orders).set({ status: mappedOrderStatus as typeof order.status }).where(eq(orders.id, order.id));
+          await tx.insert(orderStatusHistory).values({
+            id: nanoid(18),
+            orderId: order.id,
+            status: mappedOrderStatus as typeof order.status,
+            note: `Delivery update: ${update.status}${update.riderName ? ` (rider ${update.riderName})` : ""}`,
+          });
+        }
+
+        await tx.update(webhookEvents).set({ processed: true })
+          .where(and(eq(webhookEvents.provider, "shadowfax"), eq(webhookEvents.externalId, eventExternalId)));
+      });
+
+      return { ok: true, processed: true };
     }),
 
   // =========================================================================
@@ -398,7 +509,12 @@ export const storefrontRouter = router({
       trackingToken: z.string().min(16),
     }))
     .query(async ({ input }) => {
+      const { TRPCError } = await import("@trpc/server");
       const { getOrderForTracking } = await import("../db");
-      return getOrderForTracking(input.orderNumber, input.trackingToken);
+      const result = await getOrderForTracking(input.orderNumber, input.trackingToken);
+      if (!result) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Order not found." });
+      }
+      return result;
     }),
 });

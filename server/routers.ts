@@ -1,11 +1,12 @@
 /**
  * Cloud Kitchen Platform — API Router Composition
  */
-import { COOKIE_NAME } from "@shared/const";
+import { ADMIN_COOKIE_NAME, CUSTOMER_COOKIE_NAME } from "@shared/const";
 import { timingSafeEqual } from "node:crypto";
 import { TRPCError } from "@trpc/server";
+import type { Request } from "express";
 import { z } from "zod";
-import { getSessionCookieOptions } from "./_core/cookies";
+import { getAdminCookieOptions, getCustomerCookieOptions } from "./_core/cookies";
 import { sdk } from "./_core/sdk";
 import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, router } from "./_core/trpc";
@@ -19,10 +20,27 @@ import { analyticsRouter } from "./routers/analytics";
 import { loyaltyRouter } from "./routers/loyalty";
 import { isPlausibleLocalAdminToken, normalizeLocalAdminToken } from "./auth/localAdmin";
 import { hashPassword, verifyPassword } from "./security/passwordHash";
-import { checkLoginEmailLimit, checkLoginIpLimit, checkRegisterIpLimit } from "./security/rateLimit";
+import { checkLocalAdminIpLimit, checkLoginEmailLimit, checkLoginIpLimit, checkRegisterIpLimit } from "./security/rateLimit";
 import { users, restaurantMembers } from "../drizzle/schema";
 import { eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
+
+/**
+ * Resolve the client IP for rate limiting. X-Forwarded-For is attacker
+ * controlled, so it is trusted ONLY when the app runs behind a configured
+ * trusted proxy (TRUSTED_PROXY=1, e.g. nginx/Caddy on the VPS). Otherwise the
+ * socket's remote address is authoritative, preventing XFF spoofing from
+ * bypassing IP rate limits.
+ */
+function getClientIp(req: Pick<Request, "headers" | "socket">): string {
+  if (process.env.TRUSTED_PROXY === "1") {
+    const xff = req.headers["x-forwarded-for"];
+    const raw = Array.isArray(xff) ? xff[0] : xff;
+    const first = typeof raw === "string" ? raw.split(",")[0]?.trim() : undefined;
+    if (first) return first;
+  }
+  return req.socket.remoteAddress ?? "unknown";
+}
 
 export const appRouter = router({
   system: systemRouter,
@@ -35,6 +53,11 @@ export const appRouter = router({
     localAdminLogin: publicProcedure
       .input(z.object({ token: z.string().max(4096) }))
       .mutation(async ({ ctx, input }) => {
+        const clientIp = getClientIp(ctx.req);
+        const adminLimit = checkLocalAdminIpLimit(clientIp);
+        if (!adminLimit.allowed) {
+          throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: `Too many administrator login attempts. Try again in ${adminLimit.retryAfterSeconds} seconds.` });
+        }
         const submittedToken = normalizeLocalAdminToken(input.token);
         const expected = process.env.LOCAL_ADMIN_TOKEN;
         if (
@@ -57,8 +80,8 @@ export const appRouter = router({
           { openId, appId: "vps-local", name: "Kitchen Administrator" },
           { expiresInMs: 1000 * 60 * 60 * 12 }
         );
-        ctx.res.cookie(COOKIE_NAME, sessionToken, {
-          ...getSessionCookieOptions(ctx.req),
+        ctx.res.cookie(ADMIN_COOKIE_NAME, sessionToken, {
+          ...getAdminCookieOptions(ctx.req),
           maxAge: 1000 * 60 * 60 * 12,
         });
         return { success: true } as const;
@@ -67,26 +90,31 @@ export const appRouter = router({
     register: publicProcedure
       .input(z.object({
         name: z.string().min(2).max(120),
-        email: z.string().email().max(320),
+        email: z.string().trim().toLowerCase().email().max(320),
         password: z.string().min(8).max(128),
         restaurantName: z.string().min(2).max(180),
-        restaurantSlug: z.string().min(2).max(64).regex(/^[a-z0-9-]+$/),
+        restaurantSlug: z.string().trim().toLowerCase().min(2).max(64).regex(/^[a-z0-9-]+$/),
         cuisineSummary: z.string().max(500).optional(),
         contactPhone: z.string().max(24).optional(),
         address: z.string().min(5).max(500),
       }))
       .mutation(async ({ ctx, input }) => {
-        const clientIp = (ctx.req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() ?? ctx.req.socket.remoteAddress ?? "unknown";
+        const clientIp = getClientIp(ctx.req);
         const regLimit = checkRegisterIpLimit(clientIp);
         if (!regLimit.allowed) {
           throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: `Too many registration attempts. Try again in ${regLimit.retryAfterSeconds} seconds.` });
         }
 
+        // Normalize identifiers: trim + lowercase so "Foo@X.com" and "foo@x.com"
+        // map to one account, and slugs are canonical for lookup/routing.
+        const email = input.email.trim().toLowerCase();
+        const slug = input.restaurantSlug.trim().toLowerCase();
+
         const db = await getDb();
         if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
 
         const existingEmail = await db.select({ id: users.id }).from(users)
-          .where(eq(users.email, input.email)).limit(1);
+          .where(eq(users.email, email)).limit(1);
         if (existingEmail[0]) {
           throw new TRPCError({ code: "CONFLICT", message: "An account with this email already exists." });
         }
@@ -98,7 +126,7 @@ export const appRouter = router({
           await db.insert(users).values({
             openId,
             name: input.name,
-            email: input.email,
+            email,
             passwordHash: pwHash,
             loginMethod: "email",
             role: "user", // H-04: Registrants get global role "user". Admin access via restaurantMembers.
@@ -113,7 +141,7 @@ export const appRouter = router({
 
         const restaurantId = await createRestaurant({
           name: input.restaurantName,
-          slug: input.restaurantSlug,
+          slug,
           cuisineSummary: input.cuisineSummary,
           contactPhone: input.contactPhone,
           address: input.address,
@@ -136,26 +164,27 @@ export const appRouter = router({
           { openId, appId: "self-register", name: input.name },
           { expiresInMs: 1000 * 60 * 60 * 12 }
         );
-        ctx.res.cookie(COOKIE_NAME, sessionToken, {
-          ...getSessionCookieOptions(ctx.req),
+        ctx.res.cookie(ADMIN_COOKIE_NAME, sessionToken, {
+          ...getAdminCookieOptions(ctx.req),
           maxAge: 1000 * 60 * 60 * 12,
         });
 
-        return { success: true, restaurantId } as const;
+        return { success: true, restaurantId, slug } as const;
       }),
 
     login: publicProcedure
       .input(z.object({
-        email: z.string().email(),
-        password: z.string().min(1),
+        email: z.string().trim().toLowerCase().email(),
+        password: z.string().min(8).max(72),
       }))
       .mutation(async ({ ctx, input }) => {
-        const clientIp = (ctx.req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() ?? ctx.req.socket.remoteAddress ?? "unknown";
+        const clientIp = getClientIp(ctx.req);
         const ipLimit = checkLoginIpLimit(clientIp);
         if (!ipLimit.allowed) {
           throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: `Too many login attempts. Try again in ${ipLimit.retryAfterSeconds} seconds.` });
         }
-        const emailLimit = checkLoginEmailLimit(input.email);
+        const email = input.email.trim().toLowerCase();
+        const emailLimit = checkLoginEmailLimit(email);
         if (!emailLimit.allowed) {
           throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: `Too many login attempts for this email. Try again in ${emailLimit.retryAfterSeconds} seconds.` });
         }
@@ -164,7 +193,7 @@ export const appRouter = router({
         if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
 
         const [user] = await db.select().from(users)
-          .where(eq(users.email, input.email)).limit(1);
+          .where(eq(users.email, email)).limit(1);
 
         if (!user?.passwordHash) {
           throw new TRPCError({ code: "UNAUTHORIZED", message: "Invalid email or password." });
@@ -189,8 +218,8 @@ export const appRouter = router({
           { openId: user.openId, appId: "email-login", name: user.name ?? "" },
           { expiresInMs: 1000 * 60 * 60 * 12 }
         );
-        ctx.res.cookie(COOKIE_NAME, sessionToken, {
-          ...getSessionCookieOptions(ctx.req),
+        ctx.res.cookie(ADMIN_COOKIE_NAME, sessionToken, {
+          ...getAdminCookieOptions(ctx.req),
           maxAge: 1000 * 60 * 60 * 12,
         });
 
@@ -198,8 +227,15 @@ export const appRouter = router({
       }),
 
     logout: publicProcedure.mutation(({ ctx }) => {
-      ctx.res.clearCookie(COOKIE_NAME, {
-        ...getSessionCookieOptions(ctx.req),
+      // Clear BOTH session cookies: admin (12h options) and customer (30d
+      // options). They currently share one name (see shared/const), so this
+      // clears with both option sets to cover any path/domain drift.
+      ctx.res.clearCookie(ADMIN_COOKIE_NAME, {
+        ...getAdminCookieOptions(ctx.req),
+        maxAge: -1,
+      });
+      ctx.res.clearCookie(CUSTOMER_COOKIE_NAME, {
+        ...getCustomerCookieOptions(ctx.req),
         maxAge: -1,
       });
       return { success: true } as const;

@@ -71,12 +71,14 @@ if [ ! -f "$ENV_FILE" ]; then
   ADMIN_TOKEN="admin-$(generate_hex 20)"
   OTP_SECRET=$(openssl rand -hex 32 2>/dev/null || generate_hex 64)
 
-  sed -i "s|POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=${POSTGRES_PASSWORD}|" "$ENV_FILE"
-  sed -i "s|JWT_SECRET=.*|JWT_SECRET=${JWT_SECRET}|" "$ENV_FILE"
-  sed -i "s|COOKIE_SECRET=.*|COOKIE_SECRET=${COOKIE_SECRET}|" "$ENV_FILE"
-  sed -i "s|LOCAL_ADMIN_TOKEN=.*|LOCAL_ADMIN_TOKEN=${ADMIN_TOKEN}|" "$ENV_FILE"
-  sed -i "s|SECRET_ENCRYPTION_KEY=.*|SECRET_ENCRYPTION_KEY=${SECRET_KEY}|" "$ENV_FILE"
-  sed -i "s|OTP_HMAC_SECRET=.*|OTP_HMAC_SECRET=${OTP_SECRET}|" "$ENV_FILE"
+  # NOTE: sed -i.bak (not bare -i) for macOS/BSD + GNU portability; backups removed below.
+  sed -i.bak "s|POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=${POSTGRES_PASSWORD}|" "$ENV_FILE"
+  sed -i.bak "s|JWT_SECRET=.*|JWT_SECRET=${JWT_SECRET}|" "$ENV_FILE"
+  sed -i.bak "s|COOKIE_SECRET=.*|COOKIE_SECRET=${COOKIE_SECRET}|" "$ENV_FILE"
+  sed -i.bak "s|LOCAL_ADMIN_TOKEN=.*|LOCAL_ADMIN_TOKEN=${ADMIN_TOKEN}|" "$ENV_FILE"
+  sed -i.bak "s|SECRET_ENCRYPTION_KEY=.*|SECRET_ENCRYPTION_KEY=${SECRET_KEY}|" "$ENV_FILE"
+  sed -i.bak "s|OTP_HMAC_SECRET=.*|OTP_HMAC_SECRET=${OTP_SECRET}|" "$ENV_FILE"
+  rm -f "${ENV_FILE}.bak"
 
   echo "✅ Secrets generated and saved to $ENV_FILE"
   echo ""
@@ -316,10 +318,10 @@ for i in $(seq 1 60); do
   sleep 2
 done
 
-# Push schema
-echo "Pushing database schema..."
-docker compose -f "$COMPOSE_FILE" exec -T app npx drizzle-kit push --force 2>&1 || {
-  echo "⚠️  Schema push had issues, checking database..."
+# Apply migrations (never push --force in deploy)
+echo "Applying database migrations..."
+docker compose -f "$COMPOSE_FILE" exec -T app npx drizzle-kit migrate 2>&1 || {
+  echo "⚠️  Migration had issues, checking database..."
 }
 
 # Verify tables

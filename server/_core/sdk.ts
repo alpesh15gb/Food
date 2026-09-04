@@ -22,6 +22,13 @@ export type SessionPayload = {
   openId: string;
   appId: string;
   name: string;
+  /**
+   * Session version, mirrored from the user's `sessionVersion` column
+   * (callers with a DB user should pass `sv: user.sessionVersion ?? 0`).
+   * Bumped on password change / admin revocation to invalidate old tokens.
+   * Defaults to 0 for tokens issued before sv existed (backward compat).
+   */
+  sv?: number;
 };
 
 const EXCHANGE_TOKEN_PATH = `/webdev.v1.WebDevAuthPublicService/ExchangeToken`;
@@ -195,6 +202,7 @@ class SDKServer {
       openId: payload.openId,
       appId: payload.appId,
       name: payload.name,
+      sv: payload.sv ?? 0,
     })
       .setProtectedHeader({ alg: "HS256", typ: "JWT" })
       .setExpirationTime(expirationSeconds)
@@ -203,7 +211,7 @@ class SDKServer {
 
   async verifySession(
     cookieValue: string | undefined | null
-  ): Promise<{ openId: string; appId: string; name: string } | null> {
+  ): Promise<{ openId: string; appId: string; name: string; sv: number } | null> {
     if (!cookieValue) {
       console.warn("[Auth] Missing session cookie");
       return null;
@@ -214,7 +222,7 @@ class SDKServer {
       const { payload } = await jwtVerify(cookieValue, secretKey, {
         algorithms: ["HS256"],
       });
-      const { openId, appId, name } = payload as Record<string, unknown>;
+      const { openId, appId, name, sv } = payload as Record<string, unknown>;
 
       if (
         !isNonEmptyString(openId) ||
@@ -225,10 +233,22 @@ class SDKServer {
         return null;
       }
 
+      // `sv` absent on tokens issued before session-versioning: treat as 0
+      // (backward compat). Non-numeric sv is a malformed token → reject.
+      let sessionVersion = 0;
+      if (sv !== undefined) {
+        if (typeof sv !== "number" || !Number.isInteger(sv) || sv < 0) {
+          console.warn("[Auth] Session payload has invalid sv claim");
+          return null;
+        }
+        sessionVersion = sv;
+      }
+
       return {
         openId,
         appId,
         name,
+        sv: sessionVersion,
       };
     } catch (error) {
       console.warn("[Auth] Session verification failed", String(error));
@@ -314,6 +334,25 @@ class SDKServer {
 
     if (!user) {
       throw ForbiddenError("User not found");
+    }
+
+    // Session-version check: reject tokens issued before the latest
+    // revocation (password change / admin session reset bumps the DB
+    // `sessionVersion`). Mismatch throws → context maps it to null.
+    // Backward compat: when the column is absent (older schema), both sides
+    // default to 0 and the check passes. The try/catch guarantees a missing
+    // column can never lock every user out.
+    let dbSessionVersion = 0;
+    try {
+      const v = (user as unknown as Record<string, unknown>).sessionVersion;
+      dbSessionVersion = typeof v === "number" ? v : 0;
+    } catch {
+      dbSessionVersion = 0;
+    }
+    const tokenSessionVersion = typeof session.sv === "number" ? session.sv : 0;
+    if (tokenSessionVersion !== dbSessionVersion) {
+      console.warn("[Auth] Session version mismatch — token revoked");
+      throw ForbiddenError("Session revoked");
     }
 
     await db.upsertUser({

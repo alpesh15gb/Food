@@ -4,10 +4,17 @@ import { CheckCircle2, CircleAlert, KeyRound, LoaderCircle, LockKeyhole, ShieldC
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { AdminError } from "@/components/DashboardLayout";
 import { trpc } from "@/lib/trpc";
 
 type Provider = "razorpay" | "otp" | "delivery";
 type SecretDrafts = Record<string, string>;
+
+// The status feed labels the delivery service "delivery", but the vault
+// mutations canonically use "shadowfax" — map before saving/verifying.
+function toMutationProvider(provider: string): "razorpay" | "otp" | "shadowfax" {
+  return provider === "delivery" ? "shadowfax" : (provider as "razorpay" | "otp" | "shadowfax");
+}
 
 export default function IntegrationPanel({ restaurantId }: { restaurantId?: string }) {
   const utils = trpc.useUtils();
@@ -15,8 +22,20 @@ export default function IntegrationPanel({ restaurantId }: { restaurantId?: stri
   const [openProvider, setOpenProvider] = useState<Provider | null>(null);
   const rid = restaurantId || "";
 
-  const integrationQuery = trpc.admin.integrationStatus.useQuery({ restaurantId: rid });
-  const routeStatusQuery = trpc.admin.getRazorpayRouteStatus.useQuery({ restaurantId: rid });
+  const integrationQuery = trpc.admin.integrationStatus.useQuery(
+    { restaurantId: rid },
+    { enabled: !!rid, retry: false }
+  );
+  const routeStatusQuery = trpc.admin.getRazorpayRouteStatus.useQuery(
+    { restaurantId: rid },
+    { enabled: !!rid, retry: false }
+  );
+
+  if (!restaurantId) {
+    return (
+      <AdminError message="We couldn't determine which restaurant these integrations belong to." />
+    );
+  }
 
   const verifySecret = trpc.admin.verifyIntegrationSecret.useMutation({
     onSuccess: result => toast.success(
@@ -58,8 +77,13 @@ export default function IntegrationPanel({ restaurantId }: { restaurantId?: stri
     return <div className="grid min-h-72 place-items-center rounded-2xl bg-[#fffdf9] text-sm font-bold text-[#8a6a56]"><LoaderCircle className="mr-2 h-4 w-4 animate-spin" />Checking connection readiness…</div>;
   }
 
-  if (!integrationQuery.data) {
-    return <div className="rounded-2xl bg-[#fff3f1] p-5 text-sm font-bold text-[#9d4331]">We couldn't read the integration status. Please refresh the workspace.</div>;
+  if (integrationQuery.isError || !integrationQuery.data) {
+    return (
+      <AdminError
+        message="We couldn't read the integration status. Please refresh the workspace."
+        onRetry={() => integrationQuery.refetch()}
+      />
+    );
   }
 
   const services = Object.values(integrationQuery.data);
@@ -113,10 +137,10 @@ export default function IntegrationPanel({ restaurantId }: { restaurantId?: stri
                       <label className="text-xs font-extrabold text-[#5a4130]">{keyName}</label>
                       <div className="mt-1.5 flex gap-2">
                         <Input value={drafts[keyName] ?? ""} onChange={event => setDrafts(current => ({ ...current, [keyName]: event.target.value }))} type="password" autoComplete="off" placeholder="Paste secure value" className="h-10 rounded-xl border-[#ddc6b5] text-xs" />
-                        <Button aria-label={`Save ${keyName}`} disabled={!drafts[keyName]?.trim() || saveSecret.isPending} onClick={() => saveSecret.mutate({ restaurantId: rid, provider: service.provider as Provider, keyName, value: drafts[keyName] })} className="h-10 shrink-0 rounded-xl bg-[#c84630] px-3 font-extrabold hover:bg-[#ad3627]">
+                        <Button aria-label={`Save ${keyName}`} disabled={!rid || !drafts[keyName]?.trim() || saveSecret.isPending} onClick={() => saveSecret.mutate({ restaurantId: rid, provider: toMutationProvider(service.provider), keyName, value: drafts[keyName] })} className="h-10 shrink-0 rounded-xl bg-[#c84630] px-3 font-extrabold hover:bg-[#ad3627]">
                           {saveSecret.isPending ? <LoaderCircle className="h-4 w-4 animate-spin" /> : "Save"}
                         </Button>
-                        <Button aria-label={`Verify ${keyName}`} variant="outline" disabled={verifySecret.isPending} onClick={() => verifySecret.mutate({ restaurantId: rid, provider: service.provider as Provider, keyName })} className="h-10 shrink-0 rounded-xl border-[#ddc6b5] px-3 text-xs font-extrabold text-[#704d37]">Check</Button>
+                        <Button aria-label={`Verify ${keyName}`} variant="outline" disabled={!rid || verifySecret.isPending} onClick={() => verifySecret.mutate({ restaurantId: rid, provider: toMutationProvider(service.provider), keyName })} className="h-10 shrink-0 rounded-xl border-[#ddc6b5] px-3 text-xs font-extrabold text-[#704d37]">Check</Button>
                       </div>
                     </div>
                   ))}
@@ -174,7 +198,7 @@ export default function IntegrationPanel({ restaurantId }: { restaurantId?: stri
               </div>
             </div>
             <Button
-              disabled={!routeForm.contactEmail || !routeForm.contactPhone || setupRoute.isPending}
+              disabled={!rid || !routeForm.contactEmail || !routeForm.contactPhone || setupRoute.isPending}
               onClick={() => setupRoute.mutate({ restaurantId: rid, ...routeForm })}
               className="mt-2 h-10 rounded-xl bg-[#c84630] px-5 font-extrabold hover:bg-[#ad3627]"
             >
@@ -200,7 +224,7 @@ export default function IntegrationPanel({ restaurantId }: { restaurantId?: stri
                 />
               </div>
               <Button
-                disabled={updateFee.isPending}
+                disabled={!rid || updateFee.isPending}
                 onClick={() => {
                   const pct = parseFloat(feeInput);
                   if (Number.isFinite(pct) && pct >= 0 && pct <= 100) {

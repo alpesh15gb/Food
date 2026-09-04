@@ -96,12 +96,36 @@ export function calculateAuthoritativeQuote(args: {
   // Apply restaurant-level packaging if items don't have individual packaging
   const packagingFee = totalItemPackaging > 0 ? totalItemPackaging : packagingFeePaise;
 
-  // Tax calculation (on taxable amount before packaging)
-  const taxPercent = args.taxPercent ?? 5; // default 5% GST
-  const taxPaise = Math.round(totalTaxablePaise * taxPercent / 100);
-
-  // Coupon discount
+  // Coupon discount (capped to item total) — computed before tax so tax applies net of coupon.
   const couponDiscountPaise = Math.min(args.couponDiscountPaise ?? 0, itemTotalPaise);
+  const netTaxablePaise = Math.max(0, totalTaxablePaise - couponDiscountPaise);
+
+  // Tax calculation on (itemTotal - coupon), before packaging/delivery.
+  // Supports per-item taxPercent when present; otherwise falls back to restaurant rate.
+  const hasPerItemTax = catalog.some(c => {
+    const t = c.taxPercent == null ? NaN : parseFloat(String(c.taxPercent));
+    return Number.isFinite(t) && t > 0;
+  });
+  let taxPaise = 0;
+  if (hasPerItemTax) {
+    // Allocate coupon discount proportionally across lines, then apply each item's rate.
+    for (const line of lines) {
+      const catalogItem = catalogMap.get(line.menuItemId)!;
+      const effectivePrice = catalogItem.offerPricePaise ?? catalogItem.pricePaise;
+      const lineTotal =
+        effectivePrice * line.quantity +
+        (line.variantPricePaise ?? 0) * line.quantity +
+        (line.modifiers ?? []).reduce((sum, mod) => sum + (mod.pricePaise || 0), 0) * line.quantity;
+      const couponShare = itemTotalPaise > 0 ? Math.round((lineTotal / itemTotalPaise) * couponDiscountPaise) : 0;
+      const lineNet = Math.max(0, lineTotal - couponShare);
+      const itemTax = parseFloat(String(catalogItem.taxPercent ?? ""));
+      const rate = Number.isFinite(itemTax) && itemTax > 0 ? itemTax : (args.taxPercent ?? 5);
+      taxPaise += Math.round((lineNet * rate) / 100);
+    }
+  } else {
+    const taxPercent = args.taxPercent ?? 5; // default 5% GST
+    taxPaise = Math.round((netTaxablePaise * taxPercent) / 100);
+  }
 
   // Grand total
   const totalPaise = Math.max(0, itemTotalPaise - couponDiscountPaise + packagingFee + deliveryFeePaise + taxPaise);

@@ -82,8 +82,20 @@
 
 @layer base {
   * { @apply border-border outline-ring/50; }
-  body { @apply bg-background text-foreground; font-family: "Manrope", sans-serif; }
+  html { font-size: 16px; }
+  body { @apply bg-background text-foreground; font-family: "Manrope", sans-serif; font-size: 0.875rem; line-height: 1.5; }
   button:not(:disabled), [role="button"]:not([aria-disabled="true"]), [type="button"]:not(:disabled), [type="submit"]:not(:disabled), [type="reset"]:not(:disabled), a[href], select:not(:disabled), input[type="checkbox"]:not(:disabled), input[type="radio"]:not(:disabled) { @apply cursor-pointer; }
+  /* Global keyboard-focus indicator (never remove outlines without a replacement). */
+  :focus-visible { outline: 2px solid var(--color-primary, #c84630); outline-offset: 2px; }
+}
+
+/* Dynamic storefront theming: the ordering app sets --theme-primary /
+   --theme-accent from the restaurant brand at runtime. Unlayered rules win
+   over the @theme layer, so brand colours flow into every `*-primary` /
+   `*-accent` utility without breaking the static defaults. */
+:root {
+  --color-primary: var(--theme-primary, var(--primary));
+  --color-accent: var(--theme-accent, var(--accent));
 }
 
 @layer components {
@@ -96,16 +108,25 @@
 @layer utilities {
   .font-display { font-family: "DM Serif Display", Georgia, serif; }
   .ticket-edge { clip-path: polygon(0.9rem 0, calc(100% - 0.9rem) 0, 100% 0.9rem, 100% calc(100% - 0.9rem), calc(100% - 0.9rem) 100%, 0.9rem 100%, 0 calc(100% - 0.9rem), 0 0.9rem); }
+  /* clip-path clips focus outlines — drop the notch while focus is inside. */
+  .ticket-edge:focus-within { clip-path: none; border-radius: 1rem; }
   .paper-grain { background-image: radial-gradient(rgba(91, 58, 36, 0.06) 0.7px, transparent 0.7px); background-size: 8px 8px; }
   .dotted-rule { border-top: 1px dashed oklch(0.78 0.035 70); }
   .hide-scrollbar::-webkit-scrollbar { display: none; }
   .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+  /* Fixed bottom bars clear the iOS home indicator / gesture area. */
+  .safe-bottom { bottom: calc(1rem + env(safe-area-inset-bottom, 0px)); }
 }
 
 button, a, input { transition: transform 160ms cubic-bezier(0.23, 1, 0.32, 1), background-color 160ms cubic-bezier(0.23, 1, 0.32, 1), border-color 160ms cubic-bezier(0.23, 1, 0.32, 1), box-shadow 160ms cubic-bezier(0.23, 1, 0.32, 1); }
 button:active:not(:disabled) { transform: scale(0.97); }
 
 @media (prefers-reduced-motion: no-preference) {
-  .rise-in { animation: rise-in 420ms cubic-bezier(0.23, 1, 0.32, 1) both; }
+  .rise-in { animation: rise-in 180ms cubic-bezier(0.23, 1, 0.32, 1) both; }
   @keyframes rise-in { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
+  .rise-in { animation: none; }
 }

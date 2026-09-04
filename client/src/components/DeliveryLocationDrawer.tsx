@@ -88,17 +88,43 @@ export default function DeliveryLocationDrawer({
   onOpenChange,
   onConfirm,
   existingLocation,
+  initialCenter,
+  cityBias,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onConfirm: (location: DeliveryLocation) => void;
   existingLocation?: DeliveryLocation | null;
+  /** Bias the initial map pin (outlet coordinates when known). */
+  initialCenter?: { lat: number; lng: number } | null;
+  /** Bias place search toward the outlet city. */
+  cityBias?: string | null;
 }) {
   const [step, setStep] = useState<GeoStep>(
     existingLocation?.confirmed ? "confirmed" : "choose_method"
   );
   const [geoState, setGeoState] = useState<GeoLocationState | null>(null);
   const [gpsError, setGpsError] = useState<string | null>(null);
+  const [geoError, setGeoError] = useState<string | null>(null);
+  // Conditional Back: only offer Back when the user actually visited a prior step.
+  const [visitedChoice, setVisitedChoice] = useState(step === "choose_method");
+  const [cameViaMap, setCameViaMap] = useState(false);
+
+  // Last confirmed pin (this device) — used to bias the initial map position.
+  const [lastPin] = useState<{ lat: number; lng: number } | null>(() => {
+    try {
+      const raw = localStorage.getItem("ck_last_pin");
+      if (!raw) return null;
+      const parsed = JSON.parse(raw) as { lat?: unknown; lng?: unknown };
+      if (typeof parsed.lat === "number" && typeof parsed.lng === "number") {
+        return { lat: parsed.lat, lng: parsed.lng };
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  });
+  const biasedCenter = initialCenter ?? lastPin ?? DEFAULT_MAP_CENTER;
 
   // Address form
   const [flatHouse, setFlatHouse] = useState(existingLocation?.flatHouse ?? "");
@@ -123,6 +149,9 @@ export default function DeliveryLocationDrawer({
     setStep("choose_method");
     setGeoState(null);
     setGpsError(null);
+    setGeoError(null);
+    setVisitedChoice(true);
+    setCameViaMap(false);
     setSearchQuery("");
     setSearchResults([]);
     if (!existingLocation) {
@@ -145,6 +174,8 @@ export default function DeliveryLocationDrawer({
   const useCurrentLocation = useCallback(() => {
     setStep("loading");
     setGpsError(null);
+    setGeoError(null);
+    setVisitedChoice(true);
 
     if (!navigator.geolocation) {
       setGpsError("Geolocation is not supported by your browser. Please search or place a pin instead.");
@@ -166,8 +197,10 @@ export default function DeliveryLocationDrawer({
         });
 
         if (requiresMapConfirmation(level)) {
+          setCameViaMap(true);
           setStep("map_confirm");
         } else {
+          setCameViaMap(false);
           setStep("address_form");
         }
 
@@ -176,6 +209,11 @@ export default function DeliveryLocationDrawer({
           if (result.city) setCity(result.city);
           if (result.postalCode) setPostalCode(result.postalCode);
           if (result.street) setStreet(result.street);
+          if (!result.area && !result.city && !result.postalCode) {
+            setGeoError("We found your coordinates but couldn't identify the area. Please fill the address fields manually.");
+          }
+        }).catch(() => {
+          setGeoError("Address lookup failed. Please fill the address fields manually.");
         });
       },
       (error) => {
@@ -191,27 +229,56 @@ export default function DeliveryLocationDrawer({
   }, []);
 
   // --- Method B: Search Address (Google Places Autocomplete) ---
-  const handleSearchInput = useCallback((value: string) => {
-    setSearchQuery(value);
+  const runSearchNow = useCallback(async (raw?: string) => {
+    const value = (raw ?? searchQuery).trim();
     if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
-    if (!value.trim() || value.length < 3) {
+    if (value.length < 3) {
       setSearchResults([]);
       return;
     }
     setSearching(true);
-    searchTimerRef.current = setTimeout(async () => {
-      const results = await searchPlaces(value);
+    setGeoError(null);
+    try {
+      const biased = cityBias ? `${value}, ${cityBias}` : value;
+      const results = await searchPlaces(biased);
       setSearchResults(results);
+      if (results.length === 0) {
+        setGeoError("No places found for that search. Try a nearby landmark or place the pin on the map.");
+      }
+    } catch {
+      setGeoError("Place search failed. Check your connection or place the pin on the map instead.");
+    } finally {
       setSearching(false);
+    }
+  }, [searchQuery, cityBias]);
+
+  const handleSearchInput = useCallback((value: string) => {
+    setSearchQuery(value);
+    setGeoError(null);
+    if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+    if (!value.trim() || value.length < 3) {
+      setSearchResults([]);
+      setSearching(false);
+      return;
+    }
+    setSearching(true);
+    searchTimerRef.current = setTimeout(() => {
+      void runSearchNow(value);
     }, 300);
-  }, []);
+  }, [runSearchNow]);
 
   const handlePlaceSelect = useCallback(async (placeId: string, description: string) => {
     setSearchQuery(description);
     setSearchResults([]);
     setSearching(true);
+    setGeoError(null);
 
-    const details = await getPlaceDetails(placeId);
+    let details: Awaited<ReturnType<typeof getPlaceDetails>>;
+    try {
+      details = await getPlaceDetails(placeId);
+    } catch {
+      details = null;
+    }
     setSearching(false);
 
     if (details) {
@@ -229,7 +296,10 @@ export default function DeliveryLocationDrawer({
       if (details.city) setCity(details.city);
       if (details.postalCode) setPostalCode(details.postalCode);
       if (details.street) setStreet(details.street);
+      setCameViaMap(true);
       setStep("map_confirm");
+    } else {
+      setGeoError("Couldn't load that place's location. Pick another result or place the pin on the map.");
     }
   }, []);
 
@@ -316,6 +386,11 @@ export default function DeliveryLocationDrawer({
       confirmedAt: new Date().toISOString(),
       confirmed: true,
     };
+    try {
+      localStorage.setItem("ck_last_pin", JSON.stringify({ lat: location.latitude, lng: location.longitude }));
+    } catch {
+      // storage unavailable — location still confirms for this session
+    }
     onConfirm(location);
     onOpenChange(false);
   }, [flatHouse, building, street, landmark, area, city, postalCode, geoState, onConfirm, onOpenChange]);
@@ -345,9 +420,15 @@ export default function DeliveryLocationDrawer({
           {step === "choose_method" && (
             <>
               {gpsError && (
-                <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-700">
+                <div role="alert" className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-700">
                   <AlertTriangle className="mr-1 inline h-4 w-4" />
                   {gpsError}
+                </div>
+              )}
+              {geoError && (
+                <div role="alert" className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-700">
+                  <AlertTriangle className="mr-1 inline h-4 w-4" />
+                  {geoError}
                 </div>
               )}
 
@@ -372,14 +453,23 @@ export default function DeliveryLocationDrawer({
                 <div className="flex gap-2">
                   <Input
                     placeholder="Search address..."
+                    aria-label="Search delivery address"
                     value={searchQuery}
                     onChange={(e) => handleSearchInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        void runSearchNow();
+                      }
+                    }}
                     className="h-12 rounded-xl border-[#dfcbb9] bg-white text-[#382719]"
                   />
                   <Button
                     variant="outline"
+                    aria-label="Search places"
+                    onClick={() => void runSearchNow()}
                     className="h-12 rounded-xl border-[#dfcbb9] bg-white font-bold text-[#5c4332]"
-                    disabled={!searchQuery.trim()}
+                    disabled={!searchQuery.trim() || searching}
                   >
                     {searching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
                   </Button>
@@ -404,10 +494,12 @@ export default function DeliveryLocationDrawer({
               <Button
                 onClick={() => {
                   setGeoState({
-                    latitude: DEFAULT_MAP_CENTER.lat,
-                    longitude: DEFAULT_MAP_CENTER.lng,
+                    latitude: biasedCenter.lat,
+                    longitude: biasedCenter.lng,
                     source: "map_pin",
                   });
+                  setVisitedChoice(true);
+                  setCameViaMap(true);
                   setStep("map_confirm");
                 }}
                 variant="outline"
@@ -458,7 +550,7 @@ export default function DeliveryLocationDrawer({
               <div className="relative overflow-hidden rounded-xl border border-[#dfcbb9]">
                 <MapView
                   className="h-[300px]"
-                  initialCenter={geoState ? { lat: geoState.latitude, lng: geoState.longitude } : DEFAULT_MAP_CENTER}
+                  initialCenter={geoState ? { lat: geoState.latitude, lng: geoState.longitude } : biasedCenter}
                   initialZoom={16}
                   onMapReady={handleMapReady}
                 />
@@ -481,15 +573,22 @@ export default function DeliveryLocationDrawer({
               )}
 
               <div className="flex gap-2">
+                {visitedChoice && (
+                  <Button
+                    onClick={() => setStep("choose_method")}
+                    variant="outline"
+                    className="h-11 flex-1 rounded-xl border-[#dfcbb9] bg-white font-bold text-[#5c4332]"
+                  >
+                    Back
+                  </Button>
+                )}
                 <Button
-                  onClick={() => setStep("choose_method")}
-                  variant="outline"
-                  className="h-11 flex-1 rounded-xl border-[#dfcbb9] bg-white font-bold text-[#5c4332]"
-                >
-                  Back
-                </Button>
-                <Button
-                  onClick={() => geoState && setStep("address_form")}
+                  onClick={() => {
+                    if (geoState) {
+                      setCameViaMap(true);
+                      setStep("address_form");
+                    }
+                  }}
                   disabled={!geoState}
                   className="h-11 flex-1 rounded-xl bg-[#C84630] font-bold text-white hover:bg-[#b03d28] disabled:opacity-50"
                 >
@@ -503,6 +602,12 @@ export default function DeliveryLocationDrawer({
           {/* Step: Address Form */}
           {step === "address_form" && (
             <>
+              {geoError && (
+                <div role="alert" className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-700">
+                  <AlertTriangle className="mr-1 inline h-3 w-3" />
+                  {geoError}
+                </div>
+              )}
               {geoState && (
                 <div className="rounded-xl border border-[#d9b89e] bg-[#fff4e9] p-3 text-xs text-[#885e43]">
                   Location: {geoState.latitude.toFixed(6)}, {geoState.longitude.toFixed(6)}
@@ -551,9 +656,12 @@ export default function DeliveryLocationDrawer({
                   />
                   <Input
                     placeholder="PIN code *"
+                    aria-label="PIN code"
                     value={postalCode}
-                    onChange={(e) => setPostalCode(e.target.value)}
+                    onChange={(e) => setPostalCode(e.target.value.replace(/[^\d]/g, ""))}
                     maxLength={6}
+                    inputMode="numeric"
+                    autoComplete="postal-code"
                     className="h-11 rounded-xl border-[#dfcbb9] bg-white text-[#382719]"
                   />
                 </div>
@@ -561,7 +669,7 @@ export default function DeliveryLocationDrawer({
 
               <div className="flex gap-2">
                 <Button
-                  onClick={() => setStep("map_confirm")}
+                  onClick={() => setStep(cameViaMap ? "map_confirm" : "choose_method")}
                   variant="outline"
                   className="h-11 flex-1 rounded-xl border-[#dfcbb9] bg-white font-bold text-[#5c4332]"
                 >

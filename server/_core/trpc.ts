@@ -28,33 +28,74 @@ const requireAdmin = t.middleware(async opts => {
 export const adminProcedure = t.procedure.use(requireAdmin);
 
 /**
- * Resolve restaurantId from context (custom domain) or fallback to slug lookup.
- * Used by both tenantProcedure (admin) and storeProcedure (storefront).
+ * Resolve restaurantId from explicit input (restaurantId or slug) or from the
+ * custom-domain tenant on context.
+ * Precedence: input.restaurantId → input.slug lookup → ctx.restaurantId.
+ * Returns null when no tenant can be resolved. Input-supplied IDs are safe to
+ * accept here because every consumer re-verifies membership before authorizing.
  */
-async function resolveTenantId(ctx: TrpcContext, slug?: string): Promise<string | null> {
-  if (ctx.restaurantId) return ctx.restaurantId;
-  if (!slug) return null;
-  try {
-    const { getRestaurantBySlug } = await import("../db");
-    const restaurant = await getRestaurantBySlug(slug);
-    return restaurant?.id ?? null;
-  } catch {
-    return null;
+async function resolveTenantId(
+  ctx: TrpcContext,
+  input?: { slug?: unknown; restaurantId?: unknown },
+): Promise<string | null> {
+  if (typeof input?.restaurantId === "string" && input.restaurantId.length > 0) {
+    return input.restaurantId;
   }
+  const slug = typeof input?.slug === "string" ? input.slug : undefined;
+  if (slug) {
+    try {
+      const { getRestaurantBySlug } = await import("../db");
+      const restaurant = await getRestaurantBySlug(slug);
+      if (restaurant) return restaurant.id;
+      return null;
+    } catch {
+      return null;
+    }
+  }
+  if (ctx.restaurantId) return ctx.restaurantId;
+  return null;
+}
+
+/**
+ * Fetch the caller's ACTIVE membership for a restaurant (tenant scoping gate).
+ * Returns the membership row or null. Scoped by restaurant_id so a membership
+ * in restaurant A never authorizes access to restaurant B.
+ */
+async function getActiveMembership(userId: number, restaurantId: string) {
+  const db = await import("../db").then(m => m.getDb());
+  if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+
+  const { restaurantMembers } = await import("../../drizzle/schema");
+  const { eq, and } = await import("drizzle-orm");
+
+  const [membership] = await db.select().from(restaurantMembers)
+    .where(and(
+      eq(restaurantMembers.userId, userId),
+      eq(restaurantMembers.restaurantId, restaurantId),
+      eq(restaurantMembers.isActive, true),
+    ))
+    .limit(1);
+
+  return membership ?? null;
 }
 
 /**
  * Tenant-scoped procedure for admin endpoints.
- * Resolves restaurantId from custom domain (Host header) or requires it in input.
- * Ensures the authenticated user is a member of the resolved restaurant.
+ * Resolves restaurantId from input (restaurantId/slug) or custom domain,
+ * then enforces an ACTIVE membership in the resolved restaurant — a global
+ * admin role alone is NOT sufficient for tenant data.
  */
 export const tenantProcedure = t.procedure.use(requireAdmin).use(async opts => {
   const input = opts.input as unknown as Record<string, unknown> | undefined;
-  const slug = typeof input?.slug === "string" ? input.slug : undefined;
-  const restaurantId = await resolveTenantId(opts.ctx, slug);
+  const restaurantId = await resolveTenantId(opts.ctx, input);
 
   if (!restaurantId) {
     throw new TRPCError({ code: "BAD_REQUEST", message: "Restaurant not found. Provide a valid slug or use a configured custom domain." });
+  }
+
+  const membership = await getActiveMembership(opts.ctx.user!.id, restaurantId);
+  if (!membership) {
+    throw new TRPCError({ code: "FORBIDDEN", message: "You are not a member of this restaurant." });
   }
 
   return opts.next({ ctx: { ...opts.ctx, restaurantId } });
@@ -66,8 +107,7 @@ export const tenantProcedure = t.procedure.use(requireAdmin).use(async opts => {
  */
 export const storeProcedure = t.procedure.use(async opts => {
   const input = opts.input as unknown as Record<string, unknown> | undefined;
-  const slug = typeof input?.slug === "string" ? input.slug : undefined;
-  const restaurantId = await resolveTenantId(opts.ctx, slug);
+  const restaurantId = await resolveTenantId(opts.ctx, input);
 
   if (!restaurantId) {
     throw new TRPCError({ code: "NOT_FOUND", message: "Restaurant not found." });
@@ -91,46 +131,51 @@ export function requirePermission(permission: string) {
     const user = opts.ctx.user!;
 
     const input = opts.input as unknown as Record<string, unknown> | undefined;
-    const slug = typeof input?.slug === "string" ? input.slug : undefined;
-    const restaurantId = await resolveTenantId(opts.ctx, slug);
+    const restaurantId = await resolveTenantId(opts.ctx, input);
 
-    if (restaurantId) {
-      const db = await import("../db").then(m => m.getDb());
-      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+    // Fail-closed: permission-gated procedures MUST resolve a tenant.
+    // Never call next() without a rid — an unresolved scope must deny.
+    if (!restaurantId) {
+      throw new TRPCError({ code: "FORBIDDEN", message: "Restaurant scope is required for this operation." });
+    }
 
-      const { restaurantMembers } = await import("../../drizzle/schema");
-      const { eq, and } = await import("drizzle-orm");
+    // H-01: Verify user is actually a member of this restaurant
+    const membership = await getActiveMembership(user.id, restaurantId);
+    if (!membership) {
+      throw new TRPCError({ code: "FORBIDDEN", message: "You are not a member of this restaurant." });
+    }
 
-      const [membership] = await db.select().from(restaurantMembers)
-        .where(and(
-          eq(restaurantMembers.userId, user.id),
-          eq(restaurantMembers.restaurantId, restaurantId),
-          eq(restaurantMembers.isActive, true),
-        ))
-        .limit(1);
+    // Owner role bypasses all permission checks
+    if (membership.role === "owner") {
+      return opts.next({ ctx: { ...opts.ctx, user, restaurantId } });
+    }
 
-      // H-01: Verify user is actually a member of this restaurant
-      if (!membership) {
-        throw new TRPCError({ code: "FORBIDDEN", message: "You are not a member of this restaurant." });
-      }
+    // For non-owner roles, check admin_user_roles → admin_role_permissions.
+    // Tenant scoping: admin_user_roles.restaurant_id (nullable for legacy global
+    // grants). A row grants access when it matches THIS restaurant or is a
+    // legacy global (NULL) row. The restaurant_members join re-verifies active
+    // membership in this restaurant — do not drop either gate.
+    const db = await import("../db").then(m => m.getDb());
+    if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
 
-      // Owner role bypasses all permission checks
-      if (membership.role === "owner") {
-        return opts.next({ ctx: { ...opts.ctx, user, restaurantId } });
-      }
+    const { restaurantMembers, adminUserRoles, adminRolePermissions } = await import("../../drizzle/schema");
+    const { eq, and, or, isNull } = await import("drizzle-orm");
 
-      // For non-owner roles, check admin_user_roles → admin_role_permissions
-      const { adminUserRoles, adminRolePermissions } = await import("../../drizzle/schema");
-      const perms = await db.select({ permission: adminRolePermissions.permission })
-        .from(adminUserRoles)
-        .innerJoin(adminRolePermissions, eq(adminUserRoles.roleId, adminRolePermissions.roleId))
-        .where(eq(adminUserRoles.userId, user.id));
+    const perms = await db.select({ permission: adminRolePermissions.permission })
+      .from(adminUserRoles)
+      .innerJoin(adminRolePermissions, eq(adminUserRoles.roleId, adminRolePermissions.roleId))
+      .innerJoin(restaurantMembers, eq(restaurantMembers.userId, adminUserRoles.userId))
+      .where(and(
+        eq(adminUserRoles.userId, user.id),
+        or(eq(adminUserRoles.restaurantId, restaurantId), isNull(adminUserRoles.restaurantId)),
+        eq(restaurantMembers.restaurantId, restaurantId),
+        eq(restaurantMembers.isActive, true),
+      ));
 
-      const hasPermission = perms.some(p => p.permission === permission || p.permission === "*");
-      // H-02: Fail-closed — deny access on permission check failure
-      if (!hasPermission) {
-        throw new TRPCError({ code: "FORBIDDEN", message: `Missing permission: ${permission}` });
-      }
+    const hasPermission = perms.some(p => p.permission === permission || p.permission === "*");
+    // H-02: Fail-closed — deny access on permission check failure
+    if (!hasPermission) {
+      throw new TRPCError({ code: "FORBIDDEN", message: `Missing permission: ${permission}` });
     }
 
     return opts.next({ ctx: { ...opts.ctx, user, restaurantId } });

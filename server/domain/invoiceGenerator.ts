@@ -33,7 +33,20 @@ const money = (paise: number) =>
 
 /** H-09: HTML-escape all user-supplied values to prevent XSS in invoice HTML. */
 function esc(str: string): string {
-  return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+  return String(str ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+
+/** Only allow https logos or same-origin image paths; blocks javascript:/data: XSS vectors. */
+function isSafeLogoUrl(url: string | undefined): boolean {
+  if (!url) return false;
+  const u = url.trim();
+  if (u.startsWith("/images/") || u.startsWith("/assets/")) return true;
+  try {
+    const parsed = new URL(u);
+    return parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
 }
 
 export function generateInvoiceHtml(data: InvoiceData): string {
@@ -81,7 +94,7 @@ export function generateInvoiceHtml(data: InvoiceData): string {
 <body>
   <div class="header">
     <div class="brand">
-      ${data.logoUrl ? `<img src="${data.logoUrl}" alt="Logo" style="height:40px;margin-bottom:8px">` : ""}
+      ${data.logoUrl && isSafeLogoUrl(data.logoUrl) ? `<img src="${esc(data.logoUrl)}" alt="Logo" style="height:40px;margin-bottom:8px">` : ""}
       <h1>${esc(data.restaurantName)}</h1>
       <p>${esc(data.restaurantAddress)}</p>
       <p>Phone: ${esc(data.restaurantPhone)}</p>
@@ -89,10 +102,10 @@ export function generateInvoiceHtml(data: InvoiceData): string {
     </div>
     <div class="invoice-meta">
       <h2>TAX INVOICE</h2>
-      <p>Invoice No: <strong>${data.invoiceNumber}</strong></p>
-      <p>Order No: ${data.orderNumber}</p>
-      <p>Date: ${data.orderDate}</p>
-      <p>Payment: <span class="badge ${data.paymentStatus === "PAID" || data.paymentStatus === "CAPTURED" ? "badge-paid" : "badge-pending"}">${data.paymentStatus}</span></p>
+      <p>Invoice No: <strong>${esc(data.invoiceNumber)}</strong></p>
+      <p>Order No: ${esc(data.orderNumber)}</p>
+      <p>Date: ${esc(data.orderDate)}</p>
+      <p>Payment: <span class="badge ${data.paymentStatus === "PAID" || data.paymentStatus === "CAPTURED" ? "badge-paid" : "badge-pending"}">${esc(data.paymentStatus)}</span></p>
     </div>
   </div>
 
@@ -105,8 +118,8 @@ export function generateInvoiceHtml(data: InvoiceData): string {
     </div>
     <div class="party">
       <h3>Payment Details</h3>
-      <p>Method: ${data.paymentMethod || "-"}</p>
-      <p>Status: ${data.paymentStatus}</p>
+      <p>Method: ${esc(data.paymentMethod || "-")}</p>
+      <p>Status: ${esc(data.paymentStatus)}</p>
     </div>
   </div>
 

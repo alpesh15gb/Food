@@ -9,6 +9,9 @@
  */
 import { createHmac, timingSafeEqual } from "node:crypto";
 
+// Re-exported here so OTP flows can import phone helpers from one module.
+export { normalizePhoneStrict } from "./phoneValidation";
+
 /**
  * Returns the HMAC secret from environment.
  * In production/staging, fails if not configured.

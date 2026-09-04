@@ -35,6 +35,7 @@ export type ServiceabilityResult =
       reason:
         | "INVALID_LOCATION"
         | "NO_ACTIVE_OUTLET"
+        | "OUTLET_MISCONFIGURED"
         | "OUTSIDE_DELIVERY_RADIUS"
         | "SHADOWFAX_UNAVAILABLE"
         | "SHADOWFAX_NOT_SERVICEABLE"
@@ -194,7 +195,8 @@ export async function checkServiceability(
   customerLng: number,
   restaurantId: string,
   getOutletsFn: (restaurantId: string) => Promise<OutletCandidate[]>,
-  shadowfaxCheckFn?: (pickup: { lat: number; lng: number }, drop: { lat: number; lng: number }) => Promise<{ serviceable: boolean; estimatedMinutes?: number }>
+  shadowfaxCheckFn?: (pickup: { lat: number; lng: number }, drop: { lat: number; lng: number }) => Promise<{ serviceable: boolean; estimatedMinutes?: number }>,
+  opts?: { defaultRadiusKm?: number }
 ): Promise<ServiceabilityResult> {
   // Layer 1: Validate destination coordinates
   if (!isValidLatitude(customerLat) || !isValidLongitude(customerLng)) {
@@ -207,7 +209,22 @@ export async function checkServiceability(
     return { serviceable: false, reason: "NO_ACTIVE_OUTLET" };
   }
 
-  const selection = selectBestOutlet(outlets, customerLat, customerLng);
+  // Distinct misconfiguration: outlets exist but none have usable coordinates.
+  const hasUsableOutlet = outlets.some(o => {
+    if (!o.isActive || !o.isOpen) return false;
+    const loc = validateGeoLocation({ latitude: o.latitude, longitude: o.longitude });
+    return loc.valid;
+  });
+  if (!hasUsableOutlet) {
+    const anyActive = outlets.some(o => o.isActive && o.isOpen);
+    if (anyActive) {
+      return { serviceable: false, reason: "OUTLET_MISCONFIGURED", detail: "No outlet has valid pickup coordinates." };
+    }
+    return { serviceable: false, reason: "NO_ACTIVE_OUTLET" };
+  }
+
+  const defaultRadiusKm = opts?.defaultRadiusKm ?? 5;
+  const selection = selectBestOutlet(outlets, customerLat, customerLng, defaultRadiusKm);
   if (!selection) {
     return { serviceable: false, reason: "OUTSIDE_DELIVERY_RADIUS" };
   }
@@ -235,9 +252,13 @@ export async function checkServiceability(
         if (!providerServiceable) {
           return { serviceable: false, reason: "SHADOWFAX_NOT_SERVICEABLE" };
         }
-      } catch {
-        providerServiceable = false;
-        providerVerification = "FAILED";
+      } catch (err) {
+        // Distinct from NOT_SERVICEABLE: provider could not be reached at all.
+        return {
+          serviceable: false,
+          reason: "SHADOWFAX_UNAVAILABLE",
+          detail: err instanceof Error ? err.message : "Delivery provider unavailable.",
+        };
       }
     }
   }

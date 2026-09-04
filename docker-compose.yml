@@ -1,4 +1,6 @@
-# Quick local development: docker compose up -d
+# Quick local development:
+#   1. Copy .env.example to .env and set POSTGRES_PASSWORD (or export it)
+#   2. docker compose up -d
 # Full VPS deployment: bash deploy/setup.sh
 services:
   db:
@@ -7,7 +9,8 @@ services:
     environment:
       POSTGRES_DB: cloudkitchen
       POSTGRES_USER: cloudkitchen
-      POSTGRES_PASSWORD: devpassword123
+      # P0: never hardcode the password — must come from the environment.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in your .env file or environment}
     ports:
       - "5432:5432"
     volumes:

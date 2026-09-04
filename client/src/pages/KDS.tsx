@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { CheckCircle2, ChefHat, Clock, Flame, LoaderCircle, Volume2, VolumeX } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { AdminError } from "@/components/DashboardLayout";
 import { trpc } from "@/lib/trpc";
 
 type Station = "all" | "grill" | "fry" | "assembly" | "drinks";
@@ -38,20 +40,80 @@ function urgencyText(since: string): string {
   return "text-red-400";
 }
 
-export default function KDSPage({ slug }: { slug?: string }) {
+export default function KDSPage({ slug, restaurantId }: { slug?: string; restaurantId?: string }) {
   const [station, setStation] = useState<Station>("all");
   const [soundEnabled, setSoundEnabled] = useState(false);
+  const [pausedOnError, setPausedOnError] = useState(false);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const prevCountRef = useRef(0);
 
+  if (!slug) {
+    return (
+      <div className="min-h-screen bg-[#1a1a1a] text-white flex flex-col items-center justify-center p-6 text-center">
+        <ChefHat className="w-12 h-12 mb-4 opacity-40" aria-hidden />
+        <p className="text-lg font-bold">No restaurant selected</p>
+        <p className="text-sm mt-1 text-gray-400">Open the kitchen display from a restaurant workspace (e.g. /admin/your-slug/kds).</p>
+      </div>
+    );
+  }
+  void restaurantId;
+
+  return <KDSBoard slug={slug} station={station} setStation={setStation} soundEnabled={soundEnabled} setSoundEnabled={setSoundEnabled} audioCtxRef={audioCtxRef} prevCountRef={prevCountRef} pausedOnError={pausedOnError} setPausedOnError={setPausedOnError} />;
+}
+
+function KDSBoard({
+  slug, station, setStation, soundEnabled, setSoundEnabled, audioCtxRef, prevCountRef, pausedOnError, setPausedOnError,
+}: {
+  slug: string;
+  station: Station;
+  setStation: (s: Station) => void;
+  soundEnabled: boolean;
+  setSoundEnabled: (v: boolean) => void;
+  audioCtxRef: React.MutableRefObject<AudioContext | null>;
+  prevCountRef: React.MutableRefObject<number>;
+  pausedOnError: boolean;
+  setPausedOnError: (v: boolean) => void;
+}) {
+
   const ordersQuery = trpc.kds.getActiveOrders.useQuery(
-    { slug: slug || "", station: station === "all" ? undefined : station },
-    { refetchInterval: 5000 }
+    { slug, station: station === "all" ? undefined : station },
+    {
+      // Pause live refetch while the feed is failing; resume via Retry.
+      refetchInterval: pausedOnError ? false : 5000,
+      retry: false,
+    }
   );
 
-  const acceptOrder = trpc.kds.acceptOrder.useMutation({ onSuccess: () => ordersQuery.refetch() });
-  const setPreparing = trpc.kds.setOrderPreparing.useMutation({ onSuccess: () => ordersQuery.refetch() });
-  const bumpOrder = trpc.kds.bumpOrder.useMutation({ onSuccess: () => ordersQuery.refetch() });
+  useEffect(() => {
+    if (ordersQuery.isError) {
+      setPausedOnError(true);
+      toast.error("Kitchen feed failed to load. Live updates paused.");
+    } else if (ordersQuery.isSuccess) {
+      setPausedOnError(false);
+    }
+  }, [ordersQuery.isError, ordersQuery.isSuccess, setPausedOnError]);
+
+  const acceptOrder = trpc.kds.acceptOrder.useMutation({
+    onSuccess: () => {
+      ordersQuery.refetch();
+      toast.success("Order accepted");
+    },
+    onError: (err) => toast.error(err.message || "Could not accept order."),
+  });
+  const setPreparing = trpc.kds.setOrderPreparing.useMutation({
+    onSuccess: () => {
+      ordersQuery.refetch();
+      toast.success("Order moved to preparing");
+    },
+    onError: (err) => toast.error(err.message || "Could not start preparing."),
+  });
+  const bumpOrder = trpc.kds.bumpOrder.useMutation({
+    onSuccess: () => {
+      ordersQuery.refetch();
+      toast.success("Order marked ready");
+    },
+    onError: (err) => toast.error(err.message || "Could not mark order ready."),
+  });
 
   function playAlert() {
     if (!soundEnabled) return;
@@ -124,6 +186,7 @@ export default function KDSPage({ slug }: { slug?: string }) {
         <Button
           variant="ghost"
           size="sm"
+          aria-label={soundEnabled ? "Mute new-order alerts" : "Enable new-order alerts"}
           onClick={() => soundEnabled ? setSoundEnabled(false) : enableSound()}
           className={soundEnabled ? "text-green-400 hover:text-green-300" : "text-gray-500 hover:text-gray-300"}
         >
@@ -153,6 +216,16 @@ export default function KDSPage({ slug }: { slug?: string }) {
         {ordersQuery.isLoading ? (
           <div className="flex items-center justify-center h-64">
             <LoaderCircle className="w-8 h-8 animate-spin text-gray-500" />
+          </div>
+        ) : ordersQuery.isError ? (
+          <div className="mx-auto max-w-md [&_main]:min-h-0 [&_main]:bg-transparent [&_main]:p-0">
+            <AdminError
+              message="We couldn't load the kitchen feed. Live updates are paused."
+              onRetry={() => {
+                setPausedOnError(false);
+                ordersQuery.refetch();
+              }}
+            />
           </div>
         ) : orders.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-64 text-gray-500">
@@ -216,7 +289,7 @@ export default function KDSPage({ slug }: { slug?: string }) {
                     <Button
                       size="sm"
                       className="flex-1 bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold"
-                      onClick={() => acceptOrder.mutate({ orderId: order.id })}
+                      onClick={() => acceptOrder.mutate({ orderId: order.id, slug })}
                       disabled={acceptOrder.isPending}
                     >
                       Accept
@@ -226,7 +299,7 @@ export default function KDSPage({ slug }: { slug?: string }) {
                     <Button
                       size="sm"
                       className="flex-1 bg-orange-600 hover:bg-orange-700 text-white text-xs font-bold"
-                      onClick={() => setPreparing.mutate({ orderId: order.id })}
+                      onClick={() => setPreparing.mutate({ orderId: order.id, slug })}
                       disabled={setPreparing.isPending}
                     >
                       <Flame className="w-3 h-3 mr-1" /> Start
@@ -236,7 +309,7 @@ export default function KDSPage({ slug }: { slug?: string }) {
                     <Button
                       size="sm"
                       className="flex-1 bg-green-600 hover:bg-green-700 text-white text-xs font-bold"
-                      onClick={() => bumpOrder.mutate({ orderId: order.id })}
+                      onClick={() => bumpOrder.mutate({ orderId: order.id, slug })}
                       disabled={bumpOrder.isPending}
                     >
                       <CheckCircle2 className="w-3 h-3 mr-1" /> Ready

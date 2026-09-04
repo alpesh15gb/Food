@@ -70,7 +70,8 @@ describe("calculateAuthoritativeQuote", () => {
       couponDiscountPaise: 10000,
     });
     expect(quote.couponDiscountPaise).toBe(10000);
-    expect(quote.totalPaise).toBe(49800 - 10000 + 2500 + 3900 + 2490);
+    // GST on post-discount taxable (49800-10000)*5% = 1990
+    expect(quote.totalPaise).toBe(49800 - 10000 + 2500 + 3900 + 1990);
   });
 
   it("caps coupon discount at item total", () => {

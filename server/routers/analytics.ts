@@ -2,26 +2,45 @@ import { z } from "zod";
 import { requirePermission } from "../_core/trpc";
 import { router } from "../_core/trpc";
 
+/** Validate date range: start <= end and range <= 366 days. */
+function assertValidRange(start: Date, end: Date) {
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+    throw new Error("Invalid startDate or endDate.");
+  }
+  if (start > end) {
+    throw new Error("startDate must be before or equal to endDate.");
+  }
+  const days = (end.getTime() - start.getTime()) / 86400000;
+  if (days > 366) {
+    throw new Error("Date range must not exceed 366 days.");
+  }
+}
+
+const dateRangeSchema = {
+  startDate: z.coerce.date(),
+  endDate: z.coerce.date(),
+};
+
 export const analyticsRouter = router({
   revenueTrend: requirePermission("reports:read")
     .input(z.object({
       restaurantId: z.string().min(4),
-      startDate: z.string(),
-      endDate: z.string(),
+      ...dateRangeSchema,
       granularity: z.enum(["daily", "weekly", "monthly"]).default("daily"),
     }))
     .query(async ({ input }) => {
       const db = await import("../db").then(m => m.getDb());
       if (!db) return [];
-      const { orders } = await import("../../drizzle/schema");
-      const { eq, and, gte, lte, sql } = await import("drizzle-orm");
+      const { sql } = await import("drizzle-orm");
 
-      const start = new Date(input.startDate);
-      const end = new Date(input.endDate);
+      const start = input.startDate;
+      const end = input.endDate;
+      assertValidRange(start, end);
 
-      const truncFn = input.granularity === "monthly" ? "date_trunc('month', created_at)"
-        : input.granularity === "weekly" ? "date_trunc('week', created_at)"
-        : "date_trunc('day', created_at)";
+      // Timezone Asia/Kolkata: bucket periods in IST, not UTC.
+      const truncFn = input.granularity === "monthly" ? "date_trunc('month', created_at AT TIME ZONE 'Asia/Kolkata')"
+        : input.granularity === "weekly" ? "date_trunc('week', created_at AT TIME ZONE 'Asia/Kolkata')"
+        : "date_trunc('day', created_at AT TIME ZONE 'Asia/Kolkata')";
 
       const rows = await db.execute(sql`
         SELECT ${sql.raw(truncFn)} AS period,
@@ -48,8 +67,7 @@ export const analyticsRouter = router({
   itemPerformance: requirePermission("reports:read")
     .input(z.object({
       restaurantId: z.string().min(4),
-      startDate: z.string(),
-      endDate: z.string(),
+      ...dateRangeSchema,
       limit: z.number().min(1).max(50).default(20),
     }))
     .query(async ({ input }) => {
@@ -57,13 +75,14 @@ export const analyticsRouter = router({
       if (!db) return [];
       const { sql } = await import("drizzle-orm");
 
-      const start = new Date(input.startDate);
-      const end = new Date(input.endDate);
+      const start = input.startDate;
+      const end = input.endDate;
+      assertValidRange(start, end);
 
       const rows = await db.execute(sql`
-        SELECT oi.name AS item_name,
+        SELECT oi.item_name_snapshot AS item_name,
                SUM(oi.quantity)::int AS total_quantity,
-               COALESCE(SUM(oi.total_price_paise), 0)::bigint AS total_revenue_paise,
+               COALESCE(SUM(oi.unit_price_paise * oi.quantity), 0)::bigint AS total_revenue_paise,
                COALESCE(AVG(oi.unit_price_paise), 0)::bigint AS avg_unit_price_paise
         FROM order_items oi
         JOIN orders o ON o.id = oi.order_id
@@ -71,7 +90,7 @@ export const analyticsRouter = router({
           AND o.created_at >= ${start}
           AND o.created_at <= ${end}
           AND o.status NOT IN ('CANCELLED', 'REJECTED', 'PENDING_PAYMENT')
-        GROUP BY oi.name
+        GROUP BY oi.item_name_snapshot
         ORDER BY total_revenue_paise DESC
         LIMIT ${input.limit}
       `);
@@ -97,8 +116,8 @@ export const analyticsRouter = router({
       const since = new Date(Date.now() - input.days * 86400000);
 
       const rows = await db.execute(sql`
-        SELECT EXTRACT(DOW FROM created_at)::int AS day_of_week,
-               EXTRACT(HOUR FROM created_at)::int AS hour_of_day,
+        SELECT EXTRACT(DOW FROM created_at AT TIME ZONE 'Asia/Kolkata')::int AS day_of_week,
+               EXTRACT(HOUR FROM created_at AT TIME ZONE 'Asia/Kolkata')::int AS hour_of_day,
                COUNT(*)::int AS order_count
         FROM orders
         WHERE restaurant_id = ${input.restaurantId}
@@ -118,24 +137,25 @@ export const analyticsRouter = router({
   categoryBreakdown: requirePermission("reports:read")
     .input(z.object({
       restaurantId: z.string().min(4),
-      startDate: z.string(),
-      endDate: z.string(),
+      ...dateRangeSchema,
     }))
     .query(async ({ input }) => {
       const db = await import("../db").then(m => m.getDb());
       if (!db) return [];
       const { sql } = await import("drizzle-orm");
 
-      const start = new Date(input.startDate);
-      const end = new Date(input.endDate);
+      const start = input.startDate;
+      const end = input.endDate;
+      assertValidRange(start, end);
 
       const rows = await db.execute(sql`
         SELECT COALESCE(mc.name, 'Uncategorized') AS category_name,
                COUNT(DISTINCT o.id)::int AS order_count,
-               COALESCE(SUM(oi.total_price_paise), 0)::bigint AS total_revenue_paise
+               COALESCE(SUM(oi.unit_price_paise * oi.quantity), 0)::bigint AS total_revenue_paise
         FROM order_items oi
         JOIN orders o ON o.id = oi.order_id
-        LEFT JOIN menu_categories mc ON mc.id = oi.category_id
+        LEFT JOIN menu_items mi ON mi.id = oi.menu_item_id
+        LEFT JOIN menu_categories mc ON mc.id = mi.category_id
         WHERE o.restaurant_id = ${input.restaurantId}
           AND o.created_at >= ${start}
           AND o.created_at <= ${end}
@@ -154,33 +174,43 @@ export const analyticsRouter = router({
   customerRetention: requirePermission("reports:read")
     .input(z.object({
       restaurantId: z.string().min(4),
-      startDate: z.string(),
-      endDate: z.string(),
+      ...dateRangeSchema,
     }))
     .query(async ({ input }) => {
       const db = await import("../db").then(m => m.getDb());
       if (!db) return { newCustomers: 0, repeatCustomers: 0, retentionRate: 0 };
       const { sql } = await import("drizzle-orm");
 
-      const start = new Date(input.startDate);
-      const end = new Date(input.endDate);
+      const start = input.startDate;
+      const end = input.endDate;
+      assertValidRange(start, end);
 
+      // First-ever order CTE: new = first order ever falls in range;
+      // repeat = ordered in range but first order was before range.
       const rows = await db.execute(sql`
-        WITH customer_orders AS (
-          SELECT customer_id, COUNT(*) AS order_count
+        WITH first_orders AS (
+          SELECT customer_id, MIN(created_at) AS first_at
+          FROM orders
+          WHERE restaurant_id = ${input.restaurantId}
+            AND status NOT IN ('CANCELLED', 'REJECTED', 'PENDING_PAYMENT')
+            AND customer_id IS NOT NULL
+          GROUP BY customer_id
+        ),
+        range_customers AS (
+          SELECT DISTINCT customer_id
           FROM orders
           WHERE restaurant_id = ${input.restaurantId}
             AND created_at >= ${start}
             AND created_at <= ${end}
             AND status NOT IN ('CANCELLED', 'REJECTED', 'PENDING_PAYMENT')
             AND customer_id IS NOT NULL
-          GROUP BY customer_id
         )
         SELECT
-          COUNT(*) FILTER (WHERE order_count = 1)::int AS new_customers,
-          COUNT(*) FILTER (WHERE order_count > 1)::int AS repeat_customers,
+          COUNT(*) FILTER (WHERE f.first_at >= ${start} AND f.first_at <= ${end})::int AS new_customers,
+          COUNT(*) FILTER (WHERE f.first_at < ${start})::int AS repeat_customers,
           COUNT(*)::int AS total_customers
-        FROM customer_orders
+        FROM range_customers r
+        JOIN first_orders f ON f.customer_id = r.customer_id
       `);
 
       const row = (rows as any).rows?.[0];
@@ -197,16 +227,16 @@ export const analyticsRouter = router({
   summaryStats: requirePermission("reports:read")
     .input(z.object({
       restaurantId: z.string().min(4),
-      startDate: z.string(),
-      endDate: z.string(),
+      ...dateRangeSchema,
     }))
     .query(async ({ input }) => {
       const db = await import("../db").then(m => m.getDb());
       if (!db) return { totalOrders: 0, totalRevenuePaise: 0, avgOrderValuePaise: 0, cancelledCount: 0 };
       const { sql } = await import("drizzle-orm");
 
-      const start = new Date(input.startDate);
-      const end = new Date(input.endDate);
+      const start = input.startDate;
+      const end = input.endDate;
+      assertValidRange(start, end);
 
       const rows = await db.execute(sql`
         SELECT

@@ -108,9 +108,16 @@ class ShadowfaxProductionAdapter implements DeliveryProvider {
   setRestaurantId(id: string) { this.restaurantId = id; }
 
   private async getCredentials() {
-    const merchantId = (this.restaurantId ? await readIntegrationSecret(this.restaurantId, "shadowfax", "SHADOWFAX_MERCHANT_ID") : null)
+    // Canonical vault provider is "shadowfax"; fall back to legacy "delivery" rows.
+    const readBoth = async (keyName: string) => {
+      if (!this.restaurantId) return null;
+      const canonical = await readIntegrationSecret(this.restaurantId, "shadowfax", keyName);
+      if (canonical) return canonical;
+      return readIntegrationSecret(this.restaurantId, "delivery", keyName);
+    };
+    const merchantId = (await readBoth("SHADOWFAX_MERCHANT_ID"))
       ?? process.env.SHADOWFAX_MERCHANT_ID;
-    const apiKey = (this.restaurantId ? await readIntegrationSecret(this.restaurantId, "shadowfax", "SHADOWFAX_API_KEY") : null)
+    const apiKey = (await readBoth("SHADOWFAX_API_KEY"))
       ?? process.env.SHADOWFAX_API_KEY;
     if (!merchantId || !apiKey) {
       throw new Error("Shadowfax credentials not configured. Add SHADOWFAX_MERCHANT_ID and SHADOWFAX_API_KEY.");
@@ -190,6 +197,9 @@ class ShadowfaxProductionAdapter implements DeliveryProvider {
           lng: request.dropAddress.longitude,
         },
         order_value: request.totalAmountPaise,
+        // P0: thread line items + prep time so provider can quote/route correctly.
+        items: request.items.map(i => ({ name: i.name, quantity: i.quantity })),
+        estimated_preparation_minutes: request.estimatedPreparationMinutes,
         instructions: request.specialInstructions,
       });
       return {
@@ -265,10 +275,16 @@ class ShadowfaxProductionAdapter implements DeliveryProvider {
       "cancelled": "CANCELLED",
       "failed": "FAILED",
     };
+    // P0: unknown provider statuses must not be coerced to PENDING — return null.
+    const mapped = statusMap[status];
+    if (!mapped) {
+      console.warn(`[Shadowfax] Unknown webhook status "${status}" — ignoring.`);
+      return null;
+    }
 
     return {
       deliveryId: orderId,
-      status: statusMap[status] ?? "PENDING",
+      status: mapped,
       timestamp: new Date(),
       riderName: (payload.rider_name as string) ?? undefined,
       riderPhone: (payload.rider_phone as string) ?? undefined,
@@ -395,23 +411,50 @@ export async function createManualDelivery(
 
 const _providerCache = new Map<string, DeliveryProvider>();
 
-/** L-11 fix: Per-restaurant provider instances to prevent cross-tenant state sharing. */
+/** L-11 fix: Per-restaurant provider instances to prevent cross-tenant state sharing.
+ * Canonical vault provider is "shadowfax" (see secretVault); env is fallback.
+ * Mock is explicit opt-in via SHADOWFAX_MOCK=true. In production with
+ * SHADOWFAX_REQUIRE_REAL=true, missing credentials throw instead of silently mocking.
+ */
 export function getDeliveryProvider(restaurantId?: string): DeliveryProvider {
   const cacheKey = restaurantId ?? "__default__";
   const cached = _providerCache.get(cacheKey);
   if (cached) return cached;
 
-  const hasRealCredentials = Boolean(
+  const mockOptIn = process.env.SHADOWFAX_MOCK === "true" || process.env.DELIVERY_PROVIDER === "mock";
+  const isProd = process.env.NODE_ENV === "production";
+  const requireReal = process.env.SHADOWFAX_REQUIRE_REAL === "true";
+  const hasEnvCreds = Boolean(
     process.env.SHADOWFAX_API_KEY && process.env.SHADOWFAX_MERCHANT_ID
   );
 
   let provider: DeliveryProvider;
-  if (hasRealCredentials && restaurantId) {
+  if (mockOptIn) {
+    provider = new MockDeliveryAdapter();
+    console.log(`[Delivery] Using shadowfax_mock adapter for ${cacheKey} (explicit MOCK opt-in)`);
+  } else if (isProd) {
+    // Production: always real adapter (vault + env resolved per-request).
+    // getCredentials() throws when missing; REQUIRE_REAL makes it fail fast here too.
+    if (!hasEnvCreds && requireReal) {
+      // Vault may still hold creds (async check at request time), but without any
+      // env creds and REQUIRE_REAL we fail fast rather than silently mocking.
+      // Note: per-restaurant vault creds are checked in getCredentials().
+      if (!restaurantId) {
+        throw new Error("Shadowfax credentials not configured. Add SHADOWFAX_API_KEY/SHADOWFAX_MERCHANT_ID or per-restaurant vault secrets.");
+      }
+    }
     const adapter = new ShadowfaxProductionAdapter();
-    adapter.setRestaurantId(restaurantId);
+    if (restaurantId) adapter.setRestaurantId(restaurantId);
+    provider = adapter;
+  } else if (hasEnvCreds || restaurantId) {
+    // Non-prod with creds or tenant context: real adapter (vault + env).
+    const adapter = new ShadowfaxProductionAdapter();
+    if (restaurantId) adapter.setRestaurantId(restaurantId);
     provider = adapter;
   } else {
+    // Non-prod without creds and without explicit opt-in: Mock for local dev only.
     provider = new MockDeliveryAdapter();
+    console.log(`[Delivery] Using shadowfax_mock adapter for ${cacheKey} (dev fallback; set SHADOWFAX_MOCK=true to make explicit)`);
   }
 
   _providerCache.set(cacheKey, provider);

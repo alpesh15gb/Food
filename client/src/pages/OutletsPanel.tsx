@@ -1,12 +1,37 @@
 import { trpc } from "@/lib/trpc";
-import { MapPin, Loader2, Plus, Store, ToggleLeft, ToggleRight } from "lucide-react";
+import { MapPin, Plus, Store, ToggleLeft, ToggleRight } from "lucide-react";
 import { useState } from "react";
+import { toast } from "sonner";
+import { AdminError } from "@/components/DashboardLayout";
 
 export default function OutletsPanel({ restaurantId }: { restaurantId: string }) {
-  const { data: outlets, isLoading, refetch } = trpc.admin.listOutlets.useQuery({ restaurantId });
-  const createMutation = trpc.admin.createOutlet.useMutation({ onSuccess: () => { refetch(); setShowForm(false); resetForm(); } });
-  const updateMutation = trpc.admin.updateOutlet.useMutation({ onSuccess: () => refetch() });
-  const toggleActiveMutation = trpc.admin.toggleOutletActive.useMutation({ onSuccess: () => refetch() });
+  const outletsQuery = trpc.admin.listOutlets.useQuery({ restaurantId }, { retry: false });
+  const { data: outlets, isLoading, refetch } = outletsQuery;
+  const createMutation = trpc.admin.createOutlet.useMutation({
+    onSuccess: () => {
+      toast.success("Outlet created");
+      refetch();
+      setShowForm(false);
+      resetForm();
+    },
+    onError: (err) => toast.error(err.message || "Could not create outlet."),
+  });
+  const updateMutation = trpc.admin.updateOutlet.useMutation({
+    onSuccess: () => {
+      toast.success("Outlet updated");
+      refetch();
+      setShowForm(false);
+      resetForm();
+    },
+    onError: (err) => toast.error(err.message || "Could not update outlet."),
+  });
+  const toggleActiveMutation = trpc.admin.toggleOutletActive.useMutation({
+    onSuccess: () => {
+      toast.success("Outlet status updated");
+      refetch();
+    },
+    onError: (err) => toast.error(err.message || "Could not update outlet status."),
+  });
 
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -50,14 +75,25 @@ export default function OutletsPanel({ restaurantId }: { restaurantId: string })
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center py-20">
-        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      <div className="space-y-4" aria-label="Loading outlets">
+        {[1, 2, 3].map(i => (
+          <div key={i} className="h-24 animate-pulse rounded-xl bg-[#eadfd4]" />
+        ))}
       </div>
     );
   }
 
+  if (outletsQuery.isError) {
+    return (
+      <AdminError
+        message="We couldn't load outlets. Please retry."
+        onRetry={() => refetch()}
+      />
+    );
+  }
+
   return (
-    <div className="space-y-8 p-6">
+    <div className="space-y-8">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Outlets</h1>
@@ -127,8 +163,10 @@ export default function OutletsPanel({ restaurantId }: { restaurantId: string })
               </div>
               <button
                 onClick={() => toggleActiveMutation.mutate({ outletId: outlet.id, isActive: !outlet.isActive })}
-                className="text-muted-foreground hover:text-foreground"
+                disabled={toggleActiveMutation.isPending}
+                className="text-muted-foreground hover:text-foreground disabled:opacity-50"
                 title={outlet.isActive ? "Deactivate" : "Activate"}
+                aria-label={outlet.isActive ? `Deactivate ${outlet.name}` : `Activate ${outlet.name}`}
               >
                 {outlet.isActive ? <ToggleRight className="h-6 w-6 text-green-600" /> : <ToggleLeft className="h-6 w-6" />}
               </button>

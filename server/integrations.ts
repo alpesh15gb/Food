@@ -2,10 +2,11 @@
 import { hasIntegrationSecrets } from "./security/secretVault";
 
 export async function getIntegrationStatus(restaurantId: string) {
+  // Canonical vault provider for delivery is "shadowfax".
   const [razorpayStored, otpStored, deliveryStored] = await Promise.all([
     hasIntegrationSecrets(restaurantId, "razorpay", ["RAZORPAY_KEY_ID", "RAZORPAY_KEY_SECRET"]),
     hasIntegrationSecrets(restaurantId, "otp", ["OTP_PROVIDER_API_KEY"]),
-    hasIntegrationSecrets(restaurantId, "delivery", ["SHADOWFAX_API_KEY", "SHADOWFAX_MERCHANT_ID"]),
+    hasIntegrationSecrets(restaurantId, "shadowfax", ["SHADOWFAX_API_KEY", "SHADOWFAX_MERCHANT_ID"]),
   ]);
 
   return {

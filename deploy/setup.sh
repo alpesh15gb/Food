@@ -35,13 +35,15 @@ if [ ! -f deploy/config.env ]; then
   SECRET_KEY=$(openssl rand -hex 32 2>/dev/null || head -c 64 /dev/urandom | xxd -p | tr -d '\n' | head -c 64)
   ADMIN_TOKEN="admin-$(openssl rand -hex 16 2>/dev/null || head -c 32 /dev/urandom | xxd -p | tr -d '\n' | head -c 32)"
 
-  sed -i "s|POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=${POSTGRES_PASSWORD}|" deploy/config.env
-  sed -i "s|JWT_SECRET=.*|JWT_SECRET=${JWT_SECRET}|" deploy/config.env
-  sed -i "s|COOKIE_SECRET=.*|COOKIE_SECRET=${COOKIE_SECRET}|" deploy/config.env
-  sed -i "s|LOCAL_ADMIN_TOKEN=.*|LOCAL_ADMIN_TOKEN=${ADMIN_TOKEN}|" deploy/config.env
+  # NOTE: sed -i.bak (not bare -i) for macOS/BSD + GNU portability; backups removed below.
+  sed -i.bak "s|POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=${POSTGRES_PASSWORD}|" deploy/config.env
+  sed -i.bak "s|JWT_SECRET=.*|JWT_SECRET=${JWT_SECRET}|" deploy/config.env
+  sed -i.bak "s|COOKIE_SECRET=.*|COOKIE_SECRET=${COOKIE_SECRET}|" deploy/config.env
+  sed -i.bak "s|LOCAL_ADMIN_TOKEN=.*|LOCAL_ADMIN_TOKEN=${ADMIN_TOKEN}|" deploy/config.env
   OTP_SECRET=$(openssl rand -hex 32 2>/dev/null || head -c 64 /dev/urandom | xxd -p | tr -d '\n' | head -c 64)
-  sed -i "s|SECRET_ENCRYPTION_KEY=.*|SECRET_ENCRYPTION_KEY=${SECRET_KEY}|" deploy/config.env
-  sed -i "s|OTP_HMAC_SECRET=.*|OTP_HMAC_SECRET=${OTP_SECRET}|" deploy/config.env
+  sed -i.bak "s|SECRET_ENCRYPTION_KEY=.*|SECRET_ENCRYPTION_KEY=${SECRET_KEY}|" deploy/config.env
+  sed -i.bak "s|OTP_HMAC_SECRET=.*|OTP_HMAC_SECRET=${OTP_SECRET}|" deploy/config.env
+  rm -f deploy/config.env.bak
 
   echo "✅ Generated secure secrets in deploy/config.env"
   echo ""
@@ -70,10 +72,10 @@ for i in $(seq 1 30); do
   sleep 2
 done
 
-# 5. Push schema to database
+# 5. Apply migrations to database (never push --force in deploy)
 echo ""
-echo "🗄️  Pushing database schema..."
-docker compose -f deploy/docker-compose.yml exec -T app npx drizzle-kit push --force 2>&1 || echo "⚠️  Schema push will complete after first app boot"
+echo "🗄️  Applying database migrations..."
+docker compose -f deploy/docker-compose.yml exec -T app npx drizzle-kit migrate 2>&1 || echo "⚠️  Migration will complete after first app boot"
 
 echo ""
 echo "╔══════════════════════════════════════════════╗"

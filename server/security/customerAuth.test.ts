@@ -380,7 +380,8 @@ describe("Session Separation", () => {
 
   it("customer session cannot call admin procedures", () => {
     // Customer has role='user', adminProcedure requires role='admin'
-    const customerCanCallAdmin = "user" === "admin";
+    const check = (role: string) => role === "admin";
+    const customerCanCallAdmin = check("user");
     expect(customerCanCallAdmin).toBe(false);
   });
 
@@ -597,7 +598,7 @@ describe("Cookie Configuration", () => {
 
   it("admin session expiry is 12 hours", () => {
     const opts = getSessionCookieOptions({} as any);
-    expect(opts.maxAge).toBe(1000 * 60 * 60 * 24 * 12);
+    expect(opts.maxAge).toBe(1000 * 60 * 60 * 12);
   });
 });
 

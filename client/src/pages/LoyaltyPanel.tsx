@@ -1,11 +1,20 @@
 import { trpc } from "@/lib/trpc";
 import { Award, Loader2, Save, Star, Trophy, Users } from "lucide-react";
 import { useEffect, useState } from "react";
+import { toast } from "sonner";
+import { AdminError } from "@/components/DashboardLayout";
 
 export default function LoyaltyPanel({ restaurantId }: { restaurantId: string }) {
-  const { data: program, isLoading, refetch } = trpc.loyalty.getProgram.useQuery({ restaurantId });
-  const { data: stats } = trpc.loyalty.getMemberStats.useQuery({ restaurantId });
-  const upsertMutation = trpc.loyalty.upsertProgram.useMutation({ onSuccess: () => refetch() });
+  const programQuery = trpc.loyalty.getProgram.useQuery({ restaurantId }, { retry: false });
+  const { data: program, isLoading, refetch } = programQuery;
+  const { data: stats } = trpc.loyalty.getMemberStats.useQuery({ restaurantId }, { retry: false });
+  const upsertMutation = trpc.loyalty.upsertProgram.useMutation({
+    onSuccess: () => {
+      toast.success("Loyalty program saved");
+      refetch();
+    },
+    onError: (err) => toast.error(err.message || "Could not save loyalty program."),
+  });
 
   const [form, setForm] = useState({
     name: "Rewards",
@@ -31,7 +40,11 @@ export default function LoyaltyPanel({ restaurantId }: { restaurantId: string })
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    await upsertMutation.mutateAsync({ restaurantId, ...form });
+    try {
+      await upsertMutation.mutateAsync({ restaurantId, ...form });
+    } catch {
+      // Error toast is handled by the mutation's onError.
+    }
   };
 
   if (isLoading) {
@@ -42,8 +55,17 @@ export default function LoyaltyPanel({ restaurantId }: { restaurantId: string })
     );
   }
 
+  if (programQuery.isError) {
+    return (
+      <AdminError
+        message="We couldn't load the loyalty program. Please retry."
+        onRetry={() => refetch()}
+      />
+    );
+  }
+
   return (
-    <div className="space-y-8 p-6">
+    <div className="space-y-8">
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Loyalty Program</h1>
         <p className="mt-1 text-sm text-muted-foreground">Reward repeat customers with points they can redeem on future orders</p>

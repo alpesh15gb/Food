@@ -53,14 +53,15 @@ function generateTrackingToken(): string {
   return crypto.randomBytes(24).toString("base64url");
 }
 
-/** Normalize Indian phone numbers: strip spaces, dashes, country code prefix. */
+/** Strict normalize Indian phone numbers: digits only, 10-digit 6-9..., else null. */
 function normalizePhone(phone: string | null | undefined): string | null {
   if (!phone) return null;
-  let p = phone.replace(/[\s\-()]/g, "");
-  if (p.startsWith("+91")) p = p.slice(3);
-  if (p.startsWith("91") && p.length === 12) p = p.slice(2);
+  const digits = phone.replace(/\D/g, "");
+  let p = digits;
+  if (p.length === 12 && p.startsWith("91")) p = p.slice(2);
+  if (p.length === 11 && p.startsWith("0")) p = p.slice(1);
   if (p.length === 10 && /^[6-9]\d{9}$/.test(p)) return p;
-  return phone.trim(); // return as-is if not a valid Indian format
+  return null;
 }
 
 let _pool: Pool | null = null;
@@ -94,31 +95,48 @@ async function requireDb() {
 // User Management
 // =============================================================================
 
+// Throttle lastSignedIn writes to avoid a DB write on every request.
+const LAST_SIGNED_IN_THROTTLE_MS = 60 * 60 * 1000;
+const lastSignedInCache = new Map<string, number>();
+
 export async function upsertUser(user: InsertUser): Promise<void> {
   if (!user.openId) throw new Error("User openId is required for upsert");
   const db = await getDb();
   if (!db) return;
 
-  const values: InsertUser = {
-    openId: user.openId,
-    name: user.name ?? null,
-    email: user.email ?? null,
-    mobile: user.mobile ?? null,
-    loginMethod: user.loginMethod ?? null,
-    lastSignedIn: new Date(),
-  };
-
-  const updateSet: Record<string, unknown> = {
-    name: values.name,
-    email: values.email,
-    mobile: values.mobile,
-    loginMethod: values.loginMethod,
-    lastSignedIn: values.lastSignedIn,
-  };
+  // Only set provided fields — never wipe existing values with null.
+  const values: InsertUser = { openId: user.openId } as InsertUser;
+  const updateSet: Record<string, unknown> = {};
+  if (user.name !== undefined) {
+    values.name = user.name;
+    updateSet.name = user.name;
+  }
+  if (user.email !== undefined) {
+    values.email = user.email;
+    updateSet.email = user.email;
+  }
+  if (user.mobile !== undefined) {
+    values.mobile = user.mobile;
+    updateSet.mobile = user.mobile;
+  }
+  if (user.loginMethod !== undefined) {
+    values.loginMethod = user.loginMethod;
+    updateSet.loginMethod = user.loginMethod;
+  }
 
   if (user.role !== undefined) {
     values.role = user.role;
     updateSet.role = user.role;
+  }
+
+  // Throttle lastSignedIn: only bump at most once per hour per openId.
+  const now = Date.now();
+  const lastBump = lastSignedInCache.get(user.openId) ?? 0;
+  const shouldBump = now - lastBump > LAST_SIGNED_IN_THROTTLE_MS;
+  if (shouldBump) {
+    (values as Record<string, unknown>).lastSignedIn = new Date();
+    updateSet.lastSignedIn = (values as Record<string, unknown>).lastSignedIn;
+    lastSignedInCache.set(user.openId, now);
   }
 
   await db.insert(users).values(values).onConflictDoUpdate({ target: users.openId, set: updateSet });
@@ -176,83 +194,86 @@ export async function createRestaurant(input: {
   const restaurantId = id();
   const outletId = id();
 
-  await db.insert(restaurants).values({
-    id: restaurantId,
-    slug: input.slug,
-    name: input.name,
-    description: input.description ?? "",
-    cuisineSummary: input.cuisineSummary ?? "",
-    logoUrl: input.logoUrl,
-    bannerImageUrl: input.bannerImageUrl,
-    contactPhone: input.contactPhone,
-    address: input.address ?? "",
-    latitude: input.latitude,
-    longitude: input.longitude,
-    deliveryFeePaise: input.deliveryFeePaise ?? 3000,
-    packagingFeePaise: input.packagingFeePaise ?? 1500,
-    minOrderPaise: input.minOrderPaise ?? 19900,
-    isOpen: false,
-    allowScheduledOrders: true,
-    preparationMinutes: input.preparationMinutes ?? 25,
-    accentColor: input.accentColor ?? input.primaryColor ?? "#38271F",
-    fontFamily: input.fontFamily ?? "Playfair Display",
-    bodyFontFamily: input.bodyFontFamily ?? "Inter",
-  });
-
-  if (input.address) {
-    await db.insert(outlets).values({
-      id: outletId,
-      restaurantId,
-      name: `${input.name} Kitchen`,
-      address: input.address,
-      city: "",
-      postalCode: "",
+  // All-or-nothing brand bootstrap: restaurant + outlet + schedules + categories + membership.
+  await db.transaction(async (tx) => {
+    await tx.insert(restaurants).values({
+      id: restaurantId,
+      slug: input.slug,
+      name: input.name,
+      description: input.description ?? "",
+      cuisineSummary: input.cuisineSummary ?? "",
+      logoUrl: input.logoUrl,
+      bannerImageUrl: input.bannerImageUrl,
+      contactPhone: input.contactPhone,
+      address: input.address ?? "",
       latitude: input.latitude,
       longitude: input.longitude,
-      preparationMinutes: input.preparationMinutes ?? 25,
-      isActive: true,
+      deliveryFeePaise: input.deliveryFeePaise ?? 3000,
+      packagingFeePaise: input.packagingFeePaise ?? 1500,
+      minOrderPaise: input.minOrderPaise ?? 19900,
       isOpen: false,
+      allowScheduledOrders: true,
+      preparationMinutes: input.preparationMinutes ?? 25,
+      accentColor: input.accentColor ?? input.primaryColor ?? "#38271F",
+      fontFamily: input.fontFamily ?? "Playfair Display",
+      bodyFontFamily: input.bodyFontFamily ?? "Inter",
     });
-  }
 
-  const daysOfWeek = [0, 1, 2, 3, 4, 5, 6];
-  await db.insert(restaurantSchedules).values(
-    daysOfWeek.map(day => ({
-      id: id(),
-      restaurantId,
-      dayOfWeek: day,
-      openTime: "09:00",
-      closeTime: "23:00",
-      isActive: true,
-    }))
-  );
+    if (input.address) {
+      await tx.insert(outlets).values({
+        id: outletId,
+        restaurantId,
+        name: `${input.name} Kitchen`,
+        address: input.address,
+        city: "",
+        postalCode: "",
+        latitude: input.latitude,
+        longitude: input.longitude,
+        preparationMinutes: input.preparationMinutes ?? 25,
+        isActive: true,
+        isOpen: false,
+      });
+    }
 
-  const defaultCategories = [
-    { name: "Starters", slug: "starters", sortOrder: 1 },
-    { name: "Main Course", slug: "main-course", sortOrder: 2 },
-    { name: "Desserts", slug: "desserts", sortOrder: 3 },
-    { name: "Beverages", slug: "beverages", sortOrder: 4 },
-  ];
+    const daysOfWeek = [0, 1, 2, 3, 4, 5, 6];
+    await tx.insert(restaurantSchedules).values(
+      daysOfWeek.map(day => ({
+        id: id(),
+        restaurantId,
+        dayOfWeek: day,
+        openTime: "09:00",
+        closeTime: "23:00",
+        isActive: true,
+      }))
+    );
 
-  for (const cat of defaultCategories) {
-    await db.insert(menuCategories).values({
-      id: id(),
-      restaurantId,
-      ...cat,
-      isVisible: true,
-      isOpen: true,
-    });
-  }
+    const defaultCategories = [
+      { name: "Starters", slug: "starters", sortOrder: 1 },
+      { name: "Main Course", slug: "main-course", sortOrder: 2 },
+      { name: "Desserts", slug: "desserts", sortOrder: 3 },
+      { name: "Beverages", slug: "beverages", sortOrder: 4 },
+    ];
 
-  if (input.ownerUserId) {
-    await db.insert(restaurantMembers).values({
-      id: id(),
-      userId: input.ownerUserId,
-      restaurantId,
-      role: "owner",
-      isActive: true,
-    });
-  }
+    for (const cat of defaultCategories) {
+      await tx.insert(menuCategories).values({
+        id: id(),
+        restaurantId,
+        ...cat,
+        isVisible: true,
+        isOpen: true,
+      });
+    }
+
+    if (input.ownerUserId) {
+      await tx.insert(restaurantMembers).values({
+        id: id(),
+        userId: input.ownerUserId,
+        restaurantId,
+        role: "owner",
+        isActive: true,
+      });
+    }
+  });
 
   return restaurantId;
 }
@@ -525,12 +546,18 @@ export async function createOrderFromValidatedCart(args: {
   cutleryPreference?: boolean;
   customerPhone?: string;
   customerEmail?: string;
+  idempotencyKey?: string;
 }) {
   const db = await requireDb();
   const storefront = await getStorefront(args.slug);
   if (!storefront?.outlet) throw new Error("This restaurant is not currently available for delivery.");
-  if (!storefront.restaurant.isOpen && !storefront.restaurant.allowScheduledOrders) {
-    throw new Error("The restaurant is currently closed.");
+  // Scheduling gate via the canonical engine (rejects closed + tempClosure).
+  {
+    const { checkRestaurantAvailability } = await import("./domain/availability");
+    const avail = checkRestaurantAvailability(storefront.restaurant, storefront.schedules, new Date());
+    if (!avail.isAvailable) {
+      throw new Error(avail.reason ?? "The restaurant is currently closed.");
+    }
   }
 
   // --- Issue 4: Strict address validation (server-side) ---
@@ -606,6 +633,34 @@ export async function createOrderFromValidatedCart(args: {
     }
   }
 
+  // Per-line availability/scheduling gate via the canonical engine.
+  {
+    const { checkItemAvailability } = await import("./domain/availability");
+    const { productSchedules } = await import("../drizzle/schema");
+    const orderedIds = args.lines.map(l => l.menuItemId);
+    const [prodScheds, catScheds] = await Promise.all([
+      orderedIds.length ? db.select().from(productSchedules).where(inArray(productSchedules.menuItemId, orderedIds)) : Promise.resolve([] as Array<{ menuItemId: string; dayOfWeek: number | null; openTime: string | null; closeTime: string | null; startDate: Date | null; endDate: Date | null; isActive: boolean }>),
+      Promise.resolve([] as Array<{ categoryId: string }>),
+    ]);
+    void catScheds;
+    const prodSchedByItem = new Map<string, typeof prodScheds>();
+    for (const s of prodScheds) {
+      const arr = prodSchedByItem.get(s.menuItemId) ?? [];
+      arr.push(s);
+      prodSchedByItem.set(s.menuItemId, arr);
+    }
+    const now = new Date();
+    for (const line of args.lines) {
+      const item = storefront.items.find(mi => mi.id === line.menuItemId);
+      if (!item) throw new CartValidationError(`Item "${line.menuItemId}" is not in the menu.`);
+      const scheds = prodSchedByItem.get(line.menuItemId) ?? [];
+      const check = checkItemAvailability(item, scheds, now);
+      if (!check.isAvailable) {
+        throw new CartValidationError(check.reason ?? `"${item.name}" is currently unavailable.`);
+      }
+    }
+  }
+
   // Build resolved lines with server-side prices
   const resolvedLines = args.lines.map(line => {
     const item = storefront.items.find(mi => mi.id === line.menuItemId);
@@ -660,8 +715,8 @@ export async function createOrderFromValidatedCart(args: {
     });
   }
 
-  // Calculate pricing server-side using resolved (DB-verified) prices
-  const quote = calculateAuthoritativeQuote({
+  // Calculate base pricing server-side using resolved (DB-verified) prices.
+  const baseQuote = calculateAuthoritativeQuote({
     lines: resolvedLines,
     catalog: storefront.items,
     packagingFeePaise: storefront.restaurant.packagingFeePaise,
@@ -669,149 +724,253 @@ export async function createOrderFromValidatedCart(args: {
     taxPercent: parseFloat(storefront.restaurant.gstPercentage ?? "5"),
   });
 
-  // Apply coupon (Issue 9: check usage limits)
-  let couponDiscountPaise = 0;
+  // P0: unknown coupon codes must throw (never silently ignore).
   let appliedCoupon: typeof storefront.offers[0] | undefined;
   if (args.couponCode) {
     appliedCoupon = storefront.offers.find(o => o.code === args.couponCode?.toUpperCase());
-    if (appliedCoupon) {
-      // Issue 9: Check actual coupon usage from DB
-      const totalUsageCount = (await db.select({ count: sql<number>`count(*)::int` })
-        .from(couponUsage).where(eq(couponUsage.couponId, appliedCoupon.id)))[0]?.count ?? 0;
-      const customerUsageCount = customerId
-        ? (await db.select({ count: sql<number>`count(*)::int` })
-          .from(couponUsage).where(and(
-            eq(couponUsage.couponId, appliedCoupon.id),
-            eq(couponUsage.customerId, customerId),
-          )))[0]?.count ?? 0
-        : 0;
-      const customerOrderCount = customerId
-        ? (await db.select({ count: sql<number>`count(*)::int` })
-          .from(orders).where(eq(orders.customerId, customerId)))[0]?.count ?? 0
-        : 0;
-
-      const couponResult = validateCoupon({
-        coupon: {
-          code: appliedCoupon.code,
-          discountType: appliedCoupon.discountType,
-          discountValue: appliedCoupon.discountValue,
-          minOrderPaise: appliedCoupon.minOrderPaise,
-          maxDiscountPaise: appliedCoupon.maxDiscountPaise,
-          isActive: appliedCoupon.isActive,
-          startsAt: appliedCoupon.startsAt,
-          endsAt: appliedCoupon.endsAt,
-          isNewCustomerOnly: appliedCoupon.isNewCustomerOnly,
-          totalUsageLimit: appliedCoupon.totalUsageLimit,
-          perCustomerLimit: appliedCoupon.perCustomerLimit,
-        },
-        cartTotalPaise: quote.itemTotalPaise,
-        now: new Date(),
-        customerOrderCount,
-        customerCouponUsageCount: customerUsageCount,
-        totalCouponUsageCount: totalUsageCount,
-      });
-      if (couponResult.valid) {
-        couponDiscountPaise = couponResult.discountPaise;
-      } else {
-        throw new CartValidationError(couponResult.error ?? "Invalid coupon.");
-      }
+    if (!appliedCoupon) {
+      // Re-check DB in case storefront offers are stale.
+      const dbCoupon = (await db.select().from(coupons)
+        .where(and(eq(coupons.restaurantId, storefront.restaurant.id), eq(coupons.code, args.couponCode.toUpperCase())))
+        .limit(1))[0];
+      if (!dbCoupon) throw new CartValidationError(`Coupon "${args.couponCode.toUpperCase()}" is not valid for this restaurant.`);
+      appliedCoupon = dbCoupon as typeof storefront.offers[0];
     }
   }
 
-  // Recalculate with coupon
-  const finalQuote = calculateAuthoritativeQuote({
-    lines: resolvedLines,
-    catalog: storefront.items,
-    packagingFeePaise: storefront.restaurant.packagingFeePaise,
-    deliveryFeePaise: storefront.restaurant.deliveryFeePaise,
-    couponDiscountPaise,
-    taxPercent: parseFloat(storefront.restaurant.gstPercentage ?? "5"),
-  });
-
-  // Enforce minimum order
-  if (finalQuote.itemTotalPaise < storefront.restaurant.minOrderPaise) {
+  // Enforce minimum order on base total (coupon only reduces further).
+  if (baseQuote.itemTotalPaise < storefront.restaurant.minOrderPaise) {
     throw new Error(`Minimum order is ₹${Math.ceil(storefront.restaurant.minOrderPaise / 100)}.`);
   }
+
+  // Idempotency: return existing order when the key was already used.
+  const idempotencyKey = args.idempotencyKey?.trim() || null;
+  if (idempotencyKey) {
+    const existingByKey = (await db.select().from(orders)
+      .where(eq(orders.idempotencyKey, idempotencyKey)).limit(1))[0]
+      ?? (await db.select().from(orders).where(eq(orders.orderNumber, idempotencyKey)).limit(1))[0];
+    if (existingByKey) {
+      const existingQuote = {
+        itemTotalPaise: existingByKey.itemTotalPaise,
+        discountPaise: existingByKey.discountPaise,
+        couponDiscountPaise: existingByKey.couponDiscountPaise,
+        packagingFeePaise: existingByKey.packagingFeePaise,
+        deliveryFeePaise: existingByKey.deliveryFeePaise,
+        taxPaise: existingByKey.taxPaise,
+        totalPaise: existingByKey.totalPaise,
+      };
+      return {
+        id: existingByKey.id,
+        orderNumber: existingByKey.orderNumber,
+        trackingToken: existingByKey.trackingToken,
+        restaurantId: existingByKey.restaurantId,
+        ...existingQuote,
+        estimatedMinutes: existingByKey.estimatedMinutes ?? selectedOutlet.preparationMinutes + 15,
+      };
+    }
+  }
+
+  // Canonical address snapshot keys (never spread raw client input).
+  const addressSnapshot = {
+    flatHouse: String(addr.flatHouse ?? "").trim(),
+    building: typeof addr.building === "string" ? addr.building.trim() : null,
+    street: typeof addr.street === "string" ? addr.street.trim() : null,
+    landmark: typeof addr.landmark === "string" ? addr.landmark.trim() : null,
+    area: String(addr.area ?? "").trim(),
+    city: String(addr.city ?? "").trim(),
+    postalCode: String(addr.postalCode ?? "").trim(),
+    latitude: Number(lat),
+    longitude: Number(lng),
+    deliveryDistanceKm,
+  };
 
   // --- Issue 1: Generate secure tracking token ---
   const orderId = id();
   const orderNumber = `ORD-${Date.now().toString(36).toUpperCase()}-${Math.floor(1000 + Math.random() * 9000)}`;
   const trackingToken = generateTrackingToken();
+  let finalQuote = baseQuote;
 
-  // --- Issue 18: Atomic transaction — all-or-nothing order creation ---
-  // drizzle-orm/node-postgres wraps pool.connect() → BEGIN → work → COMMIT/ROLLBACK.
-  // If any step fails, all writes are rolled back atomically.
-  await db.transaction(async (tx) => {
-    await tx.insert(orders).values({
-      id: orderId,
-      orderNumber,
-      trackingToken,
-      restaurantId: storefront.restaurant.id,
-      outletId: selectedOutlet.id,
-      customerId,
-      status: "PENDING_PAYMENT",
-      paymentStatus: "PENDING",
-      addressSnapshot: { ...addr, deliveryDistanceKm },
-      customerName: (addr.name as string) || null,
-      customerPhone: phone,
-      customerEmail: args.customerEmail ?? null,
-      ...finalQuote,
-      couponCode: args.couponCode?.toUpperCase() ?? null,
-      deliveryNotes: args.deliveryNotes ?? null,
-      specialInstructions: args.lines.map(l => l.specialInstructions).filter(Boolean).join("; ") || null,
-      cutleryPreference: args.cutleryPreference ?? false,
-      estimatedMinutes: selectedOutlet.preparationMinutes + 15,
-    });
+  // --- Issue 18: Atomic transaction — coupon counts + usage INSIDE tx with SELECT FOR UPDATE. ---
+  try {
+    await db.transaction(async (tx) => {
+      // Lock coupon row when a coupon is applied.
+      let couponDiscountPaise = 0;
+      if (appliedCoupon) {
+        await tx.execute(sql`SELECT id FROM coupons WHERE id = ${appliedCoupon.id} FOR UPDATE`);
+        const totalUsageCount = Number((await tx.select({ count: sql<number>`count(*)::int` })
+          .from(couponUsage).where(eq(couponUsage.couponId, appliedCoupon.id)))[0]?.count ?? 0);
+        // Guest limits by verified phone: guests share no customerId, so count by phone.
+        const isGuest = !profile?.mobileNumber;
+        let customerUsageCount = 0;
+        let customerOrderCount = 0;
+        if (isGuest) {
+          customerOrderCount = Number((await tx.select({ count: sql<number>`count(*)::int` })
+            .from(orders).where(and(eq(orders.restaurantId, storefront.restaurant.id), eq(orders.customerPhone, phone))))[0]?.count ?? 0);
+          const usageByPhone = await tx.execute(sql`
+            SELECT count(*)::int AS count FROM coupon_usage cu
+            JOIN orders o ON o.id = cu.order_id
+            WHERE cu.coupon_id = ${appliedCoupon.id} AND o.customer_phone = ${phone}
+          `);
+          customerUsageCount = Number((usageByPhone as unknown as { rows: Array<{ count: number }> }).rows?.[0]?.count ?? 0);
+        } else {
+          customerUsageCount = Number((await tx.select({ count: sql<number>`count(*)::int` })
+            .from(couponUsage).where(and(
+              eq(couponUsage.couponId, appliedCoupon.id),
+              eq(couponUsage.customerId, customerId),
+            )))[0]?.count ?? 0);
+          customerOrderCount = Number((await tx.select({ count: sql<number>`count(*)::int` })
+            .from(orders).where(eq(orders.customerId, customerId)))[0]?.count ?? 0);
+        }
 
-    // Create order items (using server-resolved prices)
-    await tx.insert(orderItems).values(
-      resolvedLines.map(line => {
-        const item = storefront.items.find(mi => mi.id === line.menuItemId)!;
-        const unitPrice = item.offerPricePaise ?? item.pricePaise;
-        return {
-          id: id(),
-          orderId,
-          menuItemId: item.id,
-          itemNameSnapshot: item.name,
-          unitPricePaise: unitPrice,
-          quantity: line.quantity,
-          dietaryType: item.dietaryType,
-          selectedModifiers: line.modifiers.map(m => ({
-            groupId: "",
-            groupName: "",
-            optionId: m.optionId,
-            optionName: m.name,
-            pricePaise: m.pricePaise,
-          })),
-          specialInstructions: args.lines.find(l => l.menuItemId === line.menuItemId)?.specialInstructions ?? null,
-        };
-      })
-    );
+        const couponResult = validateCoupon({
+          coupon: {
+            code: appliedCoupon.code,
+            discountType: appliedCoupon.discountType,
+            discountValue: appliedCoupon.discountValue,
+            minOrderPaise: appliedCoupon.minOrderPaise,
+            maxDiscountPaise: appliedCoupon.maxDiscountPaise,
+            isActive: appliedCoupon.isActive,
+            startsAt: appliedCoupon.startsAt,
+            endsAt: appliedCoupon.endsAt,
+            isNewCustomerOnly: appliedCoupon.isNewCustomerOnly,
+            totalUsageLimit: appliedCoupon.totalUsageLimit,
+            perCustomerLimit: appliedCoupon.perCustomerLimit,
+          },
+          cartTotalPaise: baseQuote.itemTotalPaise,
+          now: new Date(),
+          customerOrderCount,
+          customerCouponUsageCount: customerUsageCount,
+          totalCouponUsageCount: totalUsageCount,
+        });
+        if (!couponResult.valid) {
+          throw new CartValidationError(couponResult.error ?? "Invalid coupon.");
+        }
+        couponDiscountPaise = couponResult.discountPaise;
+      }
 
-    await tx.insert(orderStatusHistory).values({
-      id: id(),
-      orderId,
-      status: "PENDING_PAYMENT",
-      note: "Order created; awaiting payment.",
-    });
-
-    await tx.insert(payments).values({
-      id: id(),
-      orderId,
-      amountPaise: finalQuote.totalPaise,
-    });
-
-    // Record coupon usage
-    if (args.couponCode && couponDiscountPaise > 0 && appliedCoupon) {
-      await tx.insert(couponUsage).values({
-        id: id(),
-        couponId: appliedCoupon.id,
-        orderId,
-        customerId,
-        discountPaise: couponDiscountPaise,
+      finalQuote = calculateAuthoritativeQuote({
+        lines: resolvedLines,
+        catalog: storefront.items,
+        packagingFeePaise: storefront.restaurant.packagingFeePaise,
+        deliveryFeePaise: storefront.restaurant.deliveryFeePaise,
+        couponDiscountPaise,
+        taxPercent: parseFloat(storefront.restaurant.gstPercentage ?? "5"),
       });
+
+      if (finalQuote.itemTotalPaise < storefront.restaurant.minOrderPaise) {
+        throw new Error(`Minimum order is ₹${Math.ceil(storefront.restaurant.minOrderPaise / 100)}.`);
+      }
+
+      await tx.insert(orders).values({
+        id: orderId,
+        orderNumber,
+        trackingToken,
+        idempotencyKey,
+        restaurantId: storefront.restaurant.id,
+        outletId: selectedOutlet.id,
+        customerId,
+        status: "PENDING_PAYMENT",
+        paymentStatus: "PENDING",
+        addressSnapshot,
+        customerName: (typeof addr.name === "string" && addr.name.trim()) || null,
+        customerPhone: phone,
+        customerEmail: args.customerEmail ?? null,
+        ...finalQuote,
+        couponCode: args.couponCode?.toUpperCase() ?? null,
+        couponDiscountPaise: finalQuote.couponDiscountPaise,
+        deliveryNotes: args.deliveryNotes ?? null,
+        specialInstructions: args.lines.map(l => l.specialInstructions).filter(Boolean).join("; ") || null,
+        cutleryPreference: args.cutleryPreference ?? false,
+        estimatedMinutes: selectedOutlet.preparationMinutes + 15,
+      });
+
+      // Atomic stock decrement: UPDATE ... WHERE stock >= qty (rowCount check).
+      for (const line of resolvedLines) {
+        const item = storefront.items.find(mi => mi.id === line.menuItemId)!;
+        if (item.stock != null) {
+          const dec = await tx.update(menuItems)
+            .set({ stock: sql`${menuItems.stock} - ${line.quantity}` })
+            .where(and(eq(menuItems.id, item.id), sql`${menuItems.stock} >= ${line.quantity}`))
+            .returning({ id: menuItems.id });
+          if (dec.length === 0) {
+            throw new CartValidationError(`Insufficient stock for "${item.name}".`);
+          }
+        }
+      }
+
+      // Create order items (using server-resolved prices)
+      await tx.insert(orderItems).values(
+        resolvedLines.map(line => {
+          const item = storefront.items.find(mi => mi.id === line.menuItemId)!;
+          const unitPrice = item.offerPricePaise ?? item.pricePaise;
+          return {
+            id: id(),
+            orderId,
+            menuItemId: item.id,
+            itemNameSnapshot: item.name,
+            unitPricePaise: unitPrice,
+            quantity: line.quantity,
+            dietaryType: item.dietaryType,
+            selectedModifiers: line.modifiers.map(m => ({
+              groupId: "",
+              groupName: "",
+              optionId: m.optionId,
+              optionName: m.name,
+              pricePaise: m.pricePaise,
+            })),
+            specialInstructions: args.lines.find(l => l.menuItemId === line.menuItemId)?.specialInstructions ?? null,
+          };
+        })
+      );
+
+      await tx.insert(orderStatusHistory).values({
+        id: id(),
+        orderId,
+        status: "PENDING_PAYMENT",
+        note: "Order created; awaiting payment.",
+      });
+
+      await tx.insert(payments).values({
+        id: id(),
+        orderId,
+        amountPaise: finalQuote.totalPaise,
+      });
+
+      // Record coupon usage (counts were locked above; unique(orderId) guards double-apply).
+      if (args.couponCode && finalQuote.couponDiscountPaise > 0 && appliedCoupon) {
+        await tx.insert(couponUsage).values({
+          id: id(),
+          couponId: appliedCoupon.id,
+          orderId,
+          customerId,
+          discountPaise: finalQuote.couponDiscountPaise,
+        });
+      }
+    });
+  } catch (err) {
+    // Unique idempotency key race: another request won — return the winner.
+    const msg = err instanceof Error ? err.message : String(err);
+    if (idempotencyKey && (msg.includes("23505") || msg.toLowerCase().includes("duplicate") || msg.toLowerCase().includes("unique"))) {
+      const winner = (await db.select().from(orders).where(eq(orders.idempotencyKey, idempotencyKey)).limit(1))[0];
+      if (winner) {
+        return {
+          id: winner.id,
+          orderNumber: winner.orderNumber,
+          trackingToken: winner.trackingToken,
+          restaurantId: winner.restaurantId,
+          itemTotalPaise: winner.itemTotalPaise,
+          discountPaise: winner.discountPaise,
+          couponDiscountPaise: winner.couponDiscountPaise,
+          packagingFeePaise: winner.packagingFeePaise,
+          deliveryFeePaise: winner.deliveryFeePaise,
+          taxPaise: winner.taxPaise,
+          totalPaise: winner.totalPaise,
+          estimatedMinutes: winner.estimatedMinutes ?? selectedOutlet.preparationMinutes + 15,
+        };
+      }
     }
-  });
+    throw err;
+  }
 
   return {
     id: orderId,
@@ -912,8 +1071,8 @@ async function fireAndForgetNotification(
 
   const baseUrl = process.env.PUBLIC_URL || "";
   const trackUrl = restaurant
-    ? `${baseUrl}/${restaurant.slug}/track/${order.id}`
-    : `${baseUrl}/track/${order.id}`;
+    ? `${baseUrl}/${restaurant.slug}/track/${order.orderNumber}?token=${order.trackingToken}`
+    : `${baseUrl}/track/${order.orderNumber}?token=${order.trackingToken}`;
 
   const message = buildNotificationMessage(type, {
     orderNumber: order.orderNumber,
@@ -1255,24 +1414,34 @@ export async function getAdminDashboard(restaurantId: string) {
   const outlet = (await db.select().from(outlets).where(eq(outlets.restaurantId, restaurantId)).limit(1))[0];
   const categories = await db.select().from(menuCategories).where(eq(menuCategories.restaurantId, restaurantId));
   const items = await db.select().from(menuItems).where(eq(menuItems.restaurantId, restaurantId));
-  const allOrders = await db.select().from(orders).where(eq(orders.restaurantId, restaurantId)).orderBy(desc(orders.createdAt));
   const offers = await db.select().from(coupons).where(eq(coupons.restaurantId, restaurantId));
+  // Recent orders capped at SQL level (LIMIT 100) — never load the full table.
+  const recentOrders = await db.select().from(orders)
+    .where(eq(orders.restaurantId, restaurantId))
+    .orderBy(desc(orders.createdAt))
+    .limit(100);
 
-  const activeStatuses = [
-    "PLACED", "RESTAURANT_ACCEPTED", "PREPARING", "READY_FOR_PICKUP",
-    "DELIVERY_REQUESTED", "RIDER_ASSIGNED", "PICKED_UP", "OUT_FOR_DELIVERY",
-  ];
-
-  const openOrders = allOrders.filter(o => activeStatuses.includes(o.status));
+  // Push aggregates to SQL.
   const todayStart = new Date();
   todayStart.setHours(0, 0, 0, 0);
-  const todayOrders = allOrders.filter(o => o.createdAt >= todayStart);
-  const todaySales = todayOrders
-    .filter(o => o.paymentStatus === "PAID")
-    .reduce((total, o) => total + o.totalPaise, 0);
-  const allSalesPaise = allOrders
-    .filter(o => o.paymentStatus === "PAID")
-    .reduce((total, o) => total + o.totalPaise, 0);
+  const agg = (await db.execute(sql`
+    SELECT
+      COUNT(*)::int AS total_orders,
+      COUNT(*) FILTER (WHERE status IN ('PLACED','RESTAURANT_ACCEPTED','PREPARING','READY_FOR_PICKUP','DELIVERY_REQUESTED','RIDER_ASSIGNED','PICKED_UP','OUT_FOR_DELIVERY'))::int AS open_orders,
+      COUNT(*) FILTER (WHERE created_at >= ${todayStart})::int AS today_orders,
+      COALESCE(SUM(total_paise) FILTER (WHERE payment_status = 'PAID'), 0)::bigint AS total_sales_paise,
+      COALESCE(SUM(total_paise) FILTER (WHERE payment_status = 'PAID' AND created_at >= ${todayStart}), 0)::bigint AS today_sales_paise,
+      COUNT(*) FILTER (WHERE payment_status = 'PAID')::int AS paid_count,
+      COUNT(*) FILTER (WHERE status = 'PLACED')::int AS pending_orders,
+      COUNT(*) FILTER (WHERE status = 'PREPARING')::int AS preparing_orders,
+      COUNT(*) FILTER (WHERE status = 'DELIVERED')::int AS delivered_orders,
+      COUNT(*) FILTER (WHERE status = 'CANCELLED')::int AS cancelled_orders
+    FROM orders WHERE restaurant_id = ${restaurantId}
+  `) as unknown as { rows: Array<Record<string, string | number>> }).rows?.[0];
+  const num = (v: unknown) => Number(v ?? 0);
+  const totalOrders = num(agg?.total_orders);
+  const paidCount = num(agg?.paid_count);
+  const totalSalesPaise = num(agg?.total_sales_paise);
 
   return {
     restaurant,
@@ -1280,22 +1449,21 @@ export async function getAdminDashboard(restaurantId: string) {
     categories,
     items,
     offers,
-    orders: allOrders.slice(0, 100),
+    orders: recentOrders,
     metrics: {
-      todayOrders: todayOrders.length,
-      openOrders: openOrders.length,
-      totalOrders: allOrders.length,
-      todaySalesPaise: todaySales,
-      totalSalesPaise: allSalesPaise,
+      todayOrders: num(agg?.today_orders),
+      openOrders: num(agg?.open_orders),
+      totalOrders,
+      todaySalesPaise: num(agg?.today_sales_paise),
+      totalSalesPaise,
       availableItems: items.filter(i => i.availability === "AVAILABLE").length,
       totalItems: items.length,
-      pendingOrders: allOrders.filter(o => o.status === "PLACED").length,
-      preparingOrders: allOrders.filter(o => o.status === "PREPARING").length,
-      deliveredOrders: allOrders.filter(o => o.status === "DELIVERED").length,
-      cancelledOrders: allOrders.filter(o => o.status === "CANCELLED").length,
-      averageOrderValue: allOrders.length > 0
-        ? Math.round(allSalesPaise / allOrders.filter(o => o.paymentStatus === "PAID").length)
-        : 0,
+      pendingOrders: num(agg?.pending_orders),
+      preparingOrders: num(agg?.preparing_orders),
+      deliveredOrders: num(agg?.delivered_orders),
+      cancelledOrders: num(agg?.cancelled_orders),
+      // Guard on paid count (not total) to avoid NaN AOV.
+      averageOrderValue: paidCount > 0 ? Math.round(totalSalesPaise / paidCount) : 0,
     },
   };
 }
@@ -1387,35 +1555,39 @@ export async function getCustomerById(customerId: string, restaurantId?: string)
 export async function getSalesReport(restaurantId: string, startDate: Date, endDate: Date) {
   const db = await requireDb();
 
-  const ordersInRange = await db.select().from(orders)
-    .where(and(
-      eq(orders.restaurantId, restaurantId),
-      between(orders.createdAt, startDate, endDate),
-    ));
-
-  const paidOrders = ordersInRange.filter(o => o.paymentStatus === "PAID");
-  const grossSales = paidOrders.reduce((sum, o) => sum + o.itemTotalPaise, 0);
-  const netSales = paidOrders.reduce((sum, o) => sum + o.totalPaise, 0);
-  const totalDiscounts = paidOrders.reduce((sum, o) => sum + o.couponDiscountPaise, 0);
-  const totalTaxes = paidOrders.reduce((sum, o) => sum + o.taxPaise, 0);
-  const totalDeliveryCharges = paidOrders.reduce((sum, o) => sum + o.deliveryFeePaise, 0);
-  const totalPackagingCharges = paidOrders.reduce((sum, o) => sum + o.packagingFeePaise, 0);
-  const cancelledOrders = ordersInRange.filter(o => o.status === "CANCELLED");
-  const cancelledValue = cancelledOrders.reduce((sum, o) => sum + o.totalPaise, 0);
+  // Push aggregates to SQL (no unbounded row fetch).
+  const row = (await db.execute(sql`
+    SELECT
+      COUNT(*)::int AS total_orders,
+      COUNT(*) FILTER (WHERE payment_status = 'PAID')::int AS paid_count,
+      COALESCE(SUM(item_total_paise) FILTER (WHERE payment_status = 'PAID'), 0)::bigint AS gross_sales,
+      COALESCE(SUM(total_paise) FILTER (WHERE payment_status = 'PAID'), 0)::bigint AS net_sales,
+      COALESCE(SUM(coupon_discount_paise) FILTER (WHERE payment_status = 'PAID'), 0)::bigint AS total_discounts,
+      COALESCE(SUM(tax_paise) FILTER (WHERE payment_status = 'PAID'), 0)::bigint AS total_taxes,
+      COALESCE(SUM(delivery_fee_paise) FILTER (WHERE payment_status = 'PAID'), 0)::bigint AS total_delivery,
+      COALESCE(SUM(packaging_fee_paise) FILTER (WHERE payment_status = 'PAID'), 0)::bigint AS total_packaging,
+      COUNT(*) FILTER (WHERE status = 'CANCELLED')::int AS cancelled_orders,
+      COALESCE(SUM(total_paise) FILTER (WHERE status = 'CANCELLED'), 0)::bigint AS cancelled_value
+    FROM orders
+    WHERE restaurant_id = ${restaurantId} AND created_at BETWEEN ${startDate} AND ${endDate}
+  `) as unknown as { rows: Array<Record<string, string | number>> }).rows?.[0];
+  const num = (v: unknown) => Number(v ?? 0);
+  const paidCount = num(row?.paid_count);
+  const netSales = num(row?.net_sales);
 
   return {
     period: { startDate, endDate },
-    orderCount: paidOrders.length,
-    totalOrders: ordersInRange.length,
-    grossSales,
+    orderCount: paidCount,
+    totalOrders: num(row?.total_orders),
+    grossSales: num(row?.gross_sales),
     netSales,
-    averageOrderValue: paidOrders.length > 0 ? Math.round(netSales / paidOrders.length) : 0,
-    totalDiscounts,
-    totalTaxes,
-    totalDeliveryCharges,
-    totalPackagingCharges,
-    cancelledOrders: cancelledOrders.length,
-    cancelledValue,
+    averageOrderValue: paidCount > 0 ? Math.round(netSales / paidCount) : 0,
+    totalDiscounts: num(row?.total_discounts),
+    totalTaxes: num(row?.total_taxes),
+    totalDeliveryCharges: num(row?.total_delivery),
+    totalPackagingCharges: num(row?.total_packaging),
+    cancelledOrders: num(row?.cancelled_orders),
+    cancelledValue: num(row?.cancelled_value),
   };
 }
 
@@ -1451,10 +1623,10 @@ export async function getSetting(key: string) {
   return result[0]?.value ?? null;
 }
 
-export async function setSetting(key: string, value: string, category = "general", updatedBy?: number) {
+export async function setSetting(key: string, value: string, category = "general", updatedBy?: number, restaurantId?: string | null) {
   const db = await requireDb();
-  await db.insert(settings).values({ id: id(), key, value, category, updatedBy })
-    .onConflictDoUpdate({ target: settings.key, set: { value, updatedBy } });
+  await db.insert(settings).values({ id: id(), key, value, category, updatedBy, restaurantId: restaurantId ?? null })
+    .onConflictDoUpdate({ target: [settings.key, settings.restaurantId], set: { value, updatedBy } });
 }
 
 // =============================================================================

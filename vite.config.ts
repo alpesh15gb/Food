@@ -18,6 +18,12 @@ const TRIM_TARGET_BYTES = Math.floor(MAX_LOG_SIZE_BYTES * 0.6); // Trim to 60% t
 
 type LogSource = "browserConsole" | "networkRequests" | "sessionReplay";
 
+interface ManusDebugPayload {
+  consoleLogs?: unknown[];
+  networkRequests?: unknown[];
+  sessionEvents?: unknown[];
+}
+
 function ensureLogDir() {
   if (!fs.existsSync(LOG_DIR)) {
     fs.mkdirSync(LOG_DIR, { recursive: true });
@@ -104,15 +110,15 @@ function vitePluginManusDebugCollector(): Plugin {
           return next();
         }
 
-        const handlePayload = (payload: any) => {
+        const handlePayload = (payload: ManusDebugPayload) => {
           // Write logs directly to files
-          if (payload.consoleLogs?.length > 0) {
+          if (payload.consoleLogs && payload.consoleLogs.length > 0) {
             writeToLogFile("browserConsole", payload.consoleLogs);
           }
-          if (payload.networkRequests?.length > 0) {
+          if (payload.networkRequests && payload.networkRequests.length > 0) {
             writeToLogFile("networkRequests", payload.networkRequests);
           }
-          if (payload.sessionEvents?.length > 0) {
+          if (payload.sessionEvents && payload.sessionEvents.length > 0) {
             writeToLogFile("sessionReplay", payload.sessionEvents);
           }
 
@@ -123,7 +129,7 @@ function vitePluginManusDebugCollector(): Plugin {
         const reqBody = (req as { body?: unknown }).body;
         if (reqBody && typeof reqBody === "object") {
           try {
-            handlePayload(reqBody);
+            handlePayload(reqBody as ManusDebugPayload);
           } catch (e) {
             res.writeHead(400, { "Content-Type": "application/json" });
             res.end(JSON.stringify({ success: false, error: String(e) }));
@@ -150,7 +156,17 @@ function vitePluginManusDebugCollector(): Plugin {
   };
 }
 
-const plugins = [react(), tailwindcss(), jsxLocPlugin(), vitePluginManusRuntime(), vitePluginManusDebugCollector()];
+// P0: the browser debug collector must never ship to production —
+// transformIndexHtml already no-ops there, but skip registration entirely
+// so no debug route or script tag can leak into prod builds.
+const isProductionBuild = process.env.NODE_ENV === "production";
+const plugins = [
+  react(),
+  tailwindcss(),
+  jsxLocPlugin(),
+  vitePluginManusRuntime(),
+  ...(isProductionBuild ? [] : [vitePluginManusDebugCollector()]),
+];
 
 export default defineConfig({
   plugins,

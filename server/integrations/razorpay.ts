@@ -119,7 +119,7 @@ export async function createRazorpayPaymentOrder(input: {
   amountPaise: number;
   restaurantId?: string;
 }) {
-  const { keyId, keySecret } = await credentials();
+  const { keyId, keySecret } = await credentials(input.restaurantId);
   const auth = Buffer.from(`${keyId}:${keySecret}`).toString("base64");
 
   let transferAmountPaise: number | null = null;
@@ -229,9 +229,16 @@ export async function confirmPayment(input: {
    * that has already verified the HMAC signature. */
   preVerified?: boolean;
 }): Promise<{ success: boolean; alreadyConfirmed?: boolean; error?: string }> {
-  // Verify signature — skip only when pre-verified by webhook HMAC check
+  const db = await getDb();
+  if (!db) return { success: false, error: "Database not available." };
+
+  // Fetch current order state first so per-tenant credentials can be used.
+  const order = (await db.select().from(orders).where(eq(orders.id, input.localOrderId)).limit(1))[0];
+  if (!order) return { success: false, error: "Order not found." };
+
+  // Verify signature with tenant credentials — skip only when pre-verified by webhook HMAC check
   if (!input.preVerified) {
-    const { keySecret } = await credentials();
+    const { keySecret } = await credentials(order.restaurantId);
     if (
       !isValidRazorpaySignature({
         providerOrderId: input.providerOrderId,
@@ -244,12 +251,17 @@ export async function confirmPayment(input: {
     }
   }
 
-  const db = await getDb();
-  if (!db) return { success: false, error: "Database not available." };
-
-  // Fetch current order state
-  const order = (await db.select().from(orders).where(eq(orders.id, input.localOrderId)).limit(1))[0];
-  if (!order) return { success: false, error: "Order not found." };
+  // Amount + providerOrderId binding: stored provider order must match callback.
+  const storedPayment = (await db.select().from(payments).where(eq(payments.orderId, input.localOrderId)).limit(1))[0];
+  if (!storedPayment) return { success: false, error: "Payment record not found." };
+  if (storedPayment.providerOrderId && storedPayment.providerOrderId !== input.providerOrderId) {
+    console.warn(`[Razorpay] providerOrderId mismatch for order ${input.localOrderId}: expected ${storedPayment.providerOrderId}, got ${input.providerOrderId}`);
+    return { success: false, error: "Payment order mismatch." };
+  }
+  if (storedPayment.amountPaise !== order.totalPaise) {
+    console.warn(`[Razorpay] amount mismatch for order ${input.localOrderId}: payment ${storedPayment.amountPaise} vs order ${order.totalPaise}`);
+    return { success: false, error: "Payment amount mismatch." };
+  }
 
   // --- Idempotency: Already confirmed by same payment ---
   if (order.paymentStatus === "PAID" && order.status !== "PENDING_PAYMENT") {
@@ -270,23 +282,53 @@ export async function confirmPayment(input: {
     return { success: false, error: "Order has been cancelled or rejected." };
   }
 
+  // P0: machine-gated confirmation PENDING_PAYMENT → PAYMENT_CONFIRMED → PLACED.
+  const { validateTransition } = await import("../domain/orderStateMachine");
+  try {
+    if (order.status === "PENDING_PAYMENT") {
+      validateTransition(order.status, "PAYMENT_CONFIRMED");
+      validateTransition("PAYMENT_CONFIRMED", "PLACED");
+    } else if (order.status === "PAYMENT_CONFIRMED") {
+      validateTransition(order.status, "PLACED");
+    } else {
+      validateTransition(order.status, "PLACED");
+    }
+  } catch {
+    return { success: false, error: `Cannot confirm payment from order status "${order.status}".` };
+  }
+
   // --- Issue 18: Atomic transaction for payment confirmation ---
-  // All 3 writes (payment update, order update, status history) succeed or fail together.
+  // SELECT FOR UPDATE locks the order row; rowCount check detects concurrent confirms.
   await db.transaction(async (tx) => {
-    // Update payment record
-    await tx
+    const locked = await tx.execute(sql`SELECT id, status, payment_status FROM orders WHERE id = ${input.localOrderId} FOR UPDATE`);
+    const lockedRows = (locked as unknown as { rows?: unknown[] }).rows ?? [];
+    // Drizzle pg returns rows; empty means the order vanished concurrently.
+    if (Array.isArray(lockedRows) && lockedRows.length === 0) {
+      throw new Error("Order was modified concurrently.");
+    }
+    // Update payment record with rowCount check
+    const paid = await tx
       .update(payments)
       .set({
+        providerOrderId: input.providerOrderId,
         providerPaymentId: input.providerPaymentId,
         status: "CAPTURED",
       })
-      .where(eq(payments.orderId, input.localOrderId));
+      .where(eq(payments.orderId, input.localOrderId))
+      .returning({ id: payments.id });
+    if (paid.length === 0) {
+      throw new Error("Payment record was modified concurrently.");
+    }
 
-    // Update order
-    await tx
+    // Update order via the state machine (PAYMENT_CONFIRMED carries PAID).
+    const bumped = await tx
       .update(orders)
       .set({ paymentStatus: "PAID", status: "PLACED" })
-      .where(eq(orders.id, input.localOrderId));
+      .where(eq(orders.id, input.localOrderId))
+      .returning({ id: orders.id });
+    if (bumped.length === 0) {
+      throw new Error("Order was modified concurrently.");
+    }
 
     // Record status history (check for duplicate)
     const existingHistory = (await tx.select().from(orderStatusHistory).where(
@@ -330,6 +372,9 @@ export async function handleRazorpayWebhook(
     return { processed: false, error: "Missing webhook signature." };
   }
   {
+    // NOTE: HMAC must be computed over the raw request body bytes, not JSON.stringify(payload).
+    // The tRPC webhook path receives parsed JSON, so signature verification here is
+    // best-effort. Prefer an Express raw-body webhook route that verifies before parsing.
     const rawBody = JSON.stringify(payload);
     const expectedSig = createHmac("sha256", webhookSecret).update(rawBody).digest("hex");
     if (expectedSig.length !== signature.length || !timingSafeEqual(Buffer.from(expectedSig), Buffer.from(signature))) {
@@ -338,10 +383,12 @@ export async function handleRazorpayWebhook(
     }
   }
 
-  // Idempotency: check if event was already processed
+  // Idempotency: prefer Razorpay webhook event id (payload.id) as externalId.
   const innerPayload = payload as Record<string, any>;
-  const eventId = innerPayload?.payment?.entity?.id
+  const eventId = innerPayload?.id
+    ?? innerPayload?.payment?.entity?.id
     ?? innerPayload?.order?.entity?.id
+    ?? innerPayload?.refund?.entity?.id
     ?? null;
 
   // --- Issue 16: Reject events with null external_id ---
@@ -412,11 +459,11 @@ export async function handleRazorpayWebhook(
         console.log(`[Razorpay] Unhandled webhook event: ${event}`);
     }
 
-    // Mark as processed
+    // Mark as processed with (provider, externalId) — composite unique.
     await db
       .update(webhookEvents)
       .set({ processed: true })
-      .where(eq(webhookEvents.externalId, eventId));
+      .where(and(eq(webhookEvents.provider, "razorpay"), eq(webhookEvents.externalId, eventId)));
 
     return { processed: true };
   } catch (error) {
@@ -424,7 +471,7 @@ export async function handleRazorpayWebhook(
     await db
       .update(webhookEvents)
       .set({ processingError: errorMsg })
-      .where(eq(webhookEvents.externalId, eventId));
+      .where(and(eq(webhookEvents.provider, "razorpay"), eq(webhookEvents.externalId, eventId)));
     return { processed: false, error: errorMsg };
   }
 }
@@ -520,28 +567,70 @@ async function handleRefundProcessed(refundEntity: Record<string, unknown>) {
 
     // M-14: Only mark fully REFUNDED if cumulative refunds >= payment amount
     const payment = (await tx.select().from(payments).where(eq(payments.id, existingRefund.paymentId)).limit(1))[0];
+    const order = (await tx.select().from(orders).where(eq(orders.id, existingRefund.orderId)).limit(1))[0];
     const allRefunds = await tx.select({ total: sql<number>`COALESCE(SUM(${refunds.amountPaise}), 0)` })
       .from(refunds)
       .where(eq(refunds.paymentId, existingRefund.paymentId));
-    const totalRefunded = (allRefunds[0]?.total ?? 0);
-    const isFullyRefunded = payment && totalRefunded >= payment.amountPaise;
+    const totalRefunded = Number(allRefunds[0]?.total ?? 0);
+    const isFullyRefunded = Boolean(payment && totalRefunded >= payment.amountPaise);
 
     await tx
       .update(payments)
       .set({ status: isFullyRefunded ? "REFUNDED" : "CAPTURED" })
       .where(eq(payments.id, existingRefund.paymentId));
 
-    await tx
-      .update(orders)
-      .set({ paymentStatus: isFullyRefunded ? "REFUNDED" : "PAID", status: isFullyRefunded ? "REFUNDED" : undefined })
-      .where(eq(orders.id, existingRefund.orderId));
-
-    await tx.insert(orderStatusHistory).values({
-      id: nanoid(18),
-      orderId: existingRefund.orderId,
-      status: "REFUNDED",
-      note: `Refund of ₹${existingRefund.amountPaise / 100} processed.`,
-    });
+    // P0: partial refunds must not touch orders.status; full refunds go through the machine.
+    if (isFullyRefunded && order) {
+      const { validateTransition } = await import("../domain/orderStateMachine");
+      try {
+        // Gate full-refund order transition (e.g. DELIVERED → REFUND_PENDING → REFUNDED).
+        if (order.status !== "REFUND_PENDING" && order.status !== "REFUNDED") {
+          validateTransition(order.status, "REFUND_PENDING");
+          await tx.update(orders)
+            .set({ paymentStatus: "REFUND_PENDING", status: "REFUND_PENDING" })
+            .where(eq(orders.id, existingRefund.orderId));
+          await tx.insert(orderStatusHistory).values({
+            id: nanoid(18),
+            orderId: existingRefund.orderId,
+            status: "REFUND_PENDING",
+            note: `Full refund of ₹${existingRefund.amountPaise / 100} pending.`,
+          });
+        }
+        const mid = (await tx.select().from(orders).where(eq(orders.id, existingRefund.orderId)).limit(1))[0];
+        if (mid && mid.status !== "REFUNDED") {
+          validateTransition(mid.status, "REFUNDED");
+          await tx.update(orders)
+            .set({ paymentStatus: "REFUNDED", status: "REFUNDED" })
+            .where(eq(orders.id, existingRefund.orderId));
+          await tx.insert(orderStatusHistory).values({
+            id: nanoid(18),
+            orderId: existingRefund.orderId,
+            status: "REFUNDED",
+            note: `Refund of ₹${existingRefund.amountPaise / 100} processed.`,
+          });
+        } else if (mid) {
+          await tx.update(orders)
+            .set({ paymentStatus: "REFUNDED" })
+            .where(eq(orders.id, existingRefund.orderId));
+        }
+      } catch {
+        // Machine rejected (e.g. order in PREPARING): still mark payment REFUNDED, keep order status.
+        await tx.update(orders)
+          .set({ paymentStatus: "REFUNDED" })
+          .where(eq(orders.id, existingRefund.orderId));
+      }
+    } else if (!isFullyRefunded && order) {
+      // Partial: keep orders.status untouched; ensure paymentStatus stays PAID.
+      await tx.update(orders)
+        .set({ paymentStatus: "PAID" })
+        .where(eq(orders.id, existingRefund.orderId));
+      await tx.insert(orderStatusHistory).values({
+        id: nanoid(18),
+        orderId: existingRefund.orderId,
+        status: order.status,
+        note: `Partial refund of ₹${existingRefund.amountPaise / 100} processed (total refunded ₹${(totalRefunded / 100).toFixed(2)}).`,
+      });
+    }
   });
 }
 
@@ -554,8 +643,8 @@ export async function initiateRefund(input: {
   amountPaise: number;
   reason?: string;
   initiatedBy: number;
+  restaurantId?: string;
 }) {
-  const { keyId, keySecret } = await credentials();
   const db = await getDb();
   if (!db) throw new Error("Database not available.");
 
@@ -563,6 +652,16 @@ export async function initiateRefund(input: {
   if (!payment || !payment.providerPaymentId) {
     throw new Error("Payment not found or not yet captured.");
   }
+  // Tenant check: payment must belong to the target order.
+  if (payment.orderId !== input.orderId) {
+    throw new Error("Payment does not belong to this order.");
+  }
+  const order = (await db.select().from(orders).where(eq(orders.id, input.orderId)).limit(1))[0];
+  if (!order) throw new Error("Order not found.");
+  if (input.restaurantId && order.restaurantId !== input.restaurantId) {
+    throw new Error("Order does not belong to this restaurant.");
+  }
+  const { keyId, keySecret } = await credentials(order.restaurantId);
   if (payment.status !== "CAPTURED") {
     throw new Error(`Cannot refund a payment with status "${payment.status}". Only captured payments can be refunded.`);
   }
@@ -570,9 +669,10 @@ export async function initiateRefund(input: {
     throw new Error("Refund amount must be greater than zero.");
   }
 
-  const alreadyRefunded = (await db.select({ total: sql<number>`COALESCE(SUM(${refunds.amountPaise}), 0)` })
+  const alreadyRefundedRaw = (await db.select({ total: sql<number>`COALESCE(SUM(${refunds.amountPaise}), 0)` })
     .from(refunds)
     .where(and(eq(refunds.paymentId, input.paymentId), sql`${refunds.status} != 'FAILED'`)))[0]?.total ?? 0;
+  const alreadyRefunded = Number(alreadyRefundedRaw);
 
   if (input.amountPaise + alreadyRefunded > payment.amountPaise) {
     const remaining = payment.amountPaise - alreadyRefunded;
@@ -599,6 +699,7 @@ export async function initiateRefund(input: {
 
   const refundData = (await response.json()) as RazorpayRefund;
 
+  const isFullRefund = input.amountPaise + alreadyRefunded >= payment.amountPaise;
   await db.transaction(async (tx) => {
     await tx.insert(refunds).values({
       id: nanoid(18),
@@ -612,8 +713,28 @@ export async function initiateRefund(input: {
       providerPayload: refundData,
     });
 
-    await tx.update(orders).set({ paymentStatus: "REFUND_PENDING", status: "REFUND_PENDING" })
-      .where(eq(orders.id, input.orderId));
+    // P0: partial refunds must not flip orders.status; only paymentStatus.
+    // Full refunds are machine-gated (validateTransition) before touching orders.status.
+    if (isFullRefund) {
+      const { validateTransition } = await import("../domain/orderStateMachine");
+      const current = (await tx.select().from(orders).where(eq(orders.id, input.orderId)).limit(1))[0];
+      if (current) {
+        try {
+          validateTransition(current.status, "REFUND_PENDING");
+          await tx.update(orders).set({ paymentStatus: "REFUND_PENDING", status: "REFUND_PENDING" })
+            .where(eq(orders.id, input.orderId));
+        } catch {
+          await tx.update(orders).set({ paymentStatus: "REFUND_PENDING" })
+            .where(eq(orders.id, input.orderId));
+        }
+      } else {
+        await tx.update(orders).set({ paymentStatus: "REFUND_PENDING" })
+          .where(eq(orders.id, input.orderId));
+      }
+    } else {
+      await tx.update(orders).set({ paymentStatus: "REFUND_PENDING" })
+        .where(eq(orders.id, input.orderId));
+    }
   });
 
   return { refundId: refundData.id, status: refundData.status };

@@ -97,7 +97,11 @@ export const inventoryRouter = router({
         .where(and(
           eq(rawMaterials.id, input.materialId),
           sql`${rawMaterials.currentStock} >= ${String(input.quantity)}`,
-        ));
+        ))
+        .returning({ id: rawMaterials.id });
+      if (updated.length === 0) {
+        throw new Error("Insufficient stock or material not found (concurrent update).");
+      }
 
       await db.insert(stockMovements).values({
         id: nanoid(18),
@@ -125,20 +129,28 @@ export const inventoryRouter = router({
       const { eq, and, sql } = await import("drizzle-orm");
       const { nanoid } = await import("nanoid");
 
-      const op = input.quantity >= 0 ? "+" : "-";
       const absQty = Math.abs(input.quantity);
-      // H-11: For deductions, verify sufficient stock atomically
+      // H-11: Atomic stock adjustment — deductions guarded by WHERE stock >= qty.
       if (input.quantity < 0) {
-        const [material] = await db.select({ currentStock: rawMaterials.currentStock })
-          .from(rawMaterials).where(eq(rawMaterials.id, input.materialId)).limit(1);
-        if (!material) throw new Error("Material not found.");
-        if (parseFloat(String(material.currentStock)) < absQty) {
-          throw new Error(`Insufficient stock. Available: ${material.currentStock}, requested: ${absQty}`);
+        const updated = await db.update(rawMaterials)
+          .set({ currentStock: sql`${rawMaterials.currentStock} - ${String(absQty)}` })
+          .where(and(
+            eq(rawMaterials.id, input.materialId),
+            sql`${rawMaterials.currentStock} >= ${String(absQty)}`,
+          ))
+          .returning({ id: rawMaterials.id });
+        if (updated.length === 0) {
+          throw new Error("Insufficient stock or material not found (concurrent update).");
+        }
+      } else {
+        const updated = await db.update(rawMaterials)
+          .set({ currentStock: sql`${rawMaterials.currentStock} + ${String(absQty)}` })
+          .where(eq(rawMaterials.id, input.materialId))
+          .returning({ id: rawMaterials.id });
+        if (updated.length === 0) {
+          throw new Error("Material not found.");
         }
       }
-      await db.update(rawMaterials)
-        .set({ currentStock: sql`${rawMaterials.currentStock} ${sql.raw(op)} ${String(absQty)}` })
-        .where(eq(rawMaterials.id, input.materialId));
 
       await db.insert(stockMovements).values({
         id: nanoid(18),
@@ -297,7 +309,7 @@ export const inventoryRouter = router({
       const db = await import("../db").then(m => m.getDb());
       if (!db) throw new Error("Database unavailable");
       const { purchaseOrders, purchaseOrderItems, rawMaterials, stockMovements } = await import("../../drizzle/schema");
-      const { eq, sql } = await import("drizzle-orm");
+      const { eq, and, sql } = await import("drizzle-orm");
       const { nanoid } = await import("nanoid");
 
       // H-16: Verify PO belongs to this restaurant
@@ -306,29 +318,42 @@ export const inventoryRouter = router({
       if (po.restaurantId !== input.restaurantId) {
         throw new Error("Purchase order does not belong to this restaurant.");
       }
-
-      await db.update(purchaseOrders)
-        .set({ status: "RECEIVED", receivedAt: new Date() })
-        .where(eq(purchaseOrders.id, input.poId));
+      // Status guard: only DRAFT/SENT can transition to RECEIVED.
+      if (po.status === "RECEIVED") {
+        throw new Error("Purchase order has already been received.");
+      }
+      if (po.status === "CANCELLED") {
+        throw new Error("Cancelled purchase orders cannot be received.");
+      }
 
       const items = await db.select().from(purchaseOrderItems)
         .where(eq(purchaseOrderItems.purchaseOrderId, input.poId));
 
-      for (const item of items) {
-        await db.update(rawMaterials)
-          .set({ currentStock: sql`${rawMaterials.currentStock} + ${item.quantity}` })
-          .where(eq(rawMaterials.id, item.rawMaterialId));
+      // Atomic receive: PO status flip + stock increments + movements in one tx.
+      await db.transaction(async (tx) => {
+        const bumped = await tx.update(purchaseOrders)
+          .set({ status: "RECEIVED", receivedAt: new Date() })
+          .where(and(eq(purchaseOrders.id, input.poId), eq(purchaseOrders.status, po.status)))
+          .returning({ id: purchaseOrders.id });
+        if (bumped.length === 0) {
+          throw new Error("Purchase order was modified concurrently. Please retry.");
+        }
+        for (const item of items) {
+          await tx.update(rawMaterials)
+            .set({ currentStock: sql`${rawMaterials.currentStock} + ${item.quantity}` })
+            .where(eq(rawMaterials.id, item.rawMaterialId));
 
-        await db.insert(stockMovements).values({
-          id: nanoid(18),
-          restaurantId: input.restaurantId,
-          rawMaterialId: item.rawMaterialId,
-          type: "IN",
-          quantity: item.quantity,
-          referenceType: "PURCHASE",
-          referenceId: input.poId,
-        });
-      }
+          await tx.insert(stockMovements).values({
+            id: nanoid(18),
+            restaurantId: input.restaurantId,
+            rawMaterialId: item.rawMaterialId,
+            type: "IN",
+            quantity: item.quantity,
+            referenceType: "PURCHASE",
+            referenceId: input.poId,
+          });
+        }
+      });
 
       return { success: true, itemsReceived: items.length };
     }),

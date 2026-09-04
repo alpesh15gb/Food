@@ -1,6 +1,8 @@
 import { trpc } from "@/lib/trpc";
 import { Bell, Check, Loader2, MessageSquare, Phone } from "lucide-react";
 import { useState } from "react";
+import { toast } from "sonner";
+import { AdminError } from "@/components/DashboardLayout";
 
 const NOTIFICATION_TYPES = [
   { key: "notifications_order_confirmed", label: "Order Confirmed", description: "Sent when restaurant accepts the order" },
@@ -11,8 +13,15 @@ const NOTIFICATION_TYPES = [
 ];
 
 export default function NotificationsPanel({ restaurantId }: { restaurantId: string }) {
-  const { data: settings, isLoading, refetch } = trpc.admin.getNotificationSettings.useQuery({ restaurantId });
-  const updateMutation = trpc.admin.updateNotificationSetting.useMutation({ onSuccess: () => refetch() });
+  const settingsQuery = trpc.admin.getNotificationSettings.useQuery({ restaurantId }, { retry: false });
+  const { data: settings, isLoading, refetch } = settingsQuery;
+  const updateMutation = trpc.admin.updateNotificationSetting.useMutation({
+    onSuccess: () => {
+      toast.success("Notification setting saved");
+      refetch();
+    },
+    onError: (err) => toast.error(err.message || "Could not save notification setting."),
+  });
   const [toggling, setToggling] = useState<string | null>(null);
 
   const isEnabled = (key: string) => {
@@ -22,13 +31,18 @@ export default function NotificationsPanel({ restaurantId }: { restaurantId: str
 
   const handleToggle = async (key: string) => {
     setToggling(key);
-    const current = isEnabled(key);
-    await updateMutation.mutateAsync({
-      restaurantId,
-      key,
-      value: current ? "false" : "true",
-    });
-    setToggling(null);
+    try {
+      const current = isEnabled(key);
+      await updateMutation.mutateAsync({
+        restaurantId,
+        key,
+        value: current ? "false" : "true",
+      });
+    } catch {
+      // Error toast is handled by the mutation's onError.
+    } finally {
+      setToggling(null);
+    }
   };
 
   if (isLoading) {
@@ -39,8 +53,17 @@ export default function NotificationsPanel({ restaurantId }: { restaurantId: str
     );
   }
 
+  if (settingsQuery.isError) {
+    return (
+      <AdminError
+        message="We couldn't load notification settings. Please retry."
+        onRetry={() => refetch()}
+      />
+    );
+  }
+
   return (
-    <div className="space-y-8 p-6">
+    <div className="space-y-8">
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Notifications</h1>
         <p className="mt-1 text-sm text-muted-foreground">
@@ -84,6 +107,9 @@ export default function NotificationsPanel({ restaurantId }: { restaurantId: str
                 <button
                   onClick={() => handleToggle(type.key)}
                   disabled={isToggling}
+                  role="switch"
+                  aria-checked={enabled}
+                  aria-label={`${type.label} notifications`}
                   className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${enabled ? "bg-green-600" : "bg-muted"} ${isToggling ? "opacity-50" : ""}`}
                 >
                   <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${enabled ? "translate-x-6" : "translate-x-1"}`} />

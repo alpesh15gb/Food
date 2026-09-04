@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { AdminError } from "@/components/DashboardLayout";
 import { trpc } from "@/lib/trpc";
 
 type Tab = "materials" | "recipes" | "suppliers" | "purchase-orders";
@@ -72,6 +73,25 @@ function MaterialsTab({ restaurantId }: { restaurantId: string }) {
   const alerts = lowStock.data ?? [];
   const list = materials.data ?? [];
 
+  if (materials.isLoading) {
+    return (
+      <div className="space-y-3" aria-label="Loading materials">
+        {[1, 2, 3].map(i => (
+          <div key={i} className="h-14 animate-pulse rounded-xl bg-[#eadfd4]" />
+        ))}
+      </div>
+    );
+  }
+
+  if (materials.isError) {
+    return (
+      <AdminError
+        message="We couldn't load materials. Please retry."
+        onRetry={() => materials.refetch()}
+      />
+    );
+  }
+
   return (
     <div className="space-y-4">
       {alerts.length > 0 && (
@@ -132,8 +152,8 @@ function MaterialsTab({ restaurantId }: { restaurantId: string }) {
         </div>
       )}
 
-      <div className="bg-white rounded-xl border border-[#e8ddd0] overflow-hidden">
-        <table className="w-full text-sm">
+      <div className="bg-white rounded-xl border border-[#e8ddd0] overflow-x-auto">
+        <table className="w-full min-w-[640px] text-sm">
           <thead className="bg-[#f7f2eb] text-left">
             <tr>
               <th className="px-4 py-2.5 font-semibold text-[#6b5c52]">Material</th>
@@ -202,6 +222,25 @@ function SuppliersTab({ restaurantId }: { restaurantId: string }) {
   const [form, setForm] = useState({ name: "", phone: "", email: "" });
   const list = suppliers.data ?? [];
 
+  if (suppliers.isLoading) {
+    return (
+      <div className="space-y-3" aria-label="Loading suppliers">
+        {[1, 2].map(i => (
+          <div key={i} className="h-14 animate-pulse rounded-xl bg-[#eadfd4]" />
+        ))}
+      </div>
+    );
+  }
+
+  if (suppliers.isError) {
+    return (
+      <AdminError
+        message="We couldn't load suppliers. Please retry."
+        onRetry={() => suppliers.refetch()}
+      />
+    );
+  }
+
   return (
     <div className="space-y-4">
       {!showForm ? (
@@ -224,8 +263,8 @@ function SuppliersTab({ restaurantId }: { restaurantId: string }) {
         </div>
       )}
 
-      <div className="bg-white rounded-xl border border-[#e8ddd0] overflow-hidden">
-        <table className="w-full text-sm">
+      <div className="bg-white rounded-xl border border-[#e8ddd0] overflow-x-auto">
+        <table className="w-full min-w-[640px] text-sm">
           <thead className="bg-[#f7f2eb] text-left">
             <tr>
               <th className="px-4 py-2.5 font-semibold text-[#6b5c52]">Name</th>
@@ -255,13 +294,32 @@ function SuppliersTab({ restaurantId }: { restaurantId: string }) {
 // =============================================================================
 
 function PurchaseOrdersTab({ restaurantId }: { restaurantId: string }) {
-  const pos = trpc.inventory.listPurchaseOrders.useQuery({ restaurantId });
+  const pos = trpc.inventory.listPurchaseOrders.useQuery({ restaurantId }, { retry: false });
   const list = pos.data ?? [];
+
+  if (pos.isLoading) {
+    return (
+      <div className="space-y-3" aria-label="Loading purchase orders">
+        {[1, 2, 3].map(i => (
+          <div key={i} className="h-14 animate-pulse rounded-xl bg-[#eadfd4]" />
+        ))}
+      </div>
+    );
+  }
+
+  if (pos.isError) {
+    return (
+      <AdminError
+        message="We couldn't load purchase orders. Please retry."
+        onRetry={() => pos.refetch()}
+      />
+    );
+  }
 
   return (
     <div className="space-y-4">
-      <div className="bg-white rounded-xl border border-[#e8ddd0] overflow-hidden">
-        <table className="w-full text-sm">
+      <div className="bg-white rounded-xl border border-[#e8ddd0] overflow-x-auto">
+        <table className="w-full min-w-[640px] text-sm">
           <thead className="bg-[#f7f2eb] text-left">
             <tr>
               <th className="px-4 py-2.5 font-semibold text-[#6b5c52]">PO #</th>

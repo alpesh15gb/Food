@@ -1,9 +1,10 @@
 import { useState } from "react";
-import { LoaderCircle, Mail, Plus, Shield, UserMinus, Users } from "lucide-react";
+import { LoaderCircle, Plus, Shield, UserMinus, Users } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { AdminError } from "@/components/DashboardLayout";
 import { trpc } from "@/lib/trpc";
 
 const ROLES = [
@@ -63,12 +64,12 @@ export default function StaffPanel({ restaurantId }: { restaurantId: string }) {
         <div className="bg-white rounded-xl border border-[#e8ddd0] p-4 space-y-3">
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1">
-              <Label>Email</Label>
-              <Input type="email" value={inviteForm.email} onChange={e => setInviteForm({ ...inviteForm, email: e.target.value })} placeholder="staff@restaurant.com" />
+              <Label htmlFor="invite-email">Email</Label>
+              <Input id="invite-email" type="email" value={inviteForm.email} onChange={e => setInviteForm({ ...inviteForm, email: e.target.value })} placeholder="staff@restaurant.com" />
             </div>
             <div className="space-y-1">
-              <Label>Role</Label>
-              <select className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm" value={inviteForm.role} onChange={e => setInviteForm({ ...inviteForm, role: e.target.value as RoleValue })}>
+              <Label htmlFor="invite-role">Role</Label>
+              <select id="invite-role" className="flex h-9 min-h-11 w-full rounded-md border border-input bg-background px-3 py-1 text-sm" value={inviteForm.role} onChange={e => setInviteForm({ ...inviteForm, role: e.target.value as RoleValue })}>
                 {ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
               </select>
             </div>
@@ -82,8 +83,20 @@ export default function StaffPanel({ restaurantId }: { restaurantId: string }) {
         </div>
       )}
 
-      <div className="bg-white rounded-xl border border-[#e8ddd0] overflow-hidden">
-        <table className="w-full text-sm">
+      {members.isLoading ? (
+        <div className="space-y-3" aria-label="Loading team members">
+          {[1, 2, 3].map(i => (
+            <div key={i} className="h-14 animate-pulse rounded-xl bg-[#eadfd4]" />
+          ))}
+        </div>
+      ) : members.isError ? (
+        <AdminError
+          message="We couldn't load team members. Please retry."
+          onRetry={() => members.refetch()}
+        />
+      ) : (
+      <div className="bg-white rounded-xl border border-[#e8ddd0] overflow-x-auto">
+        <table className="w-full min-w-[640px] text-sm">
           <thead className="bg-[#f7f2eb] text-left">
             <tr>
               <th className="px-4 py-2.5 font-semibold text-[#6b5c52]">Name</th>
@@ -106,8 +119,10 @@ export default function StaffPanel({ restaurantId }: { restaurantId: string }) {
                 <td className="px-4 py-2.5">{m.userEmail ?? "—"}</td>
                 <td className="px-4 py-2.5">
                   <select
-                    className="text-xs font-bold px-2 py-1 rounded border border-[#e8ddd0] bg-transparent"
+                    aria-label={`Role for ${m.userEmail ?? m.userName ?? "member"}`}
+                    className="min-h-11 text-xs font-bold px-2 py-1 rounded border border-[#e8ddd0] bg-transparent"
                     value={m.role}
+                    disabled={updateRole.isPending}
                     onChange={e => updateRole.mutate({ memberId: m.id, role: e.target.value as RoleValue })}
                   >
                     {ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
@@ -121,7 +136,7 @@ export default function StaffPanel({ restaurantId }: { restaurantId: string }) {
                 <td className="px-4 py-2.5 text-[#6b5c52]">{new Date(m.joinedAt).toLocaleDateString()}</td>
                 <td className="px-4 py-2.5 text-right">
                   {m.isActive && (
-                    <Button size="sm" variant="ghost" className="text-red-500 hover:text-red-700 hover:bg-red-50 h-7 px-2" onClick={() => deactivate.mutate({ memberId: m.id })}>
+                    <Button size="sm" variant="ghost" aria-label={`Deactivate ${m.userEmail ?? m.userName ?? "member"}`} className="text-red-500 hover:text-red-700 hover:bg-red-50 h-7 px-2" disabled={deactivate.isPending} onClick={() => deactivate.mutate({ memberId: m.id })}>
                       <UserMinus className="w-3 h-3" />
                     </Button>
                   )}
@@ -131,6 +146,7 @@ export default function StaffPanel({ restaurantId }: { restaurantId: string }) {
           </tbody>
         </table>
       </div>
+      )}
 
       {/* Role Reference */}
       <div className="bg-white rounded-xl border border-[#e8ddd0] p-4">

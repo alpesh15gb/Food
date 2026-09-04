@@ -16,17 +16,46 @@ const ipLimits = new Map<string, RateLimitEntry>();
 const loginEmailLimits = new Map<string, RateLimitEntry>();
 const loginIpLimits = new Map<string, RateLimitEntry>();
 const registerIpLimits = new Map<string, RateLimitEntry>();
+const localAdminLimits = new Map<string, RateLimitEntry>();
+const otpPurposeSendLimits = new Map<string, RateLimitEntry>();
+const otpPurposeVerifyLimits = new Map<string, RateLimitEntry>();
+
+const ALL_STORES = [
+  phoneSendLimits,
+  phoneVerifyLimits,
+  ipLimits,
+  loginEmailLimits,
+  loginIpLimits,
+  registerIpLimits,
+  localAdminLimits,
+  otpPurposeSendLimits,
+  otpPurposeVerifyLimits,
+];
+
+/** Hard cap per store: bounds memory even under key-flooding. Oldest entries evicted first. */
+const MAX_STORE_ENTRIES = 5000;
+
+function evictIfNeeded(store: Map<string, RateLimitEntry>): void {
+  while (store.size > MAX_STORE_ENTRIES) {
+    const oldest = store.keys().next();
+    if (oldest.done) break;
+    store.delete(oldest.value);
+  }
+}
 
 // Cleanup old entries every 5 minutes
-setInterval(() => {
+const sweepTimer = setInterval(() => {
   const now = Date.now();
   const maxAge = 60 * 60 * 1000; // 1 hour
-  for (const store of [phoneSendLimits, phoneVerifyLimits, ipLimits, loginEmailLimits, loginIpLimits, registerIpLimits]) {
+  for (const store of ALL_STORES) {
     for (const [key, entry] of Array.from(store.entries())) {
       if (now - entry.windowStart > maxAge) store.delete(key);
     }
+    evictIfNeeded(store);
   }
 }, 5 * 60 * 1000);
+// Don't keep the VPS process alive just for the sweeper.
+(sweepTimer as unknown as { unref?: () => void }).unref?.();
 
 /**
  * Check and record a rate-limited request.
@@ -43,6 +72,7 @@ export function checkRateLimit(
 
   if (!entry || now - entry.windowStart > windowMs) {
     // New window
+    evictIfNeeded(store);
     store.set(key, { count: 1, windowStart: now });
     return { allowed: true };
   }
@@ -84,4 +114,19 @@ export function checkLoginIpLimit(ip: string) {
 /** Check per-IP registration rate limit: 3 registrations per hour */
 export function checkRegisterIpLimit(ip: string) {
   return checkRateLimit(`register-ip:${ip}`, 3, 60 * 60 * 1000, registerIpLimits);
+}
+
+/** Check local-admin passphrase attempts: 5 per 15 minutes per IP */
+export function checkLocalAdminIpLimit(ip: string) {
+  return checkRateLimit(`local-admin:${ip}`, 5, 15 * 60 * 1000, localAdminLimits);
+}
+
+/** Purpose-aware OTP send limit: 3 per 10 minutes per phone+purpose */
+export function checkOtpSendLimit(phone: string, purpose = "login") {
+  return checkRateLimit(`send:${purpose}:${phone}`, 3, 10 * 60 * 1000, otpPurposeSendLimits);
+}
+
+/** Purpose-aware OTP verify limit: 10 per 10 minutes per phone+purpose */
+export function checkOtpVerifyLimit(phone: string, purpose = "login") {
+  return checkRateLimit(`verify:${purpose}:${phone}`, 10, 10 * 60 * 1000, otpPurposeVerifyLimits);
 }

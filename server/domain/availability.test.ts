@@ -21,6 +21,10 @@ function makeRestaurant(overrides: Partial<RestaurantRow> = {}): RestaurantRow {
     bannerImageUrl: null,
     primaryColor: "#000000",
     secondaryColor: "#ffffff",
+    accentColor: null,
+    fontFamily: null,
+    bodyFontFamily: null,
+    faviconUrl: null,
     contactPhone: null,
     contactEmail: null,
     address: null,
@@ -39,10 +43,12 @@ function makeRestaurant(overrides: Partial<RestaurantRow> = {}): RestaurantRow {
     tempClosureStart: null,
     tempClosureEnd: null,
     tempClosureMessage: null,
+    razorpayAccountId: null,
+    razorpayAccountStatus: null,
     createdAt: new Date(),
     updatedAt: new Date(),
     ...overrides,
-  };
+  } as RestaurantRow;
 }
 
 function makeItem(overrides: Partial<MenuItemRow> = {}): MenuItemRow {
