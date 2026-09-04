@@ -154,7 +154,17 @@ function Quantity({
 
 export default function OrderingApp({ slug, trackingNumber }: { slug?: string; trackingNumber?: string }) {
   const [location, navigate] = useLocation();
-  const storefrontSlug = slug || "";
+  const pathSlug = slug || "";
+  const hasPathSlug = pathSlug.length >= 2;
+  // Restaurant custom-domain roots (9housekitchen.in/) carry no path slug:
+  // resolve it from the Host header so the storefront loads directly.
+  const hostSlugQuery = trpc.storefront.defaultSlug.useQuery(undefined, {
+    enabled: !hasPathSlug,
+    retry: false,
+    staleTime: 5 * 60 * 1000,
+  });
+  const hostSlug = !hasPathSlug ? (hostSlugQuery.data?.slug ?? "") : "";
+  const storefrontSlug = hasPathSlug ? pathSlug : hostSlug;
   const hasSlug = storefrontSlug.length >= 2;
   const storefrontQuery = trpc.storefront.get.useQuery(
     { slug: storefrontSlug },
@@ -676,7 +686,10 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
 
   // Tracking / confirmation authenticate via ?order=&token= and don't need
   // the storefront to render; every other screen needs a live restaurant.
+  // While a custom-domain root is resolving its slug, hold the skeleton so
+  // the platform gate below doesn't flash first.
   if (!restaurant && screen !== "tracking" && screen !== "confirmation") {
+    if (!hasPathSlug && hostSlugQuery.isLoading) return <MenuSkeleton />;
     return hasSlug ? (
       <StorefrontUnavailable onRetry={() => storefrontQuery.refetch()} />
     ) : (

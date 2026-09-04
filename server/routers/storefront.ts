@@ -65,6 +65,35 @@ export const storefrontRouter = router({
     .input(z.object({ slug: z.string().min(2) }))
     .query(({ input }) => getStorefront(input.slug)),
 
+  /**
+   * Resolve the restaurant slug for the request's Host header via verified
+   * custom domains (primary first). Lets restaurant roots (9housekitchen.in/)
+   * load their storefront with no slug in the path. Null on platform /
+   * unknown hosts — callers fall back to slug routing or the platform page.
+   */
+  defaultSlug: publicProcedure.query(async ({ ctx }) => {
+    const raw = (ctx.req.headers.host ?? "").split(":")[0]?.toLowerCase() ?? "";
+    const host = raw.replace(/^www\./, "");
+    if (!host) return { slug: null } as const;
+    try {
+      const db = await import("../db").then(m => m.getDb());
+      if (!db) return { slug: null } as const;
+      const { customDomains, restaurants } = await import("../../drizzle/schema");
+      const { and, eq } = await import("drizzle-orm");
+      const rows = await db.select({
+        slug: restaurants.slug,
+        isPrimary: customDomains.isPrimary,
+      }).from(customDomains)
+        .innerJoin(restaurants, eq(customDomains.restaurantId, restaurants.id))
+        .where(and(eq(customDomains.domain, host), eq(customDomains.isVerified, true)));
+      if (rows.length === 0) return { slug: null } as const;
+      const best = rows.find(r => r.isPrimary) ?? rows[0];
+      return { slug: best?.slug ?? null };
+    } catch {
+      return { slug: null } as const;
+    }
+  }),
+
   paymentConfig: publicProcedure.query(() => getRazorpayConfig()),
 
   // =========================================================================

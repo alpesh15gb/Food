@@ -13,6 +13,76 @@ type RegistryRow = {
   isOpen?: boolean | null;
 };
 
+type DomainRow = {
+  domain: string;
+  isVerified?: boolean | null;
+  isPrimary?: boolean | null;
+};
+
+function RestaurantCard({ r }: { r: RegistryRow }) {
+  const [, setLocation] = useLocation();
+  // Primary verified custom domain first (e.g. 9housekitchen.in); the
+  // storefront opens at that domain root, which resolves via host mapping.
+  const domains = trpc.admin.listDomains.useQuery({ restaurantId: r.id }, { retry: false });
+  const rows = (domains.data ?? []) as DomainRow[];
+  const primary =
+    rows.find((d) => d.isPrimary && d.isVerified) ?? rows.find((d) => d.isVerified);
+  const storefrontHref = primary ? `https://${primary.domain}/` : `/${r.slug}`;
+  const external = Boolean(primary);
+
+  return (
+    <li className="flex flex-col gap-4 rounded-2xl border border-[#f0e2d3] bg-[#fffdf9] p-6">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h2 className="font-display text-2xl leading-snug">{r.name}</h2>
+          <p className="mt-1 text-xs font-bold uppercase tracking-widest text-[#856653]">
+            /{r.slug}
+            {primary ? ` · ${primary.domain}` : ""}
+            {r.isOpen ? " · Open" : r.isOpen === false ? " · Closed" : ""}
+          </p>
+        </div>
+        <span
+          aria-hidden="true"
+          className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-[#faede0] text-[#c84630]"
+        >
+          <Store className="h-5 w-5" />
+        </span>
+      </div>
+      <div className="flex flex-col gap-2">
+        <Button
+          onClick={() => setLocation(adminPath(r.slug, "overview"))}
+          className="min-h-[44px] w-full bg-[#c84630] font-extrabold hover:bg-[#ad3627]"
+        >
+          <Wrench className="mr-2 h-4 w-4" aria-hidden="true" />
+          Open workspace
+        </Button>
+        <div className="flex gap-2">
+          <Button
+            asChild
+            variant="outline"
+            className="min-h-[44px] flex-1 border-[#e7d2bf] bg-white font-bold"
+          >
+            <a href={storefrontHref} {...(external ? { target: "_blank", rel: "noreferrer" } : {})}>
+              <Globe className="mr-2 h-4 w-4" aria-hidden="true" />
+              Storefront
+            </a>
+          </Button>
+          <Button
+            asChild
+            variant="outline"
+            className="min-h-[44px] flex-1 border-[#e7d2bf] bg-white font-bold"
+          >
+            <a href={adminPath(r.slug, "domains")}>
+              <ExternalLink className="mr-2 h-4 w-4" aria-hidden="true" />
+              Domains
+            </a>
+          </Button>
+        </div>
+      </div>
+    </li>
+  );
+}
+
 export default function PlatformAdmin() {
   const [, setLocation] = useLocation();
   const restaurants = trpc.admin.restaurants.useQuery(undefined, { retry: false });
@@ -73,57 +143,7 @@ export default function PlatformAdmin() {
         ) : (
           <ul className="grid list-none gap-4 p-0 sm:grid-cols-2">
             {list.map((r) => (
-              <li
-                key={r.id}
-                className="flex flex-col gap-4 rounded-2xl border border-[#f0e2d3] bg-[#fffdf9] p-6"
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <h2 className="font-display text-2xl leading-snug">{r.name}</h2>
-                    <p className="mt-1 text-xs font-bold uppercase tracking-widest text-[#856653]">
-                      /{r.slug}
-                      {r.isOpen ? " · Open" : r.isOpen === false ? " · Closed" : ""}
-                    </p>
-                  </div>
-                  <span
-                    aria-hidden="true"
-                    className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-[#faede0] text-[#c84630]"
-                  >
-                    <Store className="h-5 w-5" />
-                  </span>
-                </div>
-                <div className="flex flex-col gap-2">
-                  <Button
-                    onClick={() => setLocation(adminPath(r.slug, "overview"))}
-                    className="min-h-[44px] w-full bg-[#c84630] font-extrabold hover:bg-[#ad3627]"
-                  >
-                    <Wrench className="mr-2 h-4 w-4" aria-hidden="true" />
-                    Open workspace
-                  </Button>
-                  <div className="flex gap-2">
-                    <Button
-                      asChild
-                      variant="outline"
-                      className="min-h-[44px] flex-1 border-[#e7d2bf] bg-white font-bold"
-                    >
-                      <a href={`/${r.slug}`}>
-                        <Globe className="mr-2 h-4 w-4" aria-hidden="true" />
-                        Storefront
-                      </a>
-                    </Button>
-                    <Button
-                      asChild
-                      variant="outline"
-                      className="min-h-[44px] flex-1 border-[#e7d2bf] bg-white font-bold"
-                    >
-                      <a href={adminPath(r.slug, "domains")}>
-                        <ExternalLink className="mr-2 h-4 w-4" aria-hidden="true" />
-                        Domains
-                      </a>
-                    </Button>
-                  </div>
-                </div>
-              </li>
+              <RestaurantCard key={r.id} r={r} />
             ))}
           </ul>
         )}

@@ -139,9 +139,16 @@ export function requirePermission(permission: string) {
       throw new TRPCError({ code: "FORBIDDEN", message: "Restaurant scope is required for this operation." });
     }
 
-    // H-01: Verify user is actually a member of this restaurant
+    // H-01: Verify user is actually a member of this restaurant.
+    // Platform operators (global role "admin" with no tenant membership —
+    // e.g. the VPS local administrator) retain access: they operate the
+    // platform itself, not one kitchen. Tenant isolation below applies to
+    // member accounts (owner bypass + granular role permissions).
     const membership = await getActiveMembership(user.id, restaurantId);
     if (!membership) {
+      if (user.role === "admin") {
+        return opts.next({ ctx: { ...opts.ctx, user, restaurantId } });
+      }
       throw new TRPCError({ code: "FORBIDDEN", message: "You are not a member of this restaurant." });
     }
 
