@@ -58,7 +58,8 @@ echo ""
 echo "🔑 Step 4/8 — Generating secure configuration..."
 
 generate_hex() {
-  openssl rand -hex "$1" 2>/dev/null || head -c "$1" /dev/urandom | xxd -p | tr -d '\n' | head -c "$1"
+  # $1 = bytes; outputs 2*$1 hex chars on BOTH paths (openssl -hex N == 2N chars).
+  openssl rand -hex "$1" 2>/dev/null || head -c "$1" /dev/urandom | od -An -tx1 | tr -d ' \n' | head -c "$(($1 * 2))"
 }
 
 if [ ! -f "$ENV_FILE" ]; then

@@ -48,7 +48,7 @@ if [ ! -f "$ENV_FILE" ]; then
   echo "🔑 Generating secure configuration..."
   cp deploy/config.env.example "$ENV_FILE"
 
-  generate_hex() { openssl rand -hex "$1" 2>/dev/null || head -c "$1" /dev/urandom | xxd -p | tr -d '\n' | head -c "$1"; }
+  generate_hex() { openssl rand -hex "$1" 2>/dev/null || head -c "$1" /dev/urandom | od -An -tx1 | tr -d ' \n' | head -c "$(($1 * 2))"; }
 
   POSTGRES_PASSWORD=$(generate_hex 20)
   JWT_SECRET=$(generate_hex 32)
