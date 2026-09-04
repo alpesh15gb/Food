@@ -5,7 +5,7 @@
  */
 /// <reference types="@types/google.maps" />
 
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useRef, useEffect, Suspense, lazy } from "react";
 import {
   Dialog,
   DialogContent,
@@ -16,7 +16,9 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { MapPin, Navigation, Search, AlertTriangle, Loader2, Check, Crosshair } from "lucide-react";
-import { MapView } from "@/components/Map";
+// Lazy: the Google Maps bundle only downloads when the pin step renders,
+// keeping the initial storefront JS small on 2G / low-end phones.
+const MapView = lazy(() => import("@/components/Map").then((m) => ({ default: m.MapView })));
 import {
   searchPlaces,
   getPlaceDetails,
@@ -548,12 +550,23 @@ export default function DeliveryLocationDrawer({
 
               {/* Interactive Map with fixed-center pin */}
               <div className="relative overflow-hidden rounded-xl border border-[#dfcbb9]">
-                <MapView
-                  className="h-[300px]"
-                  initialCenter={geoState ? { lat: geoState.latitude, lng: geoState.longitude } : biasedCenter}
-                  initialZoom={16}
-                  onMapReady={handleMapReady}
-                />
+                <Suspense
+                  fallback={
+                    <div className="grid h-[300px] place-items-center bg-[#f6ecdf] text-sm font-bold text-[#856653]">
+                      <span className="inline-flex items-center gap-2">
+                        <Loader2 className="h-5 w-5 animate-spin text-[#C84630]" aria-hidden="true" />
+                        Loading the map…
+                      </span>
+                    </div>
+                  }
+                >
+                  <MapView
+                    className="h-[300px]"
+                    initialCenter={geoState ? { lat: geoState.latitude, lng: geoState.longitude } : biasedCenter}
+                    initialZoom={16}
+                    onMapReady={handleMapReady}
+                  />
+                </Suspense>
                 {/* Fixed center pin overlay */}
                 <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
                   <div className="relative">

@@ -116,6 +116,18 @@
   .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
   /* Fixed bottom bars clear the iOS home indicator / gesture area. */
   .safe-bottom { bottom: calc(1rem + env(safe-area-inset-bottom, 0px)); }
+  /* Alias for hide-scrollbar (Swiggy-style rails use scrollbar-hide). */
+  .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+  .scrollbar-hide::-webkit-scrollbar { display: none; }
+  /* Long menu lists: the browser may skip off-screen rendering work.
+     Layout is preserved via the intrinsic-size placeholder. */
+  .menu-cv { content-visibility: auto; contain-intrinsic-size: auto 220px; }
+  @supports not (content-visibility: auto) { .menu-cv { content-visibility: visible; } }
+  /* Category sections settle below the sticky header + search rail. */
+  .section-anchor { scroll-margin-top: 216px; }
+  @media (min-width: 1024px) { .section-anchor { scroll-margin-top: 92px; } }
+  /* Two-line clamp fallback for dish descriptions (Tailwind also ships line-clamp-2). */
+  .clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 }
 
 button, a, input { transition: transform 160ms cubic-bezier(0.23, 1, 0.32, 1), background-color 160ms cubic-bezier(0.23, 1, 0.32, 1), border-color 160ms cubic-bezier(0.23, 1, 0.32, 1), box-shadow 160ms cubic-bezier(0.23, 1, 0.32, 1); }

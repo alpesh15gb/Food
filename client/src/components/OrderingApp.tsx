@@ -3,16 +3,18 @@
  * Mobile-first, inspired by leading Indian food delivery UX patterns.
  * Original premium design, not a copy of any existing brand.
  */
-import { useEffect, useMemo, useState } from "react";
+import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { toast } from "sonner";
 import {
-  ArrowLeft, ArrowRight, Bike, Check, ChevronRight, Clock3,
-  MapPin, Minus, PackageCheck,
+  ArrowLeft, ArrowRight, Bike, Check, ChevronRight, Clock3, Copy,
+  Flame, MapPin, Minus, PackageCheck,
   Plus, Search, ShoppingBag, Sparkles, Store,
   TicketPercent, UserRound, Utensils, X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import SmartImage from "@/components/SmartImage";
+import { useNetworkQuality } from "@/lib/network";
 import DeliveryLocationDrawer, { type DeliveryLocation } from "@/components/DeliveryLocationDrawer";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Drawer, DrawerContent, DrawerDescription, DrawerFooter, DrawerHeader, DrawerTitle } from "@/components/ui/drawer";
@@ -20,7 +22,8 @@ import { Input } from "@/components/ui/input";
 import { formatINR, type FoodKind } from "@/lib/types";
 import { trpc } from "@/lib/trpc";
 import { usePlatformHost } from "@/lib/platform";
-import PlatformLanding from "@/pages/PlatformLanding";
+
+const PlatformLanding = lazy(() => import("@/pages/PlatformLanding"));
 import {
   adaptStorefront,
   type StorefrontAddonGroup,
@@ -173,9 +176,13 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
   const paymentConfig = trpc.storefront.paymentConfig.useQuery();
   const initiatePayment = trpc.storefront.initiatePayment.useMutation();
   const verifyPayment = trpc.storefront.verifyPayment.useMutation();
-  const storefront = storefrontQuery.data
-    ? adaptStorefront(storefrontQuery.data)
-    : null;
+  // Memoized: adaptStorefront builds fresh menu objects, and memoizing keeps
+  // the memoized menu rows + category index stable across unrelated renders.
+  const storefrontPayload = storefrontQuery.data;
+  const storefront = useMemo(
+    () => (storefrontPayload ? adaptStorefront(storefrontPayload) : null),
+    [storefrontPayload],
+  );
   const restaurant = storefront?.restaurant;
   const categories = storefront?.categories ?? [];
   const liveMenu = storefront?.menu ?? [];
@@ -238,6 +245,21 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
 
   const [cart, setCart] = useState<CartLine[]>([]);
   const [query, setQuery] = useState("");
+  // Debounced search: the input stays instant, filtering follows ~200ms later.
+  const [debouncedQuery, setDebouncedQuery] = useState("");
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedQuery(query.trim()), 200);
+    return () => clearTimeout(timer);
+  }, [query]);
+  const clearSearch = useCallback(() => {
+    setQuery("");
+    setDebouncedQuery("");
+  }, []);
+  // Low-data mode: skip decorative imagery, show one dismissible notice.
+  const { lowData } = useNetworkQuality();
+  const [lowDataDismissed, setLowDataDismissed] = useState(false);
+  // Active category pill auto-scrolls into view on the mobile rail.
+  const activeChipRef = useRef<HTMLButtonElement | null>(null);
   const [filter, setFilter] = useState<Filter>("all");
   const [activeCategory, setActiveCategory] = useState("Menu");
   const [selected, setSelected] = useState<StorefrontMenuItem | null>(null);
@@ -321,11 +343,11 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
   const grandTotal = Math.max(0, itemTotal + packaging + delivery + taxes);
   const totalQuantity = cart.reduce((sum, line) => sum + line.quantity, 0);
 
-  // Search and filtering
+  // Search and filtering (filtering follows the debounced query)
   const results = useMemo(
     () =>
       liveMenu.filter((item) => {
-        const needle = query.toLowerCase().trim();
+        const needle = debouncedQuery.toLowerCase();
         const matchesSearch =
           !needle ||
           [item.name, item.description, item.category, item.tag, ...(item.tags ?? [])]
@@ -338,8 +360,29 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
           (filter === "bestseller" && item.isBestseller);
         return matchesSearch && matchesFilter;
       }),
-    [liveMenu, query, filter]
+    [liveMenu, debouncedQuery, filter]
   );
+
+  // Quantity of simple (non-customized) lines per menu item — drives the
+  // Swiggy-style steppers on menu rows. Customized lines stay unique.
+  const cartQtyByItem = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const line of cart) {
+      if (line.id.endsWith("-default")) {
+        map.set(line.item.id, (map.get(line.item.id) ?? 0) + line.quantity);
+      }
+    }
+    return map;
+  }, [cart]);
+
+  // Dish counts per category for the desktop index.
+  const countByCategory = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const item of liveMenu) {
+      map.set(item.category, (map.get(item.category) ?? 0) + 1);
+    }
+    return map;
+  }, [liveMenu]);
 
   const restaurantOpen = restaurant?.isOpen !== false;
   const closureMessage =
@@ -355,7 +398,9 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
           )
     );
 
-  const simpleAdd = (item: StorefrontMenuItem) => {
+  // Stable reference: passed straight into memoized menu rows.
+  const simpleAdd = useCallback(
+    (item: StorefrontMenuItem) => {
     if (!restaurantOpen) {
       toast.error("The kitchen is closed right now.", { description: closureMessage });
       return;
@@ -382,9 +427,26 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
           ];
     });
     toast.success(`${item.name} added to your order`);
-  };
+    },
+    [restaurantOpen, closureMessage],
+  );
 
-  const openItem = (item: StorefrontMenuItem) => {
+  // Decrement a simple line from a menu-row stepper (qty → 0 removes it).
+  const decrementSimple = useCallback((item: StorefrontMenuItem) => {
+    const id = `${item.id}-default`;
+    setCart((current) => {
+      const found = current.find((line) => line.id === id);
+      if (!found) return current;
+      return found.quantity <= 1
+        ? current.filter((line) => line.id !== id)
+        : current.map((line) =>
+            line.id === id ? { ...line, quantity: line.quantity - 1 } : line
+          );
+    });
+  }, []);
+
+  const openItem = useCallback(
+    (item: StorefrontMenuItem) => {
     if (!restaurantOpen) {
       toast.error("The kitchen is closed right now.", { description: closureMessage });
       return;
@@ -398,7 +460,35 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
     } else {
       simpleAdd(item);
     }
-  };
+    },
+    [restaurantOpen, closureMessage, simpleAdd],
+  );
+
+  // Tap-to-apply from the offer strip: fills the checkout coupon field.
+  const applyCoupon = useCallback((code: string) => {
+    setCouponCode(code);
+    toast.success(`Code ${code} added — it will be applied at checkout.`);
+  }, []);
+
+  // Category rail: highlight + scroll the section into view below the
+  // sticky header/rail (scroll-margin handled by .section-anchor CSS).
+  const scrollToCategory = useCallback((categoryId: string, categoryName: string) => {
+    setActiveCategory(categoryName);
+    requestAnimationFrame(() => {
+      const el = document.getElementById(`menu-section-${categoryId}`);
+      if (!el) return;
+      const reduce =
+        typeof window !== "undefined" &&
+        window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      el.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "start" });
+    });
+  }, []);
+
+  // Keep the active pill visible on the mobile rail (no smooth scrolling —
+  // it would fight the user's own scroll position).
+  useEffect(() => {
+    activeChipRef.current?.scrollIntoView({ block: "nearest", inline: "center" });
+  }, [activeCategory]);
 
   const toggleOption = (group: StorefrontAddonGroup, optionId: string) => {
     setSelectedOptionIds((current) => {
@@ -766,17 +856,42 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
           onCart={() => navigate(`/${storefrontSlug}/cart`)}
           onAccount={() => setAuthOpen(true)}
           customerPhone={loggedInPhone ?? undefined}
+          eta={restaurant.eta}
+          offerCount={offers.length}
+          deliveryFee={restaurant.deliveryFee}
+          minOrder={restaurant.minOrder}
         />
+
+        {lowData && !lowDataDismissed && (
+          <div
+            role="status"
+            className="flex items-center justify-center gap-1 border-b border-[#ead8c6] bg-[#fff6ea] py-1 pl-4 pr-2 text-xs font-bold text-[#8a6b56]"
+          >
+            <span>Slow network — showing light mode.</span>
+            <button
+              type="button"
+              onClick={() => setLowDataDismissed(true)}
+              aria-label="Dismiss slow network notice"
+              className="grid h-11 w-11 shrink-0 place-items-center rounded-full hover:text-[#c84630]"
+            >
+              <X className="h-4 w-4" aria-hidden="true" />
+            </button>
+          </div>
+        )}
 
         {/* Hero Banner */}
         <section className="relative overflow-hidden bg-[#2d1f17] text-white">
-          {restaurant.bannerImage && (
-            <img
+          {!lowData && restaurant.bannerImage ? (
+            <SmartImage
               src={restaurant.bannerImage}
               alt={`${restaurant.name} kitchen`}
-              className="absolute inset-0 h-full w-full object-cover object-center opacity-60"
+              ratio="16/9"
+              eager
+              critical
+              className="absolute inset-0"
+              imgClassName="opacity-60"
             />
-          )}
+          ) : null}
           <div className="absolute inset-0 bg-gradient-to-r from-[#1a1210]/95 via-[#2b1e16]/80 to-[#2b1e16]/30" />
           <div className="relative mx-auto flex min-h-[280px] max-w-[1440px] items-end px-4 pb-7 pt-16 sm:px-6 lg:min-h-[320px] lg:px-10 lg:pb-10">
             <div className="rise-in max-w-xl">
@@ -863,29 +978,8 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
             </button>
           </section>
 
-          {/* Offers Banner */}
-          {offers.length > 0 && (
-            <div className="mt-4 flex gap-3 overflow-x-auto pb-2 hide-scrollbar">
-              {offers.slice(0, 3).map((offer) => (
-                <div
-                  key={offer.code}
-                  className="flex shrink-0 items-center gap-3 rounded-2xl border border-[#e8d6c5] bg-gradient-to-r from-[#fff9f0] to-[#fff3e5] px-4 py-3"
-                >
-                  <div className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[#c84630]/10 text-[#c84630]">
-                    <TicketPercent className="h-5 w-5" />
-                  </div>
-                  <div>
-                    <p className="text-sm font-extrabold text-[#c84630]">
-                      {offer.code}
-                    </p>
-                    <p className="text-xs text-[#8d6b55]">
-                      {offer.description}
-                    </p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
+          {/* Offers strip — hidden when there are no offers */}
+          <OfferStrip offers={offers} onApplyCoupon={applyCoupon} />
 
           {/* Main Content Grid */}
           <div className="mt-5 lg:grid lg:grid-cols-[170px_minmax(0,1fr)_350px] lg:gap-8">
@@ -895,22 +989,22 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
                 <p className="mb-3 text-xs font-extrabold uppercase tracking-[0.16em] text-[#9a7660]">
                   On the menu
                 </p>
-                <nav className="space-y-1">
+                <nav aria-label="Menu categories" className="space-y-1">
                   {categories.map((category) => (
                     <button
                       key={category.id}
-                      onClick={() => setActiveCategory(category.name)}
+                      onClick={() => scrollToCategory(category.id, category.name)}
                       aria-pressed={activeCategory === category.name}
-                      className={`block w-full rounded-xl px-3 py-2.5 text-left text-sm font-semibold ${
+                      className={`flex min-h-[44px] w-full items-center justify-between gap-2 rounded-xl px-3 py-2 text-left text-sm font-semibold ${
                         activeCategory === category.name
                           ? "bg-[#f5e4d4] text-[#b63d2d]"
                           : "text-[#6f5140] hover:bg-[#faefe5]"
                       }`}
                     >
-                      {category.emoji && (
-                        <span className="mr-2">{category.emoji}</span>
-                      )}
-                      {category.name}
+                      <span className="truncate">{category.name}</span>
+                      <span className="shrink-0 text-xs font-bold tabular-nums text-[#a37960]">
+                        {countByCategory.get(category.name) ?? 0}
+                      </span>
                     </button>
                   ))}
                 </nav>
@@ -919,8 +1013,8 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
 
             {/* Main Menu Content */}
             <section className="min-w-0">
-              {/* Search & Filters */}
-              <div className="sticky top-16 z-20 -mx-4 bg-[#fffaf3]/95 px-4 pb-3 pt-5 backdrop-blur sm:-mx-6 sm:px-6 lg:static lg:mx-0 lg:bg-transparent lg:px-0 lg:pt-0">
+              {/* Search + category rail (sticky on mobile, static on desktop) */}
+              <div className="sticky top-[76px] z-20 -mx-4 bg-[#fffaf3]/95 px-4 pb-2 pt-4 backdrop-blur sm:-mx-6 sm:px-6 lg:static lg:mx-0 lg:bg-transparent lg:px-0 lg:pt-0">
                 <div className="flex gap-2">
                   <div className="relative flex-1">
                     <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-[#a37d64]" />
@@ -933,34 +1027,46 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
                       value={query}
                       onChange={(event) => setQuery(event.target.value)}
                       placeholder="Search dishes, cuisines, or categories"
-                      className="h-12 rounded-2xl border-[#e8d6c5] bg-white pl-11 pr-4 text-sm shadow-sm placeholder:text-[#ac8b73]"
+                      className="h-12 rounded-2xl border-[#e8d6c5] bg-white pl-11 pr-12 text-sm shadow-sm placeholder:text-[#ac8b73]"
                     />
+                    {query && (
+                      <button
+                        type="button"
+                        onClick={clearSearch}
+                        aria-label="Clear search"
+                        className="absolute right-1 top-1/2 grid h-11 w-11 -translate-y-1/2 place-items-center rounded-full text-[#a37d64] hover:text-[#c84630]"
+                      >
+                        <X className="h-4 w-4" aria-hidden="true" />
+                      </button>
+                    )}
                   </div>
                 </div>
 
-                {/* Mobile Category Pills */}
-                <div className="hide-scrollbar mt-3 flex gap-2 overflow-x-auto pb-1 lg:hidden">
-                  {categories.map((category) => (
-                    <button
-                      key={category.id}
-                      onClick={() => setActiveCategory(category.name)}
-                      aria-pressed={activeCategory === category.name}
-                      className={`whitespace-nowrap rounded-full px-3.5 py-2 text-xs font-extrabold ${
-                        activeCategory === category.name
-                          ? "bg-[#382719] text-white"
-                          : "border border-[#ead8c7] bg-white text-[#76523e]"
-                      }`}
-                    >
-                      {category.emoji && (
-                        <span className="mr-1">{category.emoji}</span>
-                      )}
-                      {category.name}
-                    </button>
-                  ))}
+                {/* Mobile Category Rail — scroll-spy chips */}
+                <div role="group" aria-label="Menu categories" className="scrollbar-hide mt-3 flex gap-2 overflow-x-auto pb-1 lg:hidden">
+                  {categories.map((category) => {
+                    const isActive = activeCategory === category.name;
+                    return (
+                      <button
+                        key={category.id}
+                        ref={isActive ? activeChipRef : undefined}
+                        onClick={() => scrollToCategory(category.id, category.name)}
+                        aria-pressed={isActive}
+                        className={`min-h-[44px] shrink-0 whitespace-nowrap rounded-full px-3.5 py-2 text-xs font-extrabold ${
+                          isActive
+                            ? "bg-[#382719] text-white"
+                            : "border border-[#ead8c7] bg-white text-[#76523e]"
+                        }`}
+                      >
+                        {category.name}
+                      </button>
+                    );
+                  })}
                 </div>
+              </div>
 
                 {/* Filter Chips */}
-                <div className="hide-scrollbar mt-3 flex gap-2 overflow-x-auto pb-1">
+                <div className="scrollbar-hide mt-3 flex gap-2 overflow-x-auto pb-1">
                   {(
                     [
                       ["all", "All"],
@@ -973,7 +1079,7 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
                       key={value}
                       onClick={() => setFilter(value)}
                       aria-pressed={filter === value}
-                      className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-3.5 py-2 text-xs font-extrabold ${
+                      className={`inline-flex min-h-[44px] shrink-0 items-center gap-1.5 rounded-full px-3.5 py-2 text-xs font-extrabold ${
                         filter === value
                           ? "bg-[#c84630] text-white"
                           : "border border-[#ead8c7] bg-[#fffdf9] text-[#76523e]"
@@ -985,18 +1091,17 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
                     </button>
                   ))}
                 </div>
-              </div>
 
               {/* Search Results */}
-              {query && (
-                <div className="mb-4 flex items-center justify-between">
-                  <p className="text-sm font-bold text-[#5b4233]">
-                    Results for{" "}
-                    <span className="text-[#c84630]">"{query}"</span>
+              {debouncedQuery && (
+                <div className="mb-4 flex items-center justify-between gap-3">
+                  <p role="status" aria-live="polite" className="text-sm font-bold text-[#5b4233]">
+                    {results.length} result{results.length !== 1 ? "s" : ""} for{" "}
+                    <span className="text-[#c84630]">"{debouncedQuery}"</span>
                   </p>
                   <button
-                    onClick={() => setQuery("")}
-                    className="text-xs font-bold text-[#9b6a52] hover:text-[#c84630]"
+                    onClick={clearSearch}
+                    className="min-h-[44px] shrink-0 px-2 text-xs font-bold text-[#9b6a52] hover:text-[#c84630]"
                   >
                     Clear
                   </button>
@@ -1004,40 +1109,43 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
               )}
 
               {/* Collections (when no search active) */}
-              {!query &&
-                collections.length > 0 &&
-                activeCategory === categories[0]?.name && (
-                  <div className="mb-6 space-y-6">
-                    {collections.map((collection) => (
-                      <div key={collection.name}>
-                        <div className="mb-3 flex items-center gap-2">
-                          <Sparkles className="h-4 w-4 text-[#c84630]" />
-                          <h3 className="text-sm font-extrabold text-[#382719]">
-                            {collection.name}
-                          </h3>
-                        </div>
-                        <div className="flex gap-3 overflow-x-auto pb-2 hide-scrollbar">
-                          {collection.items.slice(0, 6).map((item) => (
-                            <CollectionCard
-                              key={item.id}
-                              item={item}
-                              onAdd={() => openItem(item)}
-                              disabled={!restaurantOpen}
-                            />
-                          ))}
-                        </div>
+              {!debouncedQuery && collections.length > 0 && (
+                <div className="mb-6 space-y-6">
+                  {collections.map((collection) => (
+                    <div key={collection.name}>
+                      <div className="mb-3 flex items-center gap-2">
+                        <Sparkles className="h-4 w-4 text-[#c84630]" aria-hidden="true" />
+                        <h3 className="text-sm font-extrabold text-[#382719]">
+                          {collection.name}
+                        </h3>
                       </div>
-                    ))}
-                  </div>
-                )}
+                      <div className="scrollbar-hide -mx-1 flex snap-x gap-3 overflow-x-auto px-1 pb-2">
+                        {collection.items.slice(0, 6).map((item) => (
+                          <CollectionCard
+                            key={item.id}
+                            item={item}
+                            onAdd={openItem}
+                            disabled={!restaurantOpen}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
 
               {/* Menu Stream */}
               <MenuStream
                 items={results}
+                categories={categories}
                 activeCategory={activeCategory}
-                query={query}
+                query={debouncedQuery}
                 onAdd={openItem}
                 orderingDisabled={!restaurantOpen}
+                cartQtyByItem={cartQtyByItem}
+                onIncrement={simpleAdd}
+                onDecrement={decrementSimple}
+                onSpyCategory={setActiveCategory}
               />
             </section>
 
@@ -1333,47 +1441,81 @@ function TopBar({
   onCart,
   onAccount,
   customerPhone,
+  eta,
+  offerCount,
+  deliveryFee,
+  minOrder,
 }: {
   restaurantName: string;
   itemCount: number;
   onCart: () => void;
   onAccount: () => void;
   customerPhone?: string;
+  eta?: string;
+  offerCount?: number;
+  deliveryFee?: number;
+  minOrder?: number;
 }) {
   return (
     <header className="sticky top-0 z-40 border-b border-[#eadbce] bg-[#fffaf3]/95 backdrop-blur">
-      <div className="mx-auto flex h-16 max-w-[1440px] items-center justify-between px-4 sm:px-6 lg:px-10">
+      <div className="mx-auto flex h-[76px] max-w-[1440px] items-center justify-between gap-2 px-4 sm:px-6 lg:px-10">
         <button
           onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
-          className="flex items-center gap-2.5 text-left"
+          aria-label={`${restaurantName} — back to top`}
+          title={restaurantName}
+          className="flex min-w-0 items-center gap-2.5 text-left"
         >
           <BrandMark />
-          <span>
-            <span className="font-display block text-xl leading-none text-[#382719]">
+          <span className="min-w-0">
+            <span className="font-display block truncate text-xl leading-tight text-[#382719]">
               {restaurantName}
             </span>
-            <span className="mt-1 block text-xs font-extrabold uppercase tracking-[0.18em] text-[#a77d63]">
-              Direct ordering
+            {/* Single compact meta row — fixed height so it never shifts layout */}
+            <span className="flex h-5 items-center gap-2 overflow-hidden whitespace-nowrap text-[11px] font-bold text-[#9a7660]">
+              {eta ? (
+                <span className="inline-flex items-center gap-1">
+                  <Clock3 className="h-3 w-3 shrink-0" aria-hidden="true" />
+                  {eta}
+                </span>
+              ) : null}
+              {deliveryFee != null && deliveryFee > 0 ? (
+                <span className="inline-flex items-center gap-1">
+                  <Bike className="h-3 w-3 shrink-0" aria-hidden="true" />
+                  {formatINR(deliveryFee)} delivery
+                </span>
+              ) : null}
+              {minOrder != null && minOrder > 0 ? (
+                <span className="inline-flex items-center gap-1">
+                  <ShoppingBag className="h-3 w-3 shrink-0" aria-hidden="true" />
+                  Min {formatINR(minOrder)}
+                </span>
+              ) : null}
+              {offerCount != null && offerCount > 0 ? (
+                <span className="inline-flex items-center gap-1 text-[#c84630]">
+                  <TicketPercent className="h-3 w-3 shrink-0" aria-hidden="true" />
+                  {offerCount} offer{offerCount !== 1 ? "s" : ""}
+                </span>
+              ) : null}
             </span>
           </span>
         </button>
-        <nav className="flex items-center gap-1 sm:gap-2">
+        <nav className="flex shrink-0 items-center gap-1 sm:gap-2">
           <button
             onClick={onAccount}
-            className="flex items-center gap-1.5 rounded-xl border border-[#ddc6b5] bg-white px-3 py-2 text-xs font-extrabold text-[#553d2c] hover:bg-[#f9e6d9]"
+            className="flex min-h-[44px] items-center gap-1.5 rounded-xl border border-[#ddc6b5] bg-white px-3 py-2 text-xs font-extrabold text-[#553d2c] hover:bg-[#f9e6d9]"
             aria-label="Account"
           >
             <UserRound className="h-4 w-4" />
-            <span className="hidden sm:inline">{customerPhone ?? "Login"}</span>
+            <span className="hidden max-w-28 truncate sm:inline">{customerPhone ?? "Login"}</span>
           </button>
           <button
             onClick={onCart}
-            className="relative grid h-10 w-10 place-items-center rounded-xl bg-[#382719] text-white hover:bg-[#c84630]"
-            aria-label="Open cart"
+            className="relative grid h-11 w-11 place-items-center rounded-xl bg-[#382719] text-white hover:bg-[#c84630]"
+            aria-label={itemCount > 0 ? `Open cart, ${itemCount} items` : "Open cart"}
           >
             <ShoppingBag className="h-4 w-4" />
             {itemCount > 0 && (
-              <span aria-live="polite" aria-atomic="true" className="absolute -right-1 -top-1 grid h-5 min-w-5 place-items-center rounded-full bg-[#c84630] px-1 text-xs font-extrabold">
+              <span aria-hidden="true" className="absolute -right-1 -top-1 grid h-5 min-w-5 place-items-center rounded-full bg-[#c84630] px-1 text-xs font-extrabold tabular-nums">
                 {itemCount}
               </span>
             )}
@@ -1393,38 +1535,95 @@ function MetaPill({ icon, text }: { icon: React.ReactNode; text: string }) {
   );
 }
 
-function CollectionCard({
+function OfferStrip({
+  offers,
+  onApplyCoupon,
+}: {
+  offers: Array<{ code: string; description: string }>;
+  onApplyCoupon: (code: string) => void;
+}) {
+  // Hidden when empty — no dead section on the page.
+  if (offers.length === 0) return null;
+  const copyCode = async (code: string) => {
+    try {
+      await navigator.clipboard.writeText(code);
+      toast.success(`Code ${code} copied to clipboard`);
+    } catch {
+      toast.info(`Use code ${code} at checkout`);
+    }
+  };
+  return (
+    <section aria-label="Available offers" className="mt-4">
+      <div className="scrollbar-hide -mx-1 flex snap-x snap-mandatory gap-3 overflow-x-auto px-1 pb-2">
+        {offers.slice(0, 6).map((offer) => (
+          <article
+            key={offer.code}
+            className="w-[260px] shrink-0 snap-start rounded-2xl border border-[#e8d6c5] bg-gradient-to-r from-[#fff9f0] to-[#fff3e5] p-3"
+          >
+            <div className="flex items-center gap-2.5">
+              <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[#c84630]/10 text-[#c84630]">
+                <TicketPercent className="h-5 w-5" aria-hidden="true" />
+              </span>
+              <div className="min-w-0 flex-1">
+                <button
+                  type="button"
+                  onClick={() => void copyCode(offer.code)}
+                  aria-label={`Copy offer code ${offer.code}`}
+                  title="Tap to copy"
+                  className="flex min-h-[44px] items-center gap-1.5 text-left text-sm font-extrabold tracking-wide text-[#c84630]"
+                >
+                  <span className="truncate">{offer.code}</span>
+                  <Copy className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                </button>
+                <p className="truncate text-xs text-[#8d6b55]">{offer.description}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => onApplyCoupon(offer.code)}
+                className="min-h-[44px] shrink-0 rounded-lg px-3 text-xs font-extrabold text-[#c84630] hover:bg-[#c84630]/10"
+              >
+                Apply
+              </button>
+            </div>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+type MenuRowCallbacks = {
+  onAdd: (item: StorefrontMenuItem) => void;
+  disabled?: boolean;
+};
+
+const CollectionCard = memo(function CollectionCard({
   item,
   onAdd,
   disabled,
-}: {
+}: MenuRowCallbacks & {
   item: StorefrontMenuItem;
-  onAdd: () => void;
-  disabled?: boolean;
 }) {
   return (
-    <div className="flex shrink-0 w-[200px] overflow-hidden rounded-2xl border border-[#ead8c6] bg-[#fffdf9] shadow-sm">
-      {item.image && (
-        <div className="h-24 w-24 shrink-0 overflow-hidden">
-          <img
-            src={item.image}
-            alt={item.name}
-            loading="lazy"
-            className="h-full w-full object-cover"
-          />
-        </div>
-      )}
-      <div className="flex min-w-0 flex-1 flex-col justify-between p-3">
-        <div>
+    <div className="menu-cv flex w-[220px] shrink-0 snap-start gap-3 rounded-2xl border border-[#ead8c6] bg-[#fffdf9] p-3 shadow-sm">
+      <SmartImage
+        src={item.image}
+        alt={item.name}
+        ratio="1/1"
+        fallbackLabel={item.name}
+        className="h-20 w-20 shrink-0 rounded-xl"
+      />
+      <div className="flex min-w-0 flex-1 flex-col justify-between">
+        <div className="min-w-0">
           <p className="truncate text-xs font-extrabold text-[#382719]">
             {item.name}
           </p>
-          <p className="mt-0.5 text-xs font-bold text-[#c84630]">
+          <p className="mt-0.5 text-xs font-bold tabular-nums text-[#c84630]">
             {formatINR(item.price)}
           </p>
         </div>
         <button
-          onClick={onAdd}
+          onClick={() => onAdd(item)}
           disabled={disabled}
           className="mt-1 min-h-[44px] w-full rounded-lg border border-[#c84630] bg-white px-2 py-1 text-xs font-extrabold text-[#c84630] hover:bg-[#c84630] hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
         >
@@ -1433,172 +1632,291 @@ function CollectionCard({
       </div>
     </div>
   );
-}
+});
 
-function MenuStream({
+const MenuStream = memo(function MenuStream({
   items,
+  categories,
   activeCategory,
   query,
   onAdd,
   orderingDisabled,
+  cartQtyByItem,
+  onIncrement,
+  onDecrement,
+  onSpyCategory,
 }: {
   items: StorefrontMenuItem[];
+  categories: Array<{ id: string; name: string }>;
   activeCategory: string;
   query: string;
   onAdd: (item: StorefrontMenuItem) => void;
   orderingDisabled?: boolean;
+  cartQtyByItem: Map<string, number>;
+  onIncrement: (item: StorefrontMenuItem) => void;
+  onDecrement: (item: StorefrontMenuItem) => void;
+  onSpyCategory: (name: string) => void;
 }) {
-  // Category stream only — no fallback to the full menu, no Bestsellers
-  // special-case: an empty category honestly renders empty.
-  const shown = query
-    ? items
-    : items.filter((item) => item.category === activeCategory);
+  const searching = query.trim().length > 0;
 
-  if (!shown.length)
-    return (
-      <div className="ticket-edge mt-5 bg-[#fffdf8] p-9 text-center shadow-sm">
-        <div className="mx-auto grid h-14 w-14 place-items-center rounded-full bg-[#faede0] text-[#c84630]">
-          <Utensils className="h-6 w-6" />
+  // Scroll-spy: the section most visible under the sticky rail becomes the
+  // active category. Callbacks are rAF-throttled so fast flings settle once.
+  useEffect(() => {
+    if (searching) return;
+    const sections = Array.from(
+      document.querySelectorAll<HTMLElement>("[data-menu-section]"),
+    );
+    if (sections.length === 0) return;
+    let ticking = false;
+    let pending: string | null = null;
+    const flush = () => {
+      ticking = false;
+      if (pending) onSpyCategory(pending);
+      pending = null;
+    };
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const visible = entries.filter((entry) => entry.isIntersecting);
+        if (visible.length === 0) return;
+        visible.sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
+        pending = (visible[0].target as HTMLElement).dataset.menuSection ?? null;
+        if (!ticking) {
+          ticking = true;
+          requestAnimationFrame(flush);
+        }
+      },
+      { rootMargin: "-30% 0px -60% 0px", threshold: 0 },
+    );
+    sections.forEach((section) => observer.observe(section));
+    return () => observer.disconnect();
+  }, [searching, items, categories, onSpyCategory]);
+
+  const renderRow = (item: StorefrontMenuItem) => (
+    <MenuCard
+      key={item.id}
+      item={item}
+      onAdd={onAdd}
+      disabled={orderingDisabled}
+      cartQty={cartQtyByItem.get(item.id) ?? 0}
+      onIncrement={onIncrement}
+      onDecrement={onDecrement}
+    />
+  );
+
+  // Search mode: one flat result list with a live count.
+  if (searching) {
+    if (items.length === 0)
+      return (
+        <div className="ticket-edge mt-5 bg-[#fffdf8] p-9 text-center shadow-sm">
+          <div className="mx-auto grid h-14 w-14 place-items-center rounded-full bg-[#faede0] text-[#c84630]">
+            <Utensils className="h-6 w-6" />
+          </div>
+          <h2 className="font-display mt-4 text-2xl">
+            No dishes found
+          </h2>
+          <p className="mt-2 text-sm text-[#856855]">
+            Try a different search, or browse the categories below.
+          </p>
         </div>
-        <h2 className="font-display mt-4 text-2xl">
-          {query ? "No dishes found" : `Nothing in ${activeCategory} yet`}
-        </h2>
-        <p className="mt-2 text-sm text-[#856855]">
-          {query
-            ? "Try a different search, or browse the categories below."
-            : "The kitchen team will publish dishes here shortly."}
-        </p>
+      );
+
+    return (
+      <div className="space-y-3 pb-3">
+        <div className="mb-4 flex items-end justify-between">
+          <div>
+            <p className="text-xs font-extrabold uppercase tracking-[0.16em] text-[#a37960]">
+              Fresh from the kitchen
+            </p>
+            <h2 className="font-display mt-1 text-3xl text-[#382719]">
+              What we found
+            </h2>
+          </div>
+          <span role="status" aria-live="polite" className="text-xs font-bold tabular-nums text-[#94715c]">
+            {items.length} dish{items.length !== 1 ? "es" : ""}
+          </span>
+        </div>
+        {items.map(renderRow)}
       </div>
     );
+  }
 
+  // Browse mode: every category is a section; the rail scroll-spies them.
   return (
-    <div className="space-y-3 pb-3">
-      <div className="mb-4 flex items-end justify-between">
-        <div>
-          <p className="text-xs font-extrabold uppercase tracking-[0.16em] text-[#a37960]">
-            Fresh from the kitchen
-          </p>
-          <h2 className="font-display mt-1 text-3xl text-[#382719]">
-            {query ? "What we found" : activeCategory}
-          </h2>
-        </div>
-        <span className="text-xs font-bold text-[#94715c]">
-          {shown.length} dish{shown.length !== 1 ? "es" : ""}
-        </span>
-      </div>
-      {shown.map((item) => (
-        <MenuCard key={item.id} item={item} onAdd={() => onAdd(item)} disabled={orderingDisabled} />
-      ))}
+    <div className="space-y-8 pb-3">
+      {categories.map((category) => {
+        const catItems = items.filter((item) => item.category === category.name);
+        return (
+          <section
+            key={category.id}
+            id={`menu-section-${category.id}`}
+            data-menu-section={category.name}
+            aria-label={category.name}
+            className="section-anchor"
+          >
+            <div className="mb-3 flex items-end justify-between">
+              <h2 className="font-display text-2xl text-[#382719]">
+                {category.name}
+              </h2>
+              <span className="text-xs font-bold tabular-nums text-[#94715c]">
+                {catItems.length} dish{catItems.length !== 1 ? "es" : ""}
+              </span>
+            </div>
+            {catItems.length > 0 ? (
+              <div className="space-y-3">{catItems.map(renderRow)}</div>
+            ) : (
+              <div className="rounded-2xl border border-dashed border-[#e5d0bd] bg-[#fffdf9] p-5 text-center">
+                <p className="text-sm font-extrabold text-[#5b4233]">
+                  Nothing in {category.name} yet
+                </p>
+                <p className="mt-1 text-xs text-[#856855]">
+                  The kitchen team will publish dishes here shortly.
+                </p>
+              </div>
+            )}
+          </section>
+        );
+      })}
     </div>
   );
-}
+});
 
-function MenuCard({
+const MenuCard = memo(function MenuCard({
   item,
   onAdd,
   disabled,
-}: {
+  cartQty,
+  onIncrement,
+  onDecrement,
+}: MenuRowCallbacks & {
   item: StorefrontMenuItem;
-  onAdd: () => void;
-  disabled?: boolean;
+  cartQty?: number;
+  onIncrement?: (item: StorefrontMenuItem) => void;
+  onDecrement?: (item: StorefrontMenuItem) => void;
 }) {
   const unavailable = item.availability !== "AVAILABLE" || disabled;
   const hasDiscount = item.originalPrice && item.originalPrice > item.price;
+  // Steppers only for simple items already in the cart — customized lines
+  // stay unique, so they always go through the customization sheet.
+  const showStepper = !item.customizable && !unavailable && (cartQty ?? 0) > 0;
 
   return (
     <article
-      className={`group relative overflow-hidden rounded-[1.35rem] border border-[#ead8c6] bg-[#fffdf9] p-4 shadow-[0_6px_18px_rgba(89,55,31,0.05)] transition-transform hover:-translate-y-0.5 sm:p-5 ${
+      className={`menu-cv flex gap-3 rounded-2xl border border-[#ead8c6] bg-[#fffdf9] p-3 shadow-[0_6px_18px_rgba(89,55,31,0.05)] sm:p-4 ${
         unavailable ? "opacity-70" : ""
       }`}
     >
-      <div className="flex gap-4">
-        <div className="min-w-0 flex-1">
-          <div className="flex items-start gap-2">
-            <FoodDot kind={item.kind} />
-            {item.isBestseller && (
-              <span className="rounded-full bg-[#f7e6ca] px-2 py-0.5 text-xs font-extrabold uppercase tracking-[0.08em] text-[#9c5a21]">
-                Bestseller
-              </span>
-            )}
-            {item.tag && item.tag !== "Bestseller" && (
-              <span className="rounded-full bg-[#e8f5e9] px-2 py-0.5 text-xs font-extrabold uppercase tracking-[0.08em] text-[#2e7d32]">
-                {item.tag}
-              </span>
-            )}
-            {item.spiceLevel != null && item.spiceLevel > 0 && (
-              <span className="text-xs" title={`Spice level: ${item.spiceLevel}/5`}>
-                {"🌶️".repeat(Math.min(item.spiceLevel, 5))}
-              </span>
-            )}
-          </div>
-          <h3 className="mt-2 text-[15px] font-extrabold leading-snug text-[#382719] sm:text-base">
-            {item.name}
-          </h3>
-          <p className="mt-1.5 max-w-md text-xs leading-relaxed text-[#886a57] sm:text-sm">
-            {item.description}
-          </p>
-          <div className="mt-3 flex items-baseline gap-2">
-            <p className="text-sm font-extrabold text-[#382719]">
-              {formatINR(item.price)}
-            </p>
-            {hasDiscount && (
-              <p className="text-xs text-[#999] line-through">
-                {formatINR(item.originalPrice!)}
-              </p>
-            )}
-          </div>
-          {unavailable && (
-            <p className="mt-2 inline-flex rounded-md bg-[#f3e4d6] px-2 py-1 text-xs font-bold text-[#9d523e]">
-              {disabled ? "Kitchen closed" : item.availableNote || "Unavailable"}
-            </p>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-1.5">
+          <FoodDot kind={item.kind} />
+          {item.isBestseller && (
+            <span className="rounded-full bg-[#f7e6ca] px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-[0.08em] text-[#9c5a21]">
+              Bestseller
+            </span>
+          )}
+          {item.tag && item.tag !== "Bestseller" && (
+            <span className="max-w-28 truncate rounded-full bg-[#e8f5e9] px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-[0.08em] text-[#2e7d32]">
+              {item.tag}
+            </span>
+          )}
+          {item.spiceLevel != null && item.spiceLevel > 0 && (
+            <span
+              className="inline-flex items-center gap-0.5 text-[#c84630]"
+              role="img"
+              aria-label={`Spice level ${Math.min(item.spiceLevel, 5)} of 5`}
+              title={`Spice level: ${Math.min(item.spiceLevel, 5)}/5`}
+            >
+              <Flame className="h-3.5 w-3.5" aria-hidden="true" />
+            </span>
           )}
         </div>
-        {item.image && (
-          <div className="w-[112px] shrink-0 sm:w-[140px]">
-            <div className="relative aspect-square overflow-hidden rounded-2xl bg-[#f3e5d4]">
-              <img
-                src={item.image}
-                alt={item.name}
-                loading="lazy"
-                className="h-full w-full object-cover"
-              />
-              {unavailable && (
-                <div className="absolute inset-0 grid place-items-center bg-[#3a251b]/45 px-2 text-center text-xs font-extrabold text-white">
-                  {disabled
-                    ? "Kitchen closed"
-                    : item.availability === "SOLD_OUT"
-                    ? "Sold out"
-                    : "Unavailable"}
-                </div>
-              )}
-            </div>
-            <button
-              disabled={unavailable}
-              onClick={onAdd}
-              className="-mt-3 mx-auto flex h-11 min-h-[44px] min-w-20 items-center justify-center rounded-lg border border-[#c84630] bg-[#fffdf9] px-3 text-xs font-extrabold text-[#c84630] shadow-sm hover:bg-[#c84630] hover:text-white disabled:cursor-not-allowed disabled:border-[#bfae9f] disabled:text-[#9d8d80]"
-            >
-              {item.availability !== "AVAILABLE" ? "Unavailable" : disabled ? "Closed" : item.customizable ? "CUSTOMIZE" : "ADD +"}
-            </button>
-          </div>
-        )}
-        {!item.image && (
-          <button
-            disabled={unavailable}
-            onClick={onAdd}
-            className="min-h-[44px] self-end rounded-lg border border-[#c84630] bg-[#fffdf9] px-4 py-2 text-xs font-extrabold text-[#c84630] shadow-sm hover:bg-[#c84630] hover:text-white disabled:cursor-not-allowed disabled:border-[#bfae9f] disabled:text-[#9d8d80]"
-          >
-            {item.availability !== "AVAILABLE" ? "Unavailable" : disabled ? "Closed" : item.customizable ? "CUSTOMIZE" : "ADD +"}
-          </button>
-        )}
-      </div>
-      {item.customizable && !unavailable && (
-        <p className="mt-3 border-t border-dashed border-[#ead8c6] pt-2 text-xs font-bold text-[#9d7b64]">
-          Customizable
+        <h3 className="font-display mt-1.5 text-[17px] leading-snug text-[#382719]">
+          {item.name}
+        </h3>
+        <p className="mt-0.5 flex items-baseline gap-2 text-sm font-extrabold tabular-nums text-[#382719]">
+          {formatINR(item.price)}
+          {hasDiscount && (
+            <span className="text-xs font-bold text-[#999] line-through">
+              {formatINR(item.originalPrice!)}
+            </span>
+          )}
         </p>
-      )}
+        <p className="clamp-2 mt-1 line-clamp-2 text-xs leading-relaxed text-[#886a57]">
+          {item.description}
+        </p>
+        <p className="mt-1.5 text-[11px] font-bold text-[#9d7b64]">
+          {unavailable
+            ? (disabled ? "Kitchen closed" : item.availableNote || "Unavailable right now")
+            : item.customizable
+              ? "Customisable"
+              : item.isBestseller
+                ? "Loved by regulars"
+                : "Prepared fresh"}
+        </p>
+      </div>
+      <div className="w-[120px] shrink-0 sm:w-[144px]">
+        <div className="relative">
+          <SmartImage
+            src={item.image}
+            alt={item.name}
+            ratio="1/1"
+            fallbackLabel={item.name}
+            className="rounded-xl"
+          />
+          {unavailable && (
+            <div className="absolute inset-0 grid place-items-center rounded-xl bg-[#3a251b]/45 px-2 text-center text-xs font-extrabold text-white">
+              {disabled
+                ? "Kitchen closed"
+                : item.availability === "SOLD_OUT"
+                ? "Sold out"
+                : "Unavailable"}
+            </div>
+          )}
+        </div>
+        <div className="relative z-10 -mt-5 flex justify-center px-2">
+          {showStepper ? (
+            <div className="flex h-11 min-h-[44px] items-center rounded-xl border border-[#f0d9cd] bg-white text-[#c84630] shadow-[0_8px_20px_rgba(200,70,48,0.28)]">
+              <button
+                type="button"
+                aria-label={`Remove one ${item.name} from your order`}
+                onClick={() => onDecrement?.(item)}
+                className="grid h-full w-11 place-items-center rounded-l-xl hover:bg-[#fff0e9]"
+              >
+                <Minus className="h-3.5 w-3.5" aria-hidden="true" />
+              </button>
+              <span aria-live="polite" aria-atomic="true" className="min-w-5 text-center text-sm font-extrabold tabular-nums">
+                {cartQty}
+              </span>
+              <button
+                type="button"
+                aria-label={`Add one more ${item.name} to your order`}
+                onClick={() => onIncrement?.(item)}
+                className="grid h-full w-11 place-items-center rounded-r-xl hover:bg-[#fff0e9]"
+              >
+                <Plus className="h-3.5 w-3.5" aria-hidden="true" />
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              disabled={unavailable}
+              onClick={() => onAdd(item)}
+              aria-label={
+                unavailable ? `${item.name} unavailable` : `Add ${item.name} to your order`
+              }
+              className="h-11 min-h-[44px] min-w-[104px] rounded-xl border border-[#e8c9b8] bg-white px-6 text-[13px] font-extrabold tracking-wide text-[#c84630] shadow-[0_8px_20px_rgba(200,70,48,0.28)] hover:bg-[#c84630] hover:text-white disabled:cursor-not-allowed disabled:border-[#bfae9f] disabled:text-[#9d8d80] disabled:shadow-none"
+            >
+              {item.availability !== "AVAILABLE"
+                ? "Sold out"
+                : disabled
+                  ? "Closed"
+                  : "ADD"}
+            </button>
+          )}
+        </div>
+      </div>
     </article>
   );
-}
+});
 
 function MobileCartBar({
   quantity,
@@ -1612,16 +1930,17 @@ function MobileCartBar({
   return (
     <button
       onClick={onCart}
-      className="safe-bottom fixed left-4 right-4 z-40 flex min-h-[44px] items-center justify-between rounded-2xl bg-[#382719] px-4 py-3.5 text-left text-white shadow-[0_18px_45px_rgba(54,35,24,0.25)] lg:hidden"
+      aria-label={`View cart, ${quantity} item${quantity !== 1 ? "s" : ""}, total ${formatINR(total)}`}
+      className="ticket-edge safe-bottom fixed left-4 right-4 z-40 flex min-h-[44px] items-center justify-between px-5 py-3.5 text-left text-white shadow-[0_18px_45px_rgba(54,35,24,0.25)] lg:hidden bg-[#382719]"
     >
-      <span>
+      <span aria-live="polite" aria-atomic="true">
         <span className="block text-xs font-semibold text-white/70">
           {quantity} item{quantity !== 1 ? "s" : ""} in your order
         </span>
-        <span className="text-base font-extrabold">{formatINR(total)}</span>
+        <span className="text-base font-extrabold tabular-nums">{formatINR(total)}</span>
       </span>
       <span className="flex items-center gap-2 text-sm font-extrabold">
-        View cart <ArrowRight className="h-4 w-4" />
+        View cart <ArrowRight className="h-4 w-4" aria-hidden="true" />
       </span>
     </button>
   );
@@ -2668,7 +2987,11 @@ function PlatformGate() {
   const { isPlatform, isLoading, featuredName, featuredUrl } = usePlatformHost();
   if (isLoading) return <MenuSkeleton />;
   if (isPlatform) {
-    return <PlatformLanding featuredName={featuredName} featuredUrl={featuredUrl} />;
+    return (
+      <Suspense fallback={<MenuSkeleton />}>
+        <PlatformLanding featuredName={featuredName} featuredUrl={featuredUrl} />
+      </Suspense>
+    );
   }
   return <NoSlugScreen />;
 }
@@ -2714,13 +3037,41 @@ function StorefrontUnavailable({ onRetry }: { onRetry: () => void }) {
 
 function MenuSkeleton() {
   return (
-    <main className="min-h-screen bg-[#fffaf3] p-8">
-      <div className="mx-auto max-w-7xl animate-pulse space-y-5">
-        <div className="h-20 rounded-2xl bg-[#eadfd4]" />
-        <div className="h-48 rounded-2xl bg-[#eadfd4]" />
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {[1, 2, 3, 4, 5, 6].map((key) => (
-            <div key={key} className="h-32 rounded-2xl bg-[#eadfd4]" />
+    <main aria-busy="true" aria-label="Loading menu" className="min-h-screen bg-[#fffaf3] pb-28">
+      <div className="mx-auto max-w-[1440px] animate-pulse px-4 sm:px-6 lg:px-10">
+        {/* Slim header */}
+        <div className="flex h-[76px] items-center gap-2.5">
+          <div className="h-10 w-10 rounded-xl bg-[#eadfd4]" />
+          <div className="space-y-2">
+            <div className="h-5 w-40 rounded bg-[#eadfd4]" />
+            <div className="h-3 w-56 rounded bg-[#eadfd4]" />
+          </div>
+        </div>
+        {/* Hero */}
+        <div className="h-[220px] rounded-2xl bg-[#eadfd4] lg:h-[260px]" />
+        {/* Search + rail */}
+        <div className="mt-4 h-12 rounded-2xl bg-[#eadfd4]" />
+        <div className="mt-3 flex gap-2">
+          {[96, 120, 88, 110].map((width) => (
+            <div key={width} style={{ width }} className="h-11 shrink-0 rounded-full bg-[#eadfd4]" />
+          ))}
+        </div>
+        {/* Menu rows shaped like the dish cards */}
+        <div className="mt-5 space-y-3">
+          {[1, 2, 3, 4].map((key) => (
+            <div key={key} className="flex gap-3 rounded-2xl border border-[#ead8c6] bg-[#fffdf9] p-3">
+              <div className="min-w-0 flex-1 space-y-2 py-1">
+                <div className="h-3 w-16 rounded bg-[#eadfd4]" />
+                <div className="h-5 w-3/4 rounded bg-[#eadfd4]" />
+                <div className="h-4 w-1/4 rounded bg-[#eadfd4]" />
+                <div className="h-3 w-full rounded bg-[#eadfd4]" />
+                <div className="h-3 w-2/3 rounded bg-[#eadfd4]" />
+              </div>
+              <div className="w-[120px] shrink-0">
+                <div className="aspect-square w-full rounded-xl bg-[#eadfd4]" />
+                <div className="mx-auto -mt-5 h-11 w-[104px] rounded-xl bg-[#eadfd4]" />
+              </div>
+            </div>
           ))}
         </div>
       </div>

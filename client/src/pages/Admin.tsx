@@ -3,7 +3,7 @@
  * Includes: overview, order management, menu management, restaurant settings,
  * customer management, and integration settings.
  */
-import { useEffect, useState } from "react";
+import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useLocation } from "wouter";
 import { toast } from "sonner";
 import {
@@ -40,14 +40,10 @@ import PlatformAdmin from "@/pages/PlatformAdmin";
 import IntegrationPanel from "@/components/IntegrationPanel";
 import DomainsPanel from "@/pages/DomainsPanel";
 import KDSPage from "@/pages/KDS";
-import InventoryPanel from "@/pages/InventoryPanel";
 import StaffPanel from "@/pages/StaffPanel";
 import NotificationsPanel from "@/pages/NotificationsPanel";
-import AnalyticsPanel from "@/pages/AnalyticsPanel";
 import OutletsPanel from "@/pages/OutletsPanel";
 import LoyaltyPanel from "@/pages/LoyaltyPanel";
-import ComboBuilderPanel from "@/pages/ComboBuilderPanel";
-import MenuImportPanel from "@/components/MenuImportPanel";
 
 const money = (paise: number) =>
   `₹${(paise / 100).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
@@ -89,6 +85,40 @@ const statusColor: Record<string, string> = {
 };
 
 const ADMIN_SECTIONS = new Set(Object.keys(SECTION_TITLES));
+
+// Heavy admin sections are split out of the initial /admin bundle and only
+// fetched when their section mounts. Analytics carries recharts, so it must
+// stay behind lazy() — do not add a static import for any of these panels.
+const AnalyticsPanel = lazy(() => import(/* webpackChunkName: "admin-analytics" */ "@/pages/AnalyticsPanel"));
+const InventoryPanel = lazy(() => import(/* webpackChunkName: "admin-inventory" */ "@/pages/InventoryPanel"));
+const ComboBuilderPanel = lazy(() => import(/* webpackChunkName: "admin-combos" */ "@/pages/ComboBuilderPanel"));
+const MenuImportPanel = lazy(() => import(/* webpackChunkName: "admin-menu-import" */ "@/components/MenuImportPanel"));
+
+// Debounce keystroke-driven admin filters (~200ms) so typing doesn't
+// re-filter large lists (or re-fire server queries) on every keypress.
+function useDebouncedValue<T>(value: T, delay = 200): T {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const timer = setTimeout(() => setDebounced(value), delay);
+    return () => clearTimeout(timer);
+  }, [value, delay]);
+  return debounced;
+}
+
+// Per-panel Suspense fallback for lazily-loaded admin sections. Pure
+// skeleton with no focusable content; aria-busy for assistive tech.
+function PanelFallback({ label }: { label: string }) {
+  return (
+    <div className="space-y-4" aria-busy="true" aria-label={label}>
+      <div className="h-16 animate-pulse rounded-2xl bg-[#eadfd4]" />
+      <div className="grid gap-4 sm:grid-cols-2">
+        <div className="h-40 animate-pulse rounded-2xl bg-[#eadfd4]" />
+        <div className="h-40 animate-pulse rounded-2xl bg-[#eadfd4]" />
+      </div>
+      <div className="h-64 animate-pulse rounded-2xl bg-[#eadfd4]" />
+    </div>
+  );
+}
 
 // Sections that require elevated membership; hidden when the server answers FORBIDDEN.
 function isGatedSection(section: string): section is "staff" | "integrations" | "domains" {
@@ -388,7 +418,9 @@ function MenuImportWorkspace({ slug }: { slug: string }) {
             Retry
           </Button>
         </div>
-        <MenuImportPanel restaurantId={dashboard.data.restaurant.id} />
+        <Suspense fallback={<PanelFallback label="Loading menu import" />}>
+          <MenuImportPanel restaurantId={dashboard.data.restaurant.id} />
+        </Suspense>
       </div>
     </div>
   );
@@ -492,6 +524,30 @@ function AdminWorkspace({ section, slug }: { section: string; slug: string }) {
     },
     onError: (err) => toast.error(err.message || "Could not update category."),
   });
+
+  // Stable row callbacks for the memoized menu list. TanStack's `mutate`
+  // fns are referentially stable, so these don't churn and break memo.
+  const handleMenuAvailability = useCallback(
+    (itemId: string, availability: string) =>
+      updateAvailability.mutate({ itemId, availability: availability as never }),
+    [updateAvailability.mutate]
+  );
+  const handleMenuToggle = useCallback(
+    (itemId: string, isOpen: boolean) => toggleItem.mutate({ itemId, isOpen }),
+    [toggleItem.mutate]
+  );
+  const handleMenuDelete = useCallback(
+    (itemId: string) => deleteItem.mutate({ itemId }),
+    [deleteItem.mutate]
+  );
+  const handleMenuUpdateItem = useCallback(
+    (input: any) => updateItem.mutate(input),
+    [updateItem.mutate]
+  );
+  const handleMenuBulkUpdate = useCallback(
+    (input: any) => bulkUpdate.mutate(input),
+    [bulkUpdate.mutate]
+  );
 
   if (dashboard.isLoading) return <AdminLoading />;
   if (dashboard.isError || !dashboard.data)
@@ -634,19 +690,12 @@ function AdminWorkspace({ section, slug }: { section: string; slug: string }) {
               updateAvailability.isPending || toggleItem.isPending ||
               deleteItem.isPending || updateItem.isPending || bulkUpdate.isPending
             }
-            onAvailability={(itemId, availability) =>
-              updateAvailability.mutate({
-                itemId,
-                availability: availability as never,
-              })
-            }
-            onToggle={(itemId, isOpen) =>
-              toggleItem.mutate({ itemId, isOpen })
-            }
+            onAvailability={handleMenuAvailability}
+            onToggle={handleMenuToggle}
             onUploadImage={uploadImage}
-            onDelete={(itemId) => deleteItem.mutate({ itemId })}
-            onUpdateItem={(input) => updateItem.mutate(input)}
-            onBulkUpdate={(input) => bulkUpdate.mutate(input)}
+            onDelete={handleMenuDelete}
+            onUpdateItem={handleMenuUpdateItem}
+            onBulkUpdate={handleMenuBulkUpdate}
           />
         ) : section === "categories" ? (
           <CategoriesPanel
@@ -675,21 +724,27 @@ function AdminWorkspace({ section, slug }: { section: string; slug: string }) {
         ) : section === "kds" ? (
           <KDSPage slug={slug} restaurantId={data.restaurant.id} />
         ) : section === "inventory" ? (
-          <InventoryPanel restaurantId={data.restaurant.id} />
+          <Suspense fallback={<PanelFallback label="Loading inventory" />}>
+            <InventoryPanel restaurantId={data.restaurant.id} />
+          </Suspense>
         ) : section === "notifications" ? (
           <NotificationsPanel restaurantId={data.restaurant.id} />
         ) : section === "analytics" ? (
-          <AnalyticsPanel restaurantId={data.restaurant.id} />
+          <Suspense fallback={<PanelFallback label="Loading analytics" />}>
+            <AnalyticsPanel restaurantId={data.restaurant.id} />
+          </Suspense>
         ) : section === "outlets" ? (
           <OutletsPanel restaurantId={data.restaurant.id} />
         ) : section === "loyalty" ? (
           <LoyaltyPanel restaurantId={data.restaurant.id} />
         ) : section === "combos" ? (
-          <ComboBuilderPanel
-            restaurantId={data.restaurant.id}
-            categories={data.categories ?? []}
-            combos={combos}
-          />
+          <Suspense fallback={<PanelFallback label="Loading combo builder" />}>
+            <ComboBuilderPanel
+              restaurantId={data.restaurant.id}
+              categories={data.categories ?? []}
+              combos={combos}
+            />
+          </Suspense>
         ) : (
           <OverviewPanel data={data} slug={slug} />
         )}
@@ -874,6 +929,7 @@ function OverviewPanel({ data, slug }: { data: any; slug: string }) {
         {cards.map((card) => (
           <article
             key={card.label}
+            style={{ contentVisibility: "auto", containIntrinsicSize: "auto 180px" }}
             className="rounded-2xl bg-[#fffdf9] p-5 shadow-sm"
           >
             <span
@@ -890,8 +946,11 @@ function OverviewPanel({ data, slug }: { data: any; slug: string }) {
         ))}
       </section>
 
-      {/* Status Summary */}
-      <section className="rounded-2xl bg-[#fffdf9] p-5 shadow-sm">
+      {/* Status Summary (static display cards; safe to skip off-screen paint) */}
+      <section
+        style={{ contentVisibility: "auto", containIntrinsicSize: "auto 160px" }}
+        className="rounded-2xl bg-[#fffdf9] p-5 shadow-sm"
+      >
         <p className="text-[10px] font-extrabold uppercase tracking-[0.16em] text-[#9e765e]">
           Order pipeline
         </p>
@@ -911,8 +970,11 @@ function OverviewPanel({ data, slug }: { data: any; slug: string }) {
         </div>
       </section>
 
-      {/* Recent Orders */}
-      <section className="rounded-2xl bg-[#fffdf9] p-5 shadow-sm">
+      {/* Recent Orders (static preview; no focusable content) */}
+      <section
+        style={{ contentVisibility: "auto", containIntrinsicSize: "auto 320px" }}
+        className="rounded-2xl bg-[#fffdf9] p-5 shadow-sm"
+      >
         <div className="flex items-center justify-between">
           <div>
             <p className="text-[10px] font-extrabold uppercase tracking-[0.16em] text-[#9e765e]">
@@ -951,9 +1013,12 @@ function OverviewPanel({ data, slug }: { data: any; slug: string }) {
         </div>
       </section>
 
-      {/* Restaurant Status Card */}
+      {/* Restaurant Status Card (static display; quick-action buttons intentionally excluded) */}
       <section className="grid gap-5 lg:grid-cols-[1.35fr_0.65fr]">
-        <article className="rounded-2xl bg-[#38271f] p-6 text-white shadow-sm">
+        <article
+          style={{ contentVisibility: "auto", containIntrinsicSize: "auto 240px" }}
+          className="rounded-2xl bg-[#38271f] p-6 text-white shadow-sm"
+        >
           <div className="flex items-center gap-3">
             <div
               className={`h-3 w-3 rounded-full ${
@@ -1082,10 +1147,158 @@ const ORDER_TRANSITIONS: Record<string, Array<{ to: string; label: string; dange
   OUT_FOR_DELIVERY: [{ to: "DELIVERED", label: "Delivered" }],
 };
 
+// Memoized order rows: `order` keeps a stable reference from the query
+// cache and every other prop is a primitive or stable callback, so typing,
+// paging, and 5s live refetches don't re-render untouched rows.
+const OrderActions = memo(function OrderActions({
+  order,
+  busy,
+  onChange,
+}: {
+  order: any;
+  busy: boolean;
+  onChange: (order: any, next: string, danger?: boolean) => void;
+}) {
+  const transitions = ORDER_TRANSITIONS[order.status] ?? [];
+  if (!transitions.length) return <span className="text-xs text-[#a37d64]">No actions</span>;
+  return (
+    <div className="flex flex-col gap-2">
+      {transitions.map((t) => (
+        <button
+          key={t.to}
+          disabled={busy}
+          onClick={() => onChange(order, t.to, t.danger)}
+          aria-label={`${t.label} order ${order.orderNumber}`}
+          className={`min-h-11 rounded-lg px-3 py-2 text-xs font-extrabold disabled:opacity-50 ${
+            t.danger
+              ? "border border-red-200 bg-white text-red-600 hover:bg-red-50"
+              : "bg-[#382719] text-white hover:bg-[#4a3527]"
+          }`}
+        >
+          {busy ? "Saving..." : t.label}
+        </button>
+      ))}
+      {(order.status === "DELIVERED" || order.status === "READY_FOR_PICKUP") && (
+        <InvoiceButton orderId={order.id} />
+      )}
+    </div>
+  );
+});
+
+const OrderDesktopRow = memo(function OrderDesktopRow({
+  order,
+  busy,
+  onChange,
+}: {
+  order: any;
+  busy: boolean;
+  onChange: (order: any, next: string, danger?: boolean) => void;
+}) {
+  return (
+    <tr className="border-t border-[#f0e4d9]">
+      <td className="px-5 py-4">
+        <p className="font-extrabold">{order.orderNumber}</p>
+        <div className="mt-1 flex items-center gap-2">
+          <p className="text-xs text-[#8c6d58]">
+            {new Date(order.createdAt).toLocaleString("en-IN", {
+              dateStyle: "medium",
+              timeStyle: "short",
+            })}
+          </p>
+          {order.orderSource && order.orderSource !== "DIRECT" && (
+            <span className={`rounded px-1.5 py-0.5 text-[9px] font-bold uppercase ${
+              order.orderSource === "ZOMATO" ? "bg-red-100 text-red-700" :
+              order.orderSource === "SWIGGY" ? "bg-orange-100 text-orange-700" :
+              order.orderSource === "PHONE" ? "bg-blue-100 text-blue-700" :
+              "bg-green-100 text-green-700"
+            }`}>
+              {order.orderSource}
+            </span>
+          )}
+        </div>
+      </td>
+      <td className="px-5 py-4">
+        <p className="text-sm font-bold">{order.customerName || "Guest"}</p>
+        <p className="text-xs text-[#8c6d58]">{order.customerPhone || "-"}</p>
+      </td>
+      <td className="px-5 py-4">
+        <span
+          className={`rounded-full px-2.5 py-1 text-xs font-extrabold ${
+            order.paymentStatus === "PAID"
+              ? "bg-[#e5f1e5] text-[#42774b]"
+              : order.paymentStatus === "FAILED"
+              ? "bg-red-50 text-red-700"
+              : "bg-[#f7e5d7] text-[#a74c34]"
+          }`}
+        >
+          {order.paymentStatus}
+        </span>
+      </td>
+      <td className="px-5 py-4 font-extrabold">
+        {money(order.totalPaise)}
+      </td>
+      <td className="px-5 py-4">
+        <span
+          className={`rounded-full px-2.5 py-1 text-[10px] font-extrabold ${
+            statusColor[order.status] ?? "bg-gray-100 text-gray-700"
+          }`}
+        >
+          {statusLabel[order.status] ?? order.status}
+        </span>
+      </td>
+      <td className="px-5 py-4">
+        <OrderActions order={order} busy={busy} onChange={onChange} />
+      </td>
+    </tr>
+  );
+});
+
+const OrderMobileCard = memo(function OrderMobileCard({
+  order,
+  busy,
+  onChange,
+}: {
+  order: any;
+  busy: boolean;
+  onChange: (order: any, next: string, danger?: boolean) => void;
+}) {
+  return (
+    <article className="rounded-xl border border-[#eadccf] bg-[#fffaf5] p-4">
+      <div className="flex items-start justify-between gap-2">
+        <div>
+          <p className="text-sm font-extrabold">{order.orderNumber}</p>
+          <p className="mt-0.5 text-xs text-[#8c6d58]">
+            {new Date(order.createdAt).toLocaleString("en-IN", {
+              dateStyle: "medium",
+              timeStyle: "short",
+            })}
+          </p>
+        </div>
+        <span
+          className={`rounded-full px-2.5 py-1 text-[10px] font-extrabold ${
+            statusColor[order.status] ?? "bg-gray-100 text-gray-700"
+          }`}
+        >
+          {statusLabel[order.status] ?? order.status}
+        </span>
+      </div>
+      <div className="mt-3 flex items-center justify-between text-sm">
+        <p className="font-bold">{order.customerName || "Guest"}</p>
+        <p className="font-extrabold">{money(order.totalPaise)}</p>
+      </div>
+      <p className="mt-1 text-xs text-[#8c6d58]">{order.customerPhone || "No phone"} · {order.paymentStatus}</p>
+      <div className="mt-3 border-t border-[#f0e4d9] pt-3">
+        <OrderActions order={order} busy={busy} onChange={onChange} />
+      </div>
+    </article>
+  );
+});
+
 function OrdersPanel({ restaurantId }: { restaurantId: string }) {
   const utils = trpc.useUtils();
   const [filter, setFilter] = useState<string>("all");
-  const [search, setSearch] = useState("");
+  const [searchInput, setSearchInput] = useState("");
+  const search = useDebouncedValue(searchInput, 200);
   const [page, setPage] = useState(0);
   const [busyId, setBusyId] = useState<string | null>(null);
 
@@ -1106,56 +1319,40 @@ function OrdersPanel({ restaurantId }: { restaurantId: string }) {
 
   const orders = (ordersQuery.data ?? []) as any[];
   const q = search.trim().toLowerCase();
-  const filtered = orders.filter((o: any) => {
-    if (filter === "active" && !ORDER_ACTIVE_STATUSES.includes(o.status)) return false;
-    if (filter !== "all" && filter !== "active" && o.status !== filter) return false;
-    if (q) {
-      const hay = `${o.orderNumber ?? ""} ${o.customerName ?? ""} ${o.customerPhone ?? ""}`.toLowerCase();
-      if (!hay.includes(q)) return false;
-    }
-    return true;
-  });
-  const openCount = orders.filter((o: any) => ORDER_ACTIVE_STATUSES.includes(o.status)).length;
+  const filtered = useMemo(
+    () =>
+      orders.filter((o: any) => {
+        if (filter === "active" && !ORDER_ACTIVE_STATUSES.includes(o.status)) return false;
+        if (filter !== "all" && filter !== "active" && o.status !== filter) return false;
+        if (q) {
+          const hay = `${o.orderNumber ?? ""} ${o.customerName ?? ""} ${o.customerPhone ?? ""}`.toLowerCase();
+          if (!hay.includes(q)) return false;
+        }
+        return true;
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [ordersQuery.data, filter, q]
+  );
+  const openCount = useMemo(
+    () => orders.filter((o: any) => ORDER_ACTIVE_STATUSES.includes(o.status)).length,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [ordersQuery.data]
+  );
   const hasMore = orders.length === ORDERS_PAGE_SIZE;
 
-  const changeStatus = (order: any, next: string, danger?: boolean) => {
-    if (danger) {
-      const ok = window.confirm(
-        `This will mark order ${order.orderNumber} as ${statusLabel[next] ?? next}. Continue?`
-      );
-      if (!ok) return;
-    }
-    setBusyId(order.id);
-    updateOrder.mutate({ orderId: order.id, status: next as never });
-  };
-
-  const renderActions = (order: any) => {
-    const transitions = ORDER_TRANSITIONS[order.status] ?? [];
-    const busy = busyId === order.id;
-    if (!transitions.length) return <span className="text-xs text-[#a37d64]">No actions</span>;
-    return (
-      <div className="flex flex-col gap-2">
-        {transitions.map((t) => (
-          <button
-            key={t.to}
-            disabled={busy}
-            onClick={() => changeStatus(order, t.to, t.danger)}
-            aria-label={`${t.label} order ${order.orderNumber}`}
-            className={`min-h-11 rounded-lg px-3 py-2 text-xs font-extrabold disabled:opacity-50 ${
-              t.danger
-                ? "border border-red-200 bg-white text-red-600 hover:bg-red-50"
-                : "bg-[#382719] text-white hover:bg-[#4a3527]"
-            }`}
-          >
-            {busy ? "Saving..." : t.label}
-          </button>
-        ))}
-        {(order.status === "DELIVERED" || order.status === "READY_FOR_PICKUP") && (
-          <InvoiceButton orderId={order.id} />
-        )}
-      </div>
-    );
-  };
+  const changeStatus = useCallback(
+    (order: any, next: string, danger?: boolean) => {
+      if (danger) {
+        const ok = window.confirm(
+          `This will mark order ${order.orderNumber} as ${statusLabel[next] ?? next}. Continue?`
+        );
+        if (!ok) return;
+      }
+      setBusyId(order.id);
+      updateOrder.mutate({ orderId: order.id, status: next as never });
+    },
+    [updateOrder.mutate]
+  );
 
   if (ordersQuery.isLoading) return <AdminLoading />;
   if (ordersQuery.isError || !ordersQuery.data) {
@@ -1197,8 +1394,8 @@ function OrdersPanel({ restaurantId }: { restaurantId: string }) {
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#a37d64]" />
             <Input
               id="orders-search"
-              value={search}
-              onChange={(e) => { setSearch(e.target.value); setPage(0); }}
+              value={searchInput}
+              onChange={(e) => { setSearchInput(e.target.value); setPage(0); }}
               placeholder="Search order, name, or phone..."
               className="h-11 rounded-xl border-[#e8d6c5] pl-9 text-sm"
             />
@@ -1247,61 +1444,12 @@ function OrdersPanel({ restaurantId }: { restaurantId: string }) {
               </thead>
               <tbody>
                 {filtered.map((order: any) => (
-                  <tr key={order.id} className="border-t border-[#f0e4d9]">
-                    <td className="px-5 py-4">
-                      <p className="font-extrabold">{order.orderNumber}</p>
-                      <div className="mt-1 flex items-center gap-2">
-                        <p className="text-xs text-[#8c6d58]">
-                          {new Date(order.createdAt).toLocaleString("en-IN", {
-                            dateStyle: "medium",
-                            timeStyle: "short",
-                          })}
-                        </p>
-                        {order.orderSource && order.orderSource !== "DIRECT" && (
-                          <span className={`rounded px-1.5 py-0.5 text-[9px] font-bold uppercase ${
-                            order.orderSource === "ZOMATO" ? "bg-red-100 text-red-700" :
-                            order.orderSource === "SWIGGY" ? "bg-orange-100 text-orange-700" :
-                            order.orderSource === "PHONE" ? "bg-blue-100 text-blue-700" :
-                            "bg-green-100 text-green-700"
-                          }`}>
-                            {order.orderSource}
-                          </span>
-                        )}
-                      </div>
-                    </td>
-                    <td className="px-5 py-4">
-                      <p className="text-sm font-bold">{order.customerName || "Guest"}</p>
-                      <p className="text-xs text-[#8c6d58]">{order.customerPhone || "-"}</p>
-                    </td>
-                    <td className="px-5 py-4">
-                      <span
-                        className={`rounded-full px-2.5 py-1 text-xs font-extrabold ${
-                          order.paymentStatus === "PAID"
-                            ? "bg-[#e5f1e5] text-[#42774b]"
-                            : order.paymentStatus === "FAILED"
-                            ? "bg-red-50 text-red-700"
-                            : "bg-[#f7e5d7] text-[#a74c34]"
-                        }`}
-                      >
-                        {order.paymentStatus}
-                      </span>
-                    </td>
-                    <td className="px-5 py-4 font-extrabold">
-                      {money(order.totalPaise)}
-                    </td>
-                    <td className="px-5 py-4">
-                      <span
-                        className={`rounded-full px-2.5 py-1 text-[10px] font-extrabold ${
-                          statusColor[order.status] ?? "bg-gray-100 text-gray-700"
-                        }`}
-                      >
-                        {statusLabel[order.status] ?? order.status}
-                      </span>
-                    </td>
-                    <td className="px-5 py-4">
-                      {renderActions(order)}
-                    </td>
-                  </tr>
+                  <OrderDesktopRow
+                    key={order.id}
+                    order={order}
+                    busy={busyId === order.id}
+                    onChange={changeStatus}
+                  />
                 ))}
               </tbody>
             </table>
@@ -1310,34 +1458,12 @@ function OrdersPanel({ restaurantId }: { restaurantId: string }) {
           {/* Mobile cards */}
           <div className="space-y-3 p-4 md:hidden">
             {filtered.map((order: any) => (
-              <article key={order.id} className="rounded-xl border border-[#eadccf] bg-[#fffaf5] p-4">
-                <div className="flex items-start justify-between gap-2">
-                  <div>
-                    <p className="text-sm font-extrabold">{order.orderNumber}</p>
-                    <p className="mt-0.5 text-xs text-[#8c6d58]">
-                      {new Date(order.createdAt).toLocaleString("en-IN", {
-                        dateStyle: "medium",
-                        timeStyle: "short",
-                      })}
-                    </p>
-                  </div>
-                  <span
-                    className={`rounded-full px-2.5 py-1 text-[10px] font-extrabold ${
-                      statusColor[order.status] ?? "bg-gray-100 text-gray-700"
-                    }`}
-                  >
-                    {statusLabel[order.status] ?? order.status}
-                  </span>
-                </div>
-                <div className="mt-3 flex items-center justify-between text-sm">
-                  <p className="font-bold">{order.customerName || "Guest"}</p>
-                  <p className="font-extrabold">{money(order.totalPaise)}</p>
-                </div>
-                <p className="mt-1 text-xs text-[#8c6d58]">{order.customerPhone || "No phone"} · {order.paymentStatus}</p>
-                <div className="mt-3 border-t border-[#f0e4d9] pt-3">
-                  {renderActions(order)}
-                </div>
-              </article>
+              <OrderMobileCard
+                key={order.id}
+                order={order}
+                busy={busyId === order.id}
+                onChange={changeStatus}
+              />
             ))}
           </div>
 
@@ -1379,6 +1505,78 @@ function OrdersPanel({ restaurantId }: { restaurantId: string }) {
 // Menu Panel
 // =============================================================================
 
+// Memoized menu row: stable `item` reference from the dashboard cache plus
+// primitives and stable callbacks only — no inline object/array props.
+const MenuItemRow = memo(function MenuItemRow({
+  item,
+  selected,
+  listPending,
+  onToggleSelect,
+  onStartEdit,
+  onDeleteRequest,
+  onToggle,
+  onAvailability,
+}: {
+  item: any;
+  selected: boolean;
+  listPending: boolean;
+  onToggleSelect: (id: string) => void;
+  onStartEdit: (item: any) => void;
+  onDeleteRequest: (id: string) => void;
+  onToggle: (id: string, isOpen: boolean) => void;
+  onAvailability: (id: string, status: string) => void;
+}) {
+  return (
+    <div className="flex items-center gap-4">
+      <input type="checkbox" aria-label={`Select ${item.name}`} checked={selected} onChange={() => onToggleSelect(item.id)} className="shrink-0 accent-[#c84630]" />
+      {item.imageUrl ? (
+        <img src={item.imageUrl} alt="" className="h-10 w-10 shrink-0 rounded-lg object-cover border border-[#eadccf]" />
+      ) : (
+        <div className={`grid h-10 w-10 shrink-0 place-items-center rounded-xl text-xs font-extrabold ${
+          item.dietaryType === "veg" ? "bg-green-50 text-green-700" : item.dietaryType === "egg" ? "bg-amber-50 text-amber-700" : "bg-red-50 text-red-700"
+        }`}>
+          {item.dietaryType === "veg" ? "V" : item.dietaryType === "egg" ? "E" : "NV"}
+        </div>
+      )}
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2">
+          <p className="text-sm font-extrabold">{item.name}</p>
+          {item.isBestseller && (
+            <span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[9px] font-extrabold text-amber-700">BESTSELLER</span>
+          )}
+        </div>
+        <p className="mt-0.5 truncate text-xs text-[#8b6b57]">{item.description}</p>
+        <div className="mt-0.5 flex items-center gap-2 text-xs font-bold">
+          <span>{money(item.pricePaise)}</span>
+          {item.offerPricePaise && <span className="text-green-600">Offer: {money(item.offerPricePaise)}</span>}
+        </div>
+      </div>
+      <div className="flex items-center gap-2">
+        <button onClick={() => onStartEdit(item)} disabled={listPending} className="rounded-lg border border-[#ddc6b5] bg-white px-2 py-1.5 text-[10px] font-bold text-[#5c4332] hover:bg-[#fff4e9] disabled:opacity-50">Edit</button>
+        <button onClick={() => onDeleteRequest(item.id)} disabled={listPending} className="rounded-lg border border-red-200 bg-white px-2 py-1.5 text-[10px] font-bold text-red-600 hover:bg-red-50 disabled:opacity-50">Delete</button>
+        <label className="relative inline-flex cursor-pointer items-center">
+          <input type="checkbox" role="switch" aria-checked={item.isOpen} aria-label={`Show ${item.name} on storefront`} checked={item.isOpen} onChange={(e) => onToggle(item.id, e.target.checked)} disabled={listPending} className="peer sr-only" />
+          <div className="h-6 w-11 rounded-full bg-gray-200 after:absolute after:left-[2px] after:top-[2px] after:h-5 after:w-5 after:rounded-full after:bg-white after:transition-all peer-checked:bg-[#c84630] after:peer-checked:translate-x-full" />
+        </label>
+        <label className="sr-only" htmlFor={`avail-${item.id}`}>Availability for {item.name}</label>
+        <select
+          id={`avail-${item.id}`}
+          value={item.availability}
+          disabled={listPending}
+          onChange={(e) => onAvailability(item.id, e.target.value)}
+          className="rounded-lg border border-[#ddc6b5] bg-white px-2 py-2 text-xs font-extrabold disabled:opacity-50"
+        >
+          <option value="AVAILABLE">Available</option>
+          <option value="SOLD_OUT">Sold out</option>
+          <option value="SCHEDULED_UNAVAILABLE">Later</option>
+          <option value="OUT_OF_STOCK">Out of stock</option>
+          <option value="DISABLED">Hidden</option>
+        </select>
+      </div>
+    </div>
+  );
+});
+
 function MenuPanel({
   data,
   itemForm,
@@ -1406,7 +1604,8 @@ function MenuPanel({
   onUpdateItem: (input: any) => void;
   onBulkUpdate: (input: any) => void;
 }) {
-  const [search, setSearch] = useState("");
+  const [searchInput, setSearchInput] = useState("");
+  const search = useDebouncedValue(searchInput, 200);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<any>({});
@@ -1414,26 +1613,31 @@ function MenuPanel({
   const [uploading, setUploading] = useState(false);
   const [deleteId, setDeleteId] = useState<string | null>(null);
 
-  const items = (data.items ?? []).filter((item: any) =>
-    search ? item.name.toLowerCase().includes(search.toLowerCase()) : true
+  const searchLower = search.trim().toLowerCase();
+  const items = useMemo(
+    () =>
+      (data.items ?? []).filter((item: any) =>
+        searchLower ? item.name.toLowerCase().includes(searchLower) : true
+      ),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [data.items, searchLower]
   );
 
-  const toggleSelect = (id: string) => {
+  const toggleSelect = useCallback((id: string) => {
     setSelectedIds((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
       return next;
     });
-  };
+  }, []);
 
-  const toggleAll = () => {
-    if (selectedIds.size === items.length) {
-      setSelectedIds(new Set());
-    } else {
-      setSelectedIds(new Set(items.map((i: any) => i.id)));
-    }
-  };
+  const toggleAll = useCallback(() => {
+    setSelectedIds((prev) => {
+      if (prev.size === items.length) return new Set<string>();
+      return new Set(items.map((i: any) => i.id));
+    });
+  }, [items]);
 
   const handleImageUpload = async (file: File, target: "create" | "edit") => {
     if (file.size > 2 * 1024 * 1024) return toast.error("Image must be under 2 MB.");
@@ -1466,7 +1670,7 @@ function MenuPanel({
     }
   };
 
-  const startEdit = (item: any) => {
+  const startEdit = useCallback((item: any) => {
     setEditingId(item.id);
     setEditForm({
       itemId: item.id,
@@ -1478,7 +1682,11 @@ function MenuPanel({
       isBestseller: item.isBestseller,
       imageUrl: item.imageUrl,
     });
-  };
+  }, []);
+
+  const handleDeleteRequest = useCallback((id: string) => {
+    setDeleteId(id);
+  }, []);
 
   const saveEdit = () => {
     if (!editingId) return;
@@ -1617,8 +1825,8 @@ function MenuPanel({
               <label htmlFor="menu-search" className="sr-only">Search menu items</label>
               <Input
                 id="menu-search"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
                 placeholder="Search menu items..."
                 className="h-11 min-h-11 rounded-xl border-[#e8d6c5] pl-9 text-sm"
               />
@@ -1686,54 +1894,17 @@ function MenuPanel({
                   </div>
                 </div>
               ) : (
-                /* Normal Row */
-                <div className="flex items-center gap-4">
-                  <input type="checkbox" aria-label={`Select ${item.name}`} checked={selectedIds.has(item.id)} onChange={() => toggleSelect(item.id)} className="shrink-0 accent-[#c84630]" />
-                  {item.imageUrl ? (
-                    <img src={item.imageUrl} alt="" className="h-10 w-10 shrink-0 rounded-lg object-cover border border-[#eadccf]" />
-                  ) : (
-                    <div className={`grid h-10 w-10 shrink-0 place-items-center rounded-xl text-xs font-extrabold ${
-                      item.dietaryType === "veg" ? "bg-green-50 text-green-700" : item.dietaryType === "egg" ? "bg-amber-50 text-amber-700" : "bg-red-50 text-red-700"
-                    }`}>
-                      {item.dietaryType === "veg" ? "V" : item.dietaryType === "egg" ? "E" : "NV"}
-                    </div>
-                  )}
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <p className="text-sm font-extrabold">{item.name}</p>
-                      {item.isBestseller && (
-                        <span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[9px] font-extrabold text-amber-700">BESTSELLER</span>
-                      )}
-                    </div>
-                    <p className="mt-0.5 truncate text-xs text-[#8b6b57]">{item.description}</p>
-                    <div className="mt-0.5 flex items-center gap-2 text-xs font-bold">
-                      <span>{money(item.pricePaise)}</span>
-                      {item.offerPricePaise && <span className="text-green-600">Offer: {money(item.offerPricePaise)}</span>}
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button onClick={() => startEdit(item)} disabled={listPending} className="rounded-lg border border-[#ddc6b5] bg-white px-2 py-1.5 text-[10px] font-bold text-[#5c4332] hover:bg-[#fff4e9] disabled:opacity-50">Edit</button>
-                    <button onClick={() => setDeleteId(item.id)} disabled={listPending} className="rounded-lg border border-red-200 bg-white px-2 py-1.5 text-[10px] font-bold text-red-600 hover:bg-red-50 disabled:opacity-50">Delete</button>
-                    <label className="relative inline-flex cursor-pointer items-center">
-                      <input type="checkbox" role="switch" aria-checked={item.isOpen} aria-label={`Show ${item.name} on storefront`} checked={item.isOpen} onChange={(e) => onToggle(item.id, e.target.checked)} disabled={listPending} className="peer sr-only" />
-                      <div className="h-6 w-11 rounded-full bg-gray-200 after:absolute after:left-[2px] after:top-[2px] after:h-5 after:w-5 after:rounded-full after:bg-white after:transition-all peer-checked:bg-[#c84630] after:peer-checked:translate-x-full" />
-                    </label>
-                    <label className="sr-only" htmlFor={`avail-${item.id}`}>Availability for {item.name}</label>
-                    <select
-                      id={`avail-${item.id}`}
-                      value={item.availability}
-                      disabled={listPending}
-                      onChange={(e) => onAvailability(item.id, e.target.value)}
-                      className="rounded-lg border border-[#ddc6b5] bg-white px-2 py-2 text-xs font-extrabold disabled:opacity-50"
-                    >
-                      <option value="AVAILABLE">Available</option>
-                      <option value="SOLD_OUT">Sold out</option>
-                      <option value="SCHEDULED_UNAVAILABLE">Later</option>
-                      <option value="OUT_OF_STOCK">Out of stock</option>
-                      <option value="DISABLED">Hidden</option>
-                    </select>
-                  </div>
-                </div>
+                /* Normal Row (memoized; stable item ref + stable callbacks) */
+                <MenuItemRow
+                  item={item}
+                  selected={selectedIds.has(item.id)}
+                  listPending={listPending}
+                  onToggleSelect={toggleSelect}
+                  onStartEdit={startEdit}
+                  onDeleteRequest={handleDeleteRequest}
+                  onToggle={onToggle}
+                  onAvailability={onAvailability}
+                />
               )}
             </article>
           ))}
@@ -2201,8 +2372,37 @@ function CouponsPanel({
 // Customers Panel
 // =============================================================================
 
+// Memoized customer row: stable `customer` reference from the query cache
+// plus one stable select callback — no inline object/array props.
+const CustomerRow = memo(function CustomerRow({
+  customer,
+  onSelect,
+}: {
+  customer: any;
+  onSelect: (id: string) => void;
+}) {
+  return (
+    <tr
+      onClick={() => onSelect(customer.id)}
+      className="cursor-pointer hover:bg-[#fff9f3] transition-colors"
+    >
+      <td className="px-5 py-4">
+        <p className="text-sm font-bold text-[#382719]">{customer.userName || customer.preferredName || "Guest"}</p>
+        <p className="mt-0.5 text-xs text-[#91725e]">{customer.userEmail ?? "—"}</p>
+      </td>
+      <td className="px-5 py-4 text-sm text-[#553d2c]">{customer.mobileNumber ?? "—"}</td>
+      <td className="px-5 py-4 text-sm font-bold text-[#382719]">{customer.totalOrders ?? 0}</td>
+      <td className="px-5 py-4 text-sm font-extrabold text-[#382719]">₹{((customer.totalSpentPaise ?? 0) / 100).toLocaleString("en-IN")}</td>
+      <td className="px-5 py-4 text-xs text-[#91725e]">
+        {customer.createdAt ? new Date(customer.createdAt).toLocaleDateString("en-IN") : "—"}
+      </td>
+    </tr>
+  );
+});
+
 function CustomersPanel({ restaurantId }: { restaurantId: string }) {
-  const [search, setSearch] = useState("");
+  const [searchInput, setSearchInput] = useState("");
+  const search = useDebouncedValue(searchInput, 200);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [notes, setNotes] = useState("");
 
@@ -2221,6 +2421,11 @@ function CustomersPanel({ restaurantId }: { restaurantId: string }) {
 
   const list = customers.data ?? [];
   const detail = customerDetail.data;
+
+  const handleSelectCustomer = useCallback((id: string) => {
+    setSelectedId(id);
+    setNotes("");
+  }, []);
 
   // Initialise the editor from the server value (allows clearing the field).
   useEffect(() => {
@@ -2333,8 +2538,8 @@ function CustomersPanel({ restaurantId }: { restaurantId: string }) {
           <label htmlFor="customers-search" className="sr-only">Search customers</label>
           <input
             id="customers-search"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
             placeholder="Search by name, phone, or email..."
             className="h-11 min-h-11 w-full rounded-xl border border-[#ddc6b5] bg-white pl-10 pr-4 text-sm outline-none focus:ring-2 focus:ring-[#c84630]"
           />
@@ -2372,25 +2577,7 @@ function CustomersPanel({ restaurantId }: { restaurantId: string }) {
             </thead>
             <tbody className="divide-y divide-[#f0e4d8]">
               {list.map((c: any) => (
-                <tr
-                  key={c.id}
-                  onClick={() => {
-                    setSelectedId(c.id);
-                    setNotes("");
-                  }}
-                  className="cursor-pointer hover:bg-[#fff9f3] transition-colors"
-                >
-                  <td className="px-5 py-4">
-                    <p className="text-sm font-bold text-[#382719]">{c.userName || c.preferredName || "Guest"}</p>
-                    <p className="mt-0.5 text-xs text-[#91725e]">{c.userEmail ?? "—"}</p>
-                  </td>
-                  <td className="px-5 py-4 text-sm text-[#553d2c]">{c.mobileNumber ?? "—"}</td>
-                  <td className="px-5 py-4 text-sm font-bold text-[#382719]">{c.totalOrders ?? 0}</td>
-                  <td className="px-5 py-4 text-sm font-extrabold text-[#382719]">₹{((c.totalSpentPaise ?? 0) / 100).toLocaleString("en-IN")}</td>
-                  <td className="px-5 py-4 text-xs text-[#91725e]">
-                    {c.createdAt ? new Date(c.createdAt).toLocaleDateString("en-IN") : "—"}
-                  </td>
-                </tr>
+                <CustomerRow key={c.id} customer={c} onSelect={handleSelectCustomer} />
               ))}
             </tbody>
           </table>
