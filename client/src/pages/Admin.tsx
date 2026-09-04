@@ -35,6 +35,8 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { trpc } from "@/lib/trpc";
+import { usePlatformHost } from "@/lib/platform";
+import PlatformAdmin from "@/pages/PlatformAdmin";
 import IntegrationPanel from "@/components/IntegrationPanel";
 import DomainsPanel from "@/pages/DomainsPanel";
 import KDSPage from "@/pages/KDS";
@@ -103,8 +105,9 @@ export default function Admin() {
     return <div className="min-h-screen bg-[#f7f2eb]" />;
   if (!user || user.role !== "admin") return <AdminAccess />;
 
-  // /admin and /admin/:section (no slug) resolve the restaurant slug, then redirect.
-  if (!restaurantSlug) return <SlugRedirect section={safeSection} />;
+  // /admin and /admin/:section (no slug): platform host gets the restaurant
+  // registry; restaurant hosts resolve their own workspace as before.
+  if (!restaurantSlug) return <AdminRoot section={safeSection} />;
 
   return (
     <DashboardLayout>
@@ -120,6 +123,17 @@ export default function Admin() {
 // =============================================================================
 // Slug redirect helper: /admin/:section -> /admin/:slug/:section
 // =============================================================================
+
+// =============================================================================
+// Admin root: platform registry on the platform host, slug redirect otherwise
+// =============================================================================
+
+function AdminRoot({ section }: { section: string }) {
+  const { isPlatform, isLoading } = usePlatformHost();
+  if (isLoading) return <AdminLoading />;
+  if (isPlatform) return <PlatformAdmin />;
+  return <SlugRedirect section={section} />;
+}
 
 function SlugRedirect({ section }: { section: string }) {
   const [, setLocation] = useLocation();

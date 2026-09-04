@@ -19,6 +19,7 @@ import { Drawer, DrawerContent, DrawerDescription, DrawerFooter, DrawerHeader, D
 import { Input } from "@/components/ui/input";
 import { formatINR, type FoodKind } from "@/lib/types";
 import { trpc } from "@/lib/trpc";
+import { usePlatformHost } from "@/lib/platform";
 import PlatformLanding from "@/pages/PlatformLanding";
 import {
   adaptStorefront,
@@ -2649,28 +2650,12 @@ function OrderStatusView({
   );
 }
 
-function isPlatformHost(hostname: string, platformDomain: string): boolean {
-  const host = hostname.trim().toLowerCase();
-  const apex = platformDomain.trim().toLowerCase().replace(/^www\./, "");
-  if (!apex) return false;
-  return host === apex || host === `www.${apex}`;
-}
-
 /** No slug in path: platform landing on the platform domain, helper otherwise. */
 function PlatformGate() {
-  const platform = trpc.system.platformConfig.useQuery(undefined, {
-    retry: false,
-    staleTime: 5 * 60 * 1000,
-  });
-  if (platform.isLoading) return <MenuSkeleton />;
-  const domain = platform.data?.platformDomain ?? "";
-  if (domain && typeof window !== "undefined" && isPlatformHost(window.location.hostname, domain)) {
-    return (
-      <PlatformLanding
-        featuredName={platform.data?.featuredStorefrontName ?? ""}
-        featuredUrl={platform.data?.featuredStorefrontUrl ?? ""}
-      />
-    );
+  const { isPlatform, isLoading, featuredName, featuredUrl } = usePlatformHost();
+  if (isLoading) return <MenuSkeleton />;
+  if (isPlatform) {
+    return <PlatformLanding featuredName={featuredName} featuredUrl={featuredUrl} />;
   }
   return <NoSlugScreen />;
 }
