@@ -156,48 +156,50 @@ function vitePluginManusDebugCollector(): Plugin {
   };
 }
 
-// P0: the browser debug collector must never ship to production —
-// transformIndexHtml already no-ops there, but skip registration entirely
-// so no debug route or script tag can leak into prod builds.
-const isProductionBuild = process.env.NODE_ENV === "production";
-const plugins = [
-  react(),
-  tailwindcss(),
-  jsxLocPlugin(),
-  vitePluginManusRuntime(),
-  ...(isProductionBuild ? [] : [vitePluginManusDebugCollector()]),
-];
+// P0: dev-only plugins must never ship to production. Gate on Vite's
+// command (not NODE_ENV): `vite build` in Docker runs without NODE_ENV set,
+// so an env check alone silently includes them in the prod bundle. The
+// manus runtime was injecting an `unload` listener into production,
+// tripping Chrome's permissions-policy violation on every page.
+export default defineConfig(({ command }) => {
+  const isDevServer = command === "serve";
+  const plugins = [
+    react(),
+    tailwindcss(),
+    ...(isDevServer ? [jsxLocPlugin(), vitePluginManusRuntime(), vitePluginManusDebugCollector()] : []),
+  ];
 
-export default defineConfig({
-  plugins,
-  resolve: {
-    alias: {
-      "@": path.resolve(import.meta.dirname, "client", "src"),
-      "@shared": path.resolve(import.meta.dirname, "shared"),
-      "@assets": path.resolve(import.meta.dirname, "attached_assets"),
+  return {
+    plugins,
+    resolve: {
+      alias: {
+        "@": path.resolve(import.meta.dirname, "client", "src"),
+        "@shared": path.resolve(import.meta.dirname, "shared"),
+        "@assets": path.resolve(import.meta.dirname, "attached_assets"),
+      },
     },
-  },
-  envDir: path.resolve(import.meta.dirname),
-  root: path.resolve(import.meta.dirname, "client"),
-  publicDir: path.resolve(import.meta.dirname, "client", "public"),
-  build: {
-    outDir: path.resolve(import.meta.dirname, "dist/public"),
-    emptyOutDir: true,
-  },
-  server: {
-    host: true,
-    allowedHosts: [
-      ".manuspre.computer",
-      ".manus.computer",
-      ".manus-asia.computer",
-      ".manuscomputer.ai",
-      ".manusvm.computer",
-      "localhost",
-      "127.0.0.1",
-    ],
-    fs: {
-      strict: true,
-      deny: ["**/.*"],
+    envDir: path.resolve(import.meta.dirname),
+    root: path.resolve(import.meta.dirname, "client"),
+    publicDir: path.resolve(import.meta.dirname, "client", "public"),
+    build: {
+      outDir: path.resolve(import.meta.dirname, "dist/public"),
+      emptyOutDir: true,
     },
-  },
+    server: {
+      host: true,
+      allowedHosts: [
+        ".manuspre.computer",
+        ".manus.computer",
+        ".manus-asia.computer",
+        ".manuscomputer.ai",
+        ".manusvm.computer",
+        "localhost",
+        "127.0.0.1",
+      ],
+      fs: {
+        strict: true,
+        deny: ["**/.*"],
+      },
+    },
+  };
 });
