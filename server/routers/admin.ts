@@ -323,7 +323,7 @@ export const adminRouter = router({
   }))
     .mutation(async ({ input }) => {
       const buffer = Buffer.from(input.data, "base64");
-      const filename = saveUploadedImage(buffer, input.contentType, "menu", "dish");
+      const filename = await saveUploadedImage(buffer, input.contentType, "menu", "dish");
       return { url: `/images/menu/${filename}` };
     }),
 
@@ -334,7 +334,7 @@ export const adminRouter = router({
   }))
     .mutation(async ({ ctx, input }) => {
       const buffer = Buffer.from(input.data, "base64");
-      const filename = saveUploadedImage(buffer, input.contentType, "brand", input.kind);
+      const filename = await saveUploadedImage(buffer, input.contentType, "brand", input.kind);
       await logAudit({
         actorId: ctx.user.id,
         actorName: ctx.user.name ?? undefined,
