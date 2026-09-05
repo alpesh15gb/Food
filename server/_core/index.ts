@@ -32,6 +32,12 @@ async function startServer() {
     createExpressMiddleware({
       router: appRouter,
       createContext,
+      // Permanent server-side error log: names the failing procedure and the
+      // root cause (SQL column, FORBIDDEN, validation). Invaluable on VPS
+      // where the browser only shows a generic retry banner.
+      onError({ error, path }) {
+        console.error(`[tRPC] ${path || "<no-path>"} failed: ${error.message}`);
+      },
     })
   );
   // development mode uses Vite, production mode uses static files
