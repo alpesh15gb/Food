@@ -98,7 +98,7 @@ export default function IntegrationPanel({ restaurantId }: { restaurantId?: stri
   return (
     <div className="space-y-5">
       {/* Header */}
-      <section className="relative overflow-hidden rounded-2xl bg-[#38271f] p-6 text-white shadow-sm">
+      <section className="relative overflow-hidden rounded-2xl bg-[#2A3A0C] p-6 text-white shadow-sm">
         <div className="absolute -right-6 -top-10 h-36 w-36 rounded-full border-[18px] border-[#B95509]/30" />
         <div className="relative grid gap-4 md:grid-cols-[1fr_auto]">
           <div>
@@ -121,7 +121,7 @@ export default function IntegrationPanel({ restaurantId }: { restaurantId?: stri
           return (
             <article key={service.provider} className="rounded-2xl bg-[#fffdf9] p-5 shadow-sm">
               <div className="flex items-start justify-between gap-3">
-                <span className={`grid h-10 w-10 place-items-center rounded-xl ${service.ready ? "bg-[#e5f1e5] text-[#42774b]" : "bg-[#f7e4d3] text-[#B95509]"}`}>
+                <span className={`grid h-10 w-10 place-items-center rounded-xl ${service.ready ? "bg-[#e5f1e5] text-[#42774b]" : "bg-[#E9EFD6] text-[#B95509]"}`}>
                   {service.ready ? <CheckCircle2 className="h-5 w-5" /> : <CircleAlert className="h-5 w-5" />}
                 </span>
                 <span className={`rounded-full px-2.5 py-1 text-[10px] font-extrabold uppercase tracking-[0.08em] ${service.ready ? "bg-[#e5f1e5] text-[#42774b]" : "bg-[#f8e9dd] text-[#a54c34]"}`}>
@@ -130,22 +130,22 @@ export default function IntegrationPanel({ restaurantId }: { restaurantId?: stri
               </div>
               <h3 className="mt-5 text-base font-extrabold text-[#39281e]">{service.name}</h3>
               <p className="mt-2 min-h-10 text-xs leading-relaxed text-[#886956]">{service.detail}</p>
-              <Button onClick={() => setOpenProvider(isOpen ? null : service.provider as Provider)} variant="outline" className="mt-5 h-10 w-full rounded-xl border-[#dcc2ae] bg-[#fff9f3] text-xs font-extrabold text-[#704d37]">
+              <Button onClick={() => setOpenProvider(isOpen ? null : service.provider as Provider)} variant="outline" className="mt-5 h-10 w-full rounded-xl border-[#dcc2ae] bg-[#E9EFD6] text-xs font-extrabold text-[#3F4C1E]">
                 <KeyRound className="mr-2 h-4 w-4" />
                 {isOpen ? "Close secure fields" : service.ready ? "Replace secure values" : "Add secure values"}
               </Button>
               {isOpen && (
                 <div className="mt-4 space-y-3 border-t border-dashed border-[#e6d6c8] pt-4">
-                  <p className="text-[10px] font-extrabold uppercase tracking-[0.12em] text-[#9e765e]">Values are masked after save</p>
+                  <p className="text-[10px] font-extrabold uppercase tracking-[0.12em] text-[#5F6B3C]">Values are masked after save</p>
                   {service.requiredSecrets.map(keyName => (
                     <div key={keyName}>
-                      <label className="text-xs font-extrabold text-[#5a4130]">{keyName}</label>
+                      <label className="text-xs font-extrabold text-[#2A3A0C]">{keyName}</label>
                       <div className="mt-1.5 flex gap-2">
-                        <Input value={drafts[keyName] ?? ""} onChange={event => setDrafts(current => ({ ...current, [keyName]: event.target.value }))} type="password" autoComplete="off" placeholder="Paste secure value" className="h-10 rounded-xl border-[#ddc6b5] text-xs" />
+                        <Input value={drafts[keyName] ?? ""} onChange={event => setDrafts(current => ({ ...current, [keyName]: event.target.value }))} type="password" autoComplete="off" placeholder="Paste secure value" className="h-10 rounded-xl border-[#D8DFC0] text-xs" />
                         <Button aria-label={`Save ${keyName}`} disabled={!rid || !drafts[keyName]?.trim() || saveSecret.isPending} onClick={() => saveSecret.mutate({ restaurantId: rid, provider: toMutationProvider(service.provider), keyName, value: drafts[keyName] })} className="h-10 shrink-0 rounded-xl bg-[#B95509] px-3 font-extrabold hover:bg-[#9C4A07]">
                           {saveSecret.isPending ? <LoaderCircle className="h-4 w-4 animate-spin" /> : "Save"}
                         </Button>
-                        <Button aria-label={`Verify ${keyName}`} variant="outline" disabled={!rid || verifySecret.isPending} onClick={() => verifySecret.mutate({ restaurantId: rid, provider: toMutationProvider(service.provider), keyName })} className="h-10 shrink-0 rounded-xl border-[#ddc6b5] px-3 text-xs font-extrabold text-[#704d37]">Check</Button>
+                        <Button aria-label={`Verify ${keyName}`} variant="outline" disabled={!rid || verifySecret.isPending} onClick={() => verifySecret.mutate({ restaurantId: rid, provider: toMutationProvider(service.provider), keyName })} className="h-10 shrink-0 rounded-xl border-[#D8DFC0] px-3 text-xs font-extrabold text-[#3F4C1E]">Check</Button>
                       </div>
                     </div>
                   ))}
@@ -160,7 +160,7 @@ export default function IntegrationPanel({ restaurantId }: { restaurantId?: stri
       <section className="rounded-2xl bg-[#fffdf9] p-6 shadow-sm">
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-center gap-3">
-            <span className={`grid h-10 w-10 place-items-center rounded-xl ${isRouteActive ? "bg-[#e5f1e5] text-[#42774b]" : "bg-[#f7e4d3] text-[#B95509]"}`}>
+            <span className={`grid h-10 w-10 place-items-center rounded-xl ${isRouteActive ? "bg-[#e5f1e5] text-[#42774b]" : "bg-[#E9EFD6] text-[#B95509]"}`}>
               <Split className="h-5 w-5" />
             </span>
             <div>
@@ -179,27 +179,27 @@ export default function IntegrationPanel({ restaurantId }: { restaurantId?: stri
 
         {!isRouteActive && (
           <div className="mt-5 space-y-3 border-t border-dashed border-[#e6d6c8] pt-5">
-            <p className="text-[10px] font-extrabold uppercase tracking-[0.12em] text-[#9e765e]">Link a Razorpay sub-account for automatic settlement</p>
+            <p className="text-[10px] font-extrabold uppercase tracking-[0.12em] text-[#5F6B3C]">Link a Razorpay sub-account for automatic settlement</p>
             <div className="grid gap-3 sm:grid-cols-2">
               <div>
-                <label className="text-xs font-extrabold text-[#5a4130]">Contact email</label>
-                <Input value={routeForm.contactEmail} onChange={e => setRouteForm(f => ({ ...f, contactEmail: e.target.value }))} type="email" placeholder="restaurant@example.com" className="mt-1.5 h-10 rounded-xl border-[#ddc6b5] text-xs" />
+                <label className="text-xs font-extrabold text-[#2A3A0C]">Contact email</label>
+                <Input value={routeForm.contactEmail} onChange={e => setRouteForm(f => ({ ...f, contactEmail: e.target.value }))} type="email" placeholder="restaurant@example.com" className="mt-1.5 h-10 rounded-xl border-[#D8DFC0] text-xs" />
               </div>
               <div>
-                <label className="text-xs font-extrabold text-[#5a4130]">Contact phone</label>
-                <Input value={routeForm.contactPhone} onChange={e => setRouteForm(f => ({ ...f, contactPhone: e.target.value }))} placeholder="+91 98765 43210" className="mt-1.5 h-10 rounded-xl border-[#ddc6b5] text-xs" />
+                <label className="text-xs font-extrabold text-[#2A3A0C]">Contact phone</label>
+                <Input value={routeForm.contactPhone} onChange={e => setRouteForm(f => ({ ...f, contactPhone: e.target.value }))} placeholder="+91 98765 43210" className="mt-1.5 h-10 rounded-xl border-[#D8DFC0] text-xs" />
               </div>
               <div>
-                <label className="text-xs font-extrabold text-[#5a4130]">Legal business name</label>
-                <Input value={routeForm.legalBusinessName} onChange={e => setRouteForm(f => ({ ...f, legalBusinessName: e.target.value }))} placeholder="Optional" className="mt-1.5 h-10 rounded-xl border-[#ddc6b5] text-xs" />
+                <label className="text-xs font-extrabold text-[#2A3A0C]">Legal business name</label>
+                <Input value={routeForm.legalBusinessName} onChange={e => setRouteForm(f => ({ ...f, legalBusinessName: e.target.value }))} placeholder="Optional" className="mt-1.5 h-10 rounded-xl border-[#D8DFC0] text-xs" />
               </div>
               <div>
-                <label className="text-xs font-extrabold text-[#5a4130]">PAN</label>
-                <Input value={routeForm.pan} onChange={e => setRouteForm(f => ({ ...f, pan: e.target.value }))} placeholder="ABCDE1234F" className="mt-1.5 h-10 rounded-xl border-[#ddc6b5] text-xs" />
+                <label className="text-xs font-extrabold text-[#2A3A0C]">PAN</label>
+                <Input value={routeForm.pan} onChange={e => setRouteForm(f => ({ ...f, pan: e.target.value }))} placeholder="ABCDE1234F" className="mt-1.5 h-10 rounded-xl border-[#D8DFC0] text-xs" />
               </div>
               <div>
-                <label className="text-xs font-extrabold text-[#5a4130]">GSTIN</label>
-                <Input value={routeForm.gstin} onChange={e => setRouteForm(f => ({ ...f, gstin: e.target.value }))} placeholder="29ABCDE1234F1Z5" className="mt-1.5 h-10 rounded-xl border-[#ddc6b5] text-xs" />
+                <label className="text-xs font-extrabold text-[#2A3A0C]">GSTIN</label>
+                <Input value={routeForm.gstin} onChange={e => setRouteForm(f => ({ ...f, gstin: e.target.value }))} placeholder="29ABCDE1234F1Z5" className="mt-1.5 h-10 rounded-xl border-[#D8DFC0] text-xs" />
               </div>
             </div>
             <Button
@@ -217,7 +217,7 @@ export default function IntegrationPanel({ restaurantId }: { restaurantId?: stri
           <div className="mt-5 space-y-3 border-t border-dashed border-[#e6d6c8] pt-5">
             <div className="flex items-end gap-3">
               <div className="flex-1">
-                <label className="text-xs font-extrabold text-[#5a4130]">Platform fee (%)</label>
+                <label className="text-xs font-extrabold text-[#2A3A0C]">Platform fee (%)</label>
                 <Input
                   type="number"
                   min={0}
@@ -226,7 +226,7 @@ export default function IntegrationPanel({ restaurantId }: { restaurantId?: stri
                   placeholder={String(routeData?.platformFeePercent ?? 0)}
                   value={feeInput}
                   onChange={e => setFeeInput(e.target.value)}
-                  className="mt-1.5 h-10 rounded-xl border-[#ddc6b5] text-xs"
+                  className="mt-1.5 h-10 rounded-xl border-[#D8DFC0] text-xs"
                 />
               </div>
               <Button
@@ -245,14 +245,14 @@ export default function IntegrationPanel({ restaurantId }: { restaurantId?: stri
               </Button>
             </div>
             <p className="text-[10px] text-[#886956]">
-              Linked account: <code className="rounded bg-[#f7e4d3] px-1.5 py-0.5 text-[10px] font-bold text-[#5a4130]">{routeData?.accountId}</code>
+              Linked account: <code className="rounded bg-[#E9EFD6] px-1.5 py-0.5 text-[10px] font-bold text-[#2A3A0C]">{routeData?.accountId}</code>
             </p>
           </div>
         )}
       </section>
 
       {/* Security notice */}
-      <section className="rounded-2xl border border-[#ead8c6] bg-[#fff8f0] p-5">
+      <section className="rounded-2xl border border-[#D8DFC0] bg-[#E9EFD6] p-5">
         <div className="flex items-start gap-3">
           <span className="mt-0.5 text-[#aa432e]"><LockKeyhole className="h-5 w-5" /></span>
           <p className="text-xs leading-relaxed text-[#73513e]">

@@ -112,43 +112,43 @@ export default function SignupPage() {
       <div className="min-h-screen bg-[#f7f2eb] flex items-center justify-center p-4">
         <div className="w-full max-w-md space-y-8">
           <div className="text-center space-y-2">
-            <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-[#38271F] text-white mb-4">
+            <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-[#2A3A0C] text-white mb-4">
               <ChefHat className="w-8 h-8" />
             </div>
-            <h1 className="text-3xl font-bold text-[#38271F]" style={{ fontFamily: "'Playfair Display', serif" }}>
+            <h1 className="text-3xl font-bold text-[#2A3A0C]" style={{ fontFamily: "'Playfair Display', serif" }}>
               Welcome Back
             </h1>
-            <p className="text-[#6b5c52]">Sign in to manage your restaurant</p>
+            <p className="text-[#3F4C1E]">Sign in to manage your restaurant</p>
           </div>
 
-          <form onSubmit={handleLogin} className="space-y-4 bg-white rounded-2xl p-8 shadow-sm border border-[#e8ddd0]">
+          <form onSubmit={handleLogin} className="space-y-4 bg-white rounded-2xl p-8 shadow-sm border border-[#D8DFC0]">
             <div className="space-y-2">
               <Label htmlFor="login-email">Email</Label>
               <div className="relative">
-                <Mail className="absolute left-3 top-3 w-4 h-4 text-[#a09080]" />
+                <Mail className="absolute left-3 top-3 w-4 h-4 text-[#9AA07E]" />
                 <Input id="login-email" type="email" placeholder="you@restaurant.com" className="pl-10" value={form.email} onChange={e => update("email", e.target.value)} />
               </div>
             </div>
             <div className="space-y-2">
               <Label htmlFor="login-password">Password</Label>
               <div className="relative">
-                <Lock className="absolute left-3 top-3 w-4 h-4 text-[#a09080]" />
+                <Lock className="absolute left-3 top-3 w-4 h-4 text-[#9AA07E]" />
                 <Input id="login-password" type="password" placeholder="Your password" className="pl-10" value={form.password} onChange={e => update("password", e.target.value)} />
               </div>
             </div>
-            <Button type="submit" className="w-full bg-[#38271F] hover:bg-[#2a1d17] text-white" disabled={isLoading}>
+            <Button type="submit" className="w-full bg-[#2A3A0C] hover:bg-[#2A3A0C] text-white" disabled={isLoading}>
               {isLoading ? <LoaderCircle className="w-4 h-4 animate-spin mr-2" /> : null}
               Sign In
             </Button>
           </form>
 
-          <p className="text-center text-sm text-[#6b5c52]">
+          <p className="text-center text-sm text-[#3F4C1E]">
             Don't have an account?{" "}
-            <button onClick={() => setIsLogin(false)} className="text-[#38271F] font-semibold hover:underline">
+            <button onClick={() => setIsLogin(false)} className="text-[#2A3A0C] font-semibold hover:underline">
               Create one
             </button>
           </p>
-          <p className="text-center text-sm text-[#6b5c52]">
+          <p className="text-center text-sm text-[#3F4C1E]">
             <button onClick={() => toast.info("Password resets are handled by your restaurant owner.")} className="hover:underline">
               Forgot your password?
             </button>
@@ -166,65 +166,65 @@ export default function SignupPage() {
     <div className="min-h-screen bg-[#f7f2eb] flex items-center justify-center p-4">
       <div className="w-full max-w-md space-y-8">
         <div className="text-center space-y-2">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-[#38271F] text-white mb-4">
+          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-[#2A3A0C] text-white mb-4">
             <ChefHat className="w-8 h-8" />
           </div>
-          <h1 className="text-3xl font-bold text-[#38271F]" style={{ fontFamily: "'Playfair Display', serif" }}>
+          <h1 className="text-3xl font-bold text-[#2A3A0C]" style={{ fontFamily: "'Playfair Display', serif" }}>
             Start Your Restaurant
           </h1>
-          <p className="text-[#6b5c52]">Create your branded ordering page in minutes</p>
+          <p className="text-[#3F4C1E]">Create your branded ordering page in minutes</p>
         </div>
 
         <div className="flex gap-2 mb-6">
-          <div className={`flex-1 h-1.5 rounded-full ${step === "account" ? "bg-[#38271F]" : "bg-[#38271F]/30"}`} />
-          <div className={`flex-1 h-1.5 rounded-full ${step === "restaurant" ? "bg-[#38271F]" : "bg-[#38271F]/30"}`} />
+          <div className={`flex-1 h-1.5 rounded-full ${step === "account" ? "bg-[#2A3A0C]" : "bg-[#2A3A0C]/30"}`} />
+          <div className={`flex-1 h-1.5 rounded-full ${step === "restaurant" ? "bg-[#2A3A0C]" : "bg-[#2A3A0C]/30"}`} />
         </div>
 
         {step === "account" ? (
-          <form onSubmit={handleAccountNext} className="space-y-4 bg-white rounded-2xl p-8 shadow-sm border border-[#e8ddd0]">
+          <form onSubmit={handleAccountNext} className="space-y-4 bg-white rounded-2xl p-8 shadow-sm border border-[#D8DFC0]">
             <div className="space-y-2">
               <Label htmlFor="name">Your Name</Label>
               <div className="relative">
-                <User className="absolute left-3 top-3 w-4 h-4 text-[#a09080]" />
+                <User className="absolute left-3 top-3 w-4 h-4 text-[#9AA07E]" />
                 <Input id="name" placeholder="John Doe" className="pl-10" value={form.name} onChange={e => update("name", e.target.value)} />
               </div>
             </div>
             <div className="space-y-2">
               <Label htmlFor="email">Email</Label>
               <div className="relative">
-                <Mail className="absolute left-3 top-3 w-4 h-4 text-[#a09080]" />
+                <Mail className="absolute left-3 top-3 w-4 h-4 text-[#9AA07E]" />
                 <Input id="email" type="email" placeholder="you@restaurant.com" className="pl-10" value={form.email} onChange={e => update("email", e.target.value)} />
               </div>
             </div>
             <div className="space-y-2">
               <Label htmlFor="password">Password</Label>
               <div className="relative">
-                <Lock className="absolute left-3 top-3 w-4 h-4 text-[#a09080]" />
+                <Lock className="absolute left-3 top-3 w-4 h-4 text-[#9AA07E]" />
                 <Input id="password" type="password" placeholder="At least 8 characters" className="pl-10" value={form.password} onChange={e => update("password", e.target.value)} />
               </div>
             </div>
-            <Button type="submit" className="w-full bg-[#38271F] hover:bg-[#2a1d17] text-white">
+            <Button type="submit" className="w-full bg-[#2A3A0C] hover:bg-[#2A3A0C] text-white">
               Continue
             </Button>
           </form>
         ) : (
-          <form onSubmit={handleRegister} className="space-y-4 bg-white rounded-2xl p-8 shadow-sm border border-[#e8ddd0]">
+          <form onSubmit={handleRegister} className="space-y-4 bg-white rounded-2xl p-8 shadow-sm border border-[#D8DFC0]">
             <div className="space-y-2">
               <Label htmlFor="restaurantName">Restaurant Name</Label>
               <div className="relative">
-                <Store className="absolute left-3 top-3 w-4 h-4 text-[#a09080]" />
+                <Store className="absolute left-3 top-3 w-4 h-4 text-[#9AA07E]" />
                 <Input id="restaurantName" placeholder="Your Restaurant Name" className="pl-10" value={form.restaurantName} onChange={e => update("restaurantName", e.target.value)} />
               </div>
             </div>
             {form.restaurantSlug && (
-              <p className="text-xs text-[#6b5c52] -mt-2">
-                Your storefront URL: <span className="font-mono text-[#38271F]">/{form.restaurantSlug}</span>
+              <p className="text-xs text-[#3F4C1E] -mt-2">
+                Your storefront URL: <span className="font-mono text-[#2A3A0C]">/{form.restaurantSlug}</span>
               </p>
             )}
             <div className="space-y-2">
               <Label htmlFor="restaurantSlug">Storefront URL (editable)</Label>
               <Input id="restaurantSlug" placeholder="your-restaurant" className="font-mono" value={form.restaurantSlug} onChange={e => update("restaurantSlug", e.target.value.toLowerCase())} maxLength={64} />
-              <p className="text-xs text-[#6b5c52]">Lowercase letters, numbers, hyphens only.</p>
+              <p className="text-xs text-[#3F4C1E]">Lowercase letters, numbers, hyphens only.</p>
             </div>
             <div className="space-y-2">
               <Label htmlFor="cuisineSummary">Cuisine Type</Label>
@@ -233,14 +233,14 @@ export default function SignupPage() {
             <div className="space-y-2">
               <Label htmlFor="address">Address</Label>
               <div className="relative">
-                <MapPin className="absolute left-3 top-3 w-4 h-4 text-[#a09080]" />
+                <MapPin className="absolute left-3 top-3 w-4 h-4 text-[#9AA07E]" />
                 <Input id="address" placeholder="Full address of your kitchen" className="pl-10" value={form.address} onChange={e => update("address", e.target.value)} />
               </div>
             </div>
             <div className="space-y-2">
               <Label htmlFor="contactPhone">Contact Phone (optional)</Label>
               <div className="relative">
-                <Phone className="absolute left-3 top-3 w-4 h-4 text-[#a09080]" />
+                <Phone className="absolute left-3 top-3 w-4 h-4 text-[#9AA07E]" />
                 <Input id="contactPhone" placeholder="+91 98765 43210" className="pl-10" value={form.contactPhone} onChange={e => update("contactPhone", e.target.value)} />
               </div>
             </div>
@@ -248,7 +248,7 @@ export default function SignupPage() {
               <Button type="button" variant="outline" className="flex-1" onClick={() => setStep("account")}>
                 Back
               </Button>
-              <Button type="submit" className="flex-1 bg-[#38271F] hover:bg-[#2a1d17] text-white" disabled={isLoading}>
+              <Button type="submit" className="flex-1 bg-[#2A3A0C] hover:bg-[#2A3A0C] text-white" disabled={isLoading}>
                 {isLoading ? <LoaderCircle className="w-4 h-4 animate-spin mr-2" /> : null}
                 Create Restaurant
               </Button>
@@ -256,13 +256,13 @@ export default function SignupPage() {
           </form>
         )}
 
-        <p className="text-center text-sm text-[#6b5c52]">
+        <p className="text-center text-sm text-[#3F4C1E]">
           Already have an account?{" "}
-          <button onClick={() => setIsLogin(true)} className="text-[#38271F] font-semibold hover:underline">
+          <button onClick={() => setIsLogin(true)} className="text-[#2A3A0C] font-semibold hover:underline">
             Sign in
           </button>
         </p>
-        <p className="text-center text-sm text-[#6b5c52]">
+        <p className="text-center text-sm text-[#3F4C1E]">
           <button onClick={() => setLocation("/")} className="hover:underline">
             Back to storefront
           </button>

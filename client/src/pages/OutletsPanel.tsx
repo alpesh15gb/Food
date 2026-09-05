@@ -114,7 +114,7 @@ export default function OutletsPanel({ restaurantId }: { restaurantId: string })
     return (
       <div className="space-y-4" aria-label="Loading outlets">
         {[1, 2, 3].map(i => (
-          <div key={i} className="h-24 animate-pulse rounded-xl bg-[#eadfd4]" />
+          <div key={i} className="h-24 animate-pulse rounded-xl bg-[#E9EFD6]" />
         ))}
       </div>
     );

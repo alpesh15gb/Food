@@ -24,7 +24,7 @@ function RouteFallback() {
     >
       <div className="flex flex-col items-center gap-4">
         <span
-          className="h-10 w-10 animate-spin rounded-full border-4 border-[#e4d5c8] border-t-[#B95509]"
+          className="h-10 w-10 animate-spin rounded-full border-4 border-[#D8DFC0] border-t-[#B95509]"
           aria-hidden="true"
         />
         <p className="text-sm font-bold text-[#816252]">Loading…</p>

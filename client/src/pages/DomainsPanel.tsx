@@ -88,15 +88,15 @@ export default function DomainsPanel({ restaurantId }: { restaurantId: string })
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-xl font-bold text-[#38271F]" style={{ fontFamily: "var(--font-display)" }}>Custom Domains</h2>
-        <p className="text-sm text-[#6b5c52] mt-1">Point your own domain to your storefront. Add a CNAME record at your DNS provider.</p>
+        <h2 className="text-xl font-bold text-[#2A3A0C]" style={{ fontFamily: "var(--font-display)" }}>Custom Domains</h2>
+        <p className="text-sm text-[#3F4C1E] mt-1">Point your own domain to your storefront. Add a CNAME record at your DNS provider.</p>
       </div>
 
       {cnameTarget && (
-        <div className="flex flex-wrap items-center gap-3 rounded-xl border border-[#e8ddd0] bg-white p-4">
+        <div className="flex flex-wrap items-center gap-3 rounded-xl border border-[#D8DFC0] bg-white p-4">
           <div className="min-w-0 flex-1">
-            <p className="text-xs font-bold text-[#6b5c52]">Point your CNAME record to</p>
-            <code className="mt-1 block truncate rounded bg-[#f7f2eb] px-2 py-1 text-sm font-bold text-[#38271F]">{cnameTarget}</code>
+            <p className="text-xs font-bold text-[#3F4C1E]">Point your CNAME record to</p>
+            <code className="mt-1 block truncate rounded bg-[#f7f2eb] px-2 py-1 text-sm font-bold text-[#2A3A0C]">{cnameTarget}</code>
           </div>
           <Button size="sm" variant="outline" onClick={() => copyCname(cnameTarget)} aria-label="Copy CNAME target">
             <Copy className="w-3 h-3 mr-1" /> Copy
@@ -105,16 +105,16 @@ export default function DomainsPanel({ restaurantId }: { restaurantId: string })
       )}
 
       {!adding ? (
-        <Button onClick={() => setAdding(true)} className="bg-[#38271F] hover:bg-[#2a1d17] text-white gap-2">
+        <Button onClick={() => setAdding(true)} className="bg-[#2A3A0C] hover:bg-[#2A3A0C] text-white gap-2">
           <Plus className="w-4 h-4" /> Add Domain
         </Button>
       ) : (
-        <form onSubmit={handleAdd} className="flex gap-2 items-end bg-white p-4 rounded-xl border border-[#e8ddd0]">
+        <form onSubmit={handleAdd} className="flex gap-2 items-end bg-white p-4 rounded-xl border border-[#D8DFC0]">
           <div className="flex-1 space-y-1">
-            <label htmlFor="new-domain" className="text-xs font-medium text-[#6b5c52]">Domain Name</label>
+            <label htmlFor="new-domain" className="text-xs font-medium text-[#3F4C1E]">Domain Name</label>
             <Input id="new-domain" placeholder="order.yourrestaurant.com" value={newDomain} onChange={e => setNewDomain(e.target.value)} autoFocus />
           </div>
-          <Button type="submit" disabled={addDomain.isPending} className="bg-[#38271F] hover:bg-[#2a1d17] text-white">
+          <Button type="submit" disabled={addDomain.isPending} className="bg-[#2A3A0C] hover:bg-[#2A3A0C] text-white">
             {addDomain.isPending ? <LoaderCircle className="w-4 h-4 animate-spin" /> : "Add"}
           </Button>
           <Button type="button" variant="ghost" aria-label="Cancel adding domain" onClick={() => { setAdding(false); setNewDomain(""); }}>
@@ -126,7 +126,7 @@ export default function DomainsPanel({ restaurantId }: { restaurantId: string })
       {domains.isLoading ? (
         <div className="space-y-3" aria-label="Loading domains">
           {[1, 2].map(i => (
-            <div key={i} className="h-20 animate-pulse rounded-xl bg-[#eadfd4]" />
+            <div key={i} className="h-20 animate-pulse rounded-xl bg-[#E9EFD6]" />
           ))}
         </div>
       ) : domains.isError ? (
@@ -137,7 +137,7 @@ export default function DomainsPanel({ restaurantId }: { restaurantId: string })
       ) : null}
 
       {domains.isSuccess && list.length === 0 && !adding && (
-        <div className="text-center py-12 text-[#a09080]">
+        <div className="text-center py-12 text-[#9AA07E]">
           <Globe className="w-12 h-12 mx-auto mb-3 opacity-40" />
           <p>No custom domains configured yet.</p>
         </div>
@@ -145,7 +145,7 @@ export default function DomainsPanel({ restaurantId }: { restaurantId: string })
 
       <div className="space-y-3">
         {list.map(domain => (
-          <div key={domain.id} className="bg-white rounded-xl border border-[#e8ddd0] p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <div key={domain.id} className="bg-white rounded-xl border border-[#D8DFC0] p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
             <div className="flex items-center gap-3 min-w-0">
               {domain.isVerified ? (
                 <ShieldCheck className="w-5 h-5 text-green-600 shrink-0" />
@@ -156,10 +156,10 @@ export default function DomainsPanel({ restaurantId }: { restaurantId: string })
                 <div className="flex items-center gap-2">
                   <span className="font-medium truncate">{domain.domain}</span>
                   {domain.isPrimary && (
-                    <span className="text-[10px] font-bold uppercase tracking-wider bg-[#38271F] text-white px-1.5 py-0.5 rounded">Primary</span>
+                    <span className="text-[10px] font-bold uppercase tracking-wider bg-[#2A3A0C] text-white px-1.5 py-0.5 rounded">Primary</span>
                   )}
                 </div>
-                <p className="text-xs text-[#6b5c52]">
+                <p className="text-xs text-[#3F4C1E]">
                   {domain.isVerified
                     ? `SSL: ${domain.sslStatus} • Verified ${domain.verifiedAt && !Number.isNaN(new Date(domain.verifiedAt).getTime()) ? new Date(domain.verifiedAt).toLocaleDateString() : ""}`
                     : cnameTarget
@@ -181,7 +181,7 @@ export default function DomainsPanel({ restaurantId }: { restaurantId: string })
                 </Button>
               )}
               {domain.isVerified && (
-                <a href={`https://${domain.domain}`} target="_blank" rel="noopener noreferrer" className="inline-flex items-center justify-center h-8 px-3 text-xs font-medium rounded-md border border-[#e8ddd0] hover:bg-[#f7f2eb]">
+                <a href={`https://${domain.domain}`} target="_blank" rel="noopener noreferrer" className="inline-flex items-center justify-center h-8 px-3 text-xs font-medium rounded-md border border-[#D8DFC0] hover:bg-[#f7f2eb]">
                   <CheckCircle2 className="w-3 h-3 mr-1" /> Visit
                 </a>
               )}

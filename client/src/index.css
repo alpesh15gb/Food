@@ -45,27 +45,27 @@
   --chart-5: oklch(0.32 0.03 55);
   --radius: 1.1rem;
   --background: oklch(0.985 0.012 80);
-  --foreground: oklch(0.23 0.025 50);
+  --foreground: oklch(0.24 0.03 115);
   --card: oklch(1 0.005 80);
-  --card-foreground: oklch(0.23 0.025 50);
+  --card-foreground: oklch(0.24 0.03 115);
   --popover: oklch(1 0.005 80);
-  --popover-foreground: oklch(0.23 0.025 50);
-  --secondary: oklch(0.95 0.02 72);
-  --secondary-foreground: oklch(0.35 0.035 50);
-  --muted: oklch(0.955 0.012 82);
-  --muted-foreground: oklch(0.52 0.03 58);
-  --accent: oklch(0.93 0.03 75);
-  --accent-foreground: oklch(0.28 0.035 48);
+  --popover-foreground: oklch(0.24 0.03 115);
+  --secondary: oklch(0.94 0.025 115);
+  --secondary-foreground: oklch(0.33 0.04 115);
+  --muted: oklch(0.95 0.015 115);
+  --muted-foreground: oklch(0.5 0.035 115);
+  --accent: oklch(0.92 0.035 115);
+  --accent-foreground: oklch(0.27 0.04 115);
   --destructive: oklch(0.54 0.19 26);
   --destructive-foreground: oklch(0.99 0.01 75);
-  --border: oklch(0.89 0.018 75);
-  --input: oklch(0.89 0.018 75);
+  --border: oklch(0.89 0.02 115);
+  --input: oklch(0.89 0.02 115);
   --ring: oklch(0.55 0.14 58);
 }
 
 .dark {
   --background: oklch(0.19 0.02 48);
-  --foreground: oklch(0.94 0.015 80);
+  --foreground: oklch(0.94 0.015 115);
   --card: oklch(0.24 0.023 48);
   --card-foreground: oklch(0.94 0.015 80);
   --popover: oklch(0.24 0.023 48);
@@ -73,7 +73,7 @@
   --secondary: oklch(0.29 0.027 48);
   --secondary-foreground: oklch(0.86 0.02 80);
   --muted: oklch(0.29 0.027 48);
-  --muted-foreground: oklch(0.72 0.025 80);
+  --muted-foreground: oklch(0.72 0.025 115);
   --accent: oklch(0.3 0.035 48);
   --accent-foreground: oklch(0.94 0.015 80);
   --border: oklch(0.94 0.015 80 / 12%);
@@ -110,8 +110,8 @@
   .ticket-edge { clip-path: polygon(0.9rem 0, calc(100% - 0.9rem) 0, 100% 0.9rem, 100% calc(100% - 0.9rem), calc(100% - 0.9rem) 100%, 0.9rem 100%, 0 calc(100% - 0.9rem), 0 0.9rem); }
   /* clip-path clips focus outlines — drop the notch while focus is inside. */
   .ticket-edge:focus-within { clip-path: none; border-radius: 1rem; }
-  .paper-grain { background-image: radial-gradient(rgba(91, 58, 36, 0.06) 0.7px, transparent 0.7px); background-size: 8px 8px; }
-  .dotted-rule { border-top: 1px dashed oklch(0.78 0.035 70); }
+  .paper-grain { background-image: radial-gradient(rgba(46, 66, 14, 0.06) 0.7px, transparent 0.7px); background-size: 8px 8px; }
+  .dotted-rule { border-top: 1px dashed oklch(0.78 0.04 115); }
   .hide-scrollbar::-webkit-scrollbar { display: none; }
   .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
   /* Fixed bottom bars clear the iOS home indicator / gesture area. */

@@ -112,12 +112,12 @@ function useDebouncedValue<T>(value: T, delay = 200): T {
 function PanelFallback({ label }: { label: string }) {
   return (
     <div className="space-y-4" aria-busy="true" aria-label={label}>
-      <div className="h-16 animate-pulse rounded-2xl bg-[#eadfd4]" />
+      <div className="h-16 animate-pulse rounded-2xl bg-[#E9EFD6]" />
       <div className="grid gap-4 sm:grid-cols-2">
-        <div className="h-40 animate-pulse rounded-2xl bg-[#eadfd4]" />
-        <div className="h-40 animate-pulse rounded-2xl bg-[#eadfd4]" />
+        <div className="h-40 animate-pulse rounded-2xl bg-[#E9EFD6]" />
+        <div className="h-40 animate-pulse rounded-2xl bg-[#E9EFD6]" />
       </div>
-      <div className="h-64 animate-pulse rounded-2xl bg-[#eadfd4]" />
+      <div className="h-64 animate-pulse rounded-2xl bg-[#E9EFD6]" />
     </div>
   );
 }
@@ -208,7 +208,7 @@ function SlugRedirect({ section }: { section: string }) {
             <Button
               onClick={() => restaurants.refetch()}
               variant="outline"
-              className="h-11 flex-1 rounded-xl border-[#d8bda7] font-extrabold text-[#704d37]"
+              className="h-11 flex-1 rounded-xl border-[#D8DFC0] font-extrabold text-[#3F4C1E]"
             >
               <RefreshCw className="mr-2 h-4 w-4" /> Retry
             </Button>
@@ -262,9 +262,9 @@ function AdminAccess() {
         </h1>
         {localAccess.isLoading ? (
           <div className="mt-5 space-y-3" aria-label="Loading sign-in options">
-            <div className="h-11 animate-pulse rounded-xl bg-[#eadfd4]" />
-            <div className="h-11 animate-pulse rounded-xl bg-[#eadfd4]" />
-            <div className="h-11 animate-pulse rounded-xl bg-[#eadfd4]" />
+            <div className="h-11 animate-pulse rounded-xl bg-[#E9EFD6]" />
+            <div className="h-11 animate-pulse rounded-xl bg-[#E9EFD6]" />
+            <div className="h-11 animate-pulse rounded-xl bg-[#E9EFD6]" />
           </div>
         ) : localAccess.data ? (
           <form
@@ -286,7 +286,7 @@ function AdminAccess() {
                 }}
                 type="password"
                 autoComplete="current-password"
-                className="mt-2 h-11 rounded-xl border-[#ddc6b5]"
+                className="mt-2 h-11 rounded-xl border-[#D8DFC0]"
                 placeholder="Paste the admin passphrase"
               />
             </label>
@@ -325,7 +325,7 @@ function AdminAccess() {
                 onChange={(e) => { setEmail(e.target.value); setAccessError(""); }}
                 type="email"
                 autoComplete="email"
-                className="mt-2 h-11 rounded-xl border-[#ddc6b5]"
+                className="mt-2 h-11 rounded-xl border-[#D8DFC0]"
                 placeholder="owner@restaurant.com"
               />
             </label>
@@ -336,7 +336,7 @@ function AdminAccess() {
                 onChange={(e) => { setPassword(e.target.value); setAccessError(""); }}
                 type="password"
                 autoComplete="current-password"
-                className="mt-2 h-11 rounded-xl border-[#ddc6b5]"
+                className="mt-2 h-11 rounded-xl border-[#D8DFC0]"
                 placeholder="Enter your password"
               />
             </label>
@@ -397,7 +397,7 @@ function MenuImportWorkspace({ slug }: { slug: string }) {
           <Button
             onClick={() => setLocation(adminPath(slug, "overview"))}
             variant="outline"
-            className="h-10 rounded-xl border-[#d8bda7] bg-white text-xs font-extrabold text-[#704d37]"
+            className="h-10 rounded-xl border-[#D8DFC0] bg-white text-xs font-extrabold text-[#3F4C1E]"
           >
             Back to overview
           </Button>
@@ -409,11 +409,11 @@ function MenuImportWorkspace({ slug }: { slug: string }) {
     <div className="min-h-screen bg-[#f7f2eb] p-5 text-[#34251d] lg:p-8">
       <div className="mx-auto max-w-7xl">
         <div className="mb-6 flex flex-wrap items-center gap-3">
-          <span className="grid h-10 w-10 place-items-center rounded-xl bg-[#f7e4d3] text-[#B95509]">
+          <span className="grid h-10 w-10 place-items-center rounded-xl bg-[#E9EFD6] text-[#B95509]">
             <FileUp className="h-5 w-5" />
           </span>
           <div className="min-w-0 flex-1">
-            <p className="text-[10px] font-extrabold uppercase tracking-[0.16em] text-[#9e765e]">
+            <p className="text-[10px] font-extrabold uppercase tracking-[0.16em] text-[#5F6B3C]">
               {dashboard.data.restaurant.name} · menu studio
             </p>
             <h1 className="font-display text-3xl">Import your live menu</h1>
@@ -423,7 +423,7 @@ function MenuImportWorkspace({ slug }: { slug: string }) {
             disabled={dashboard.isFetching}
             variant="outline"
             aria-label="Retry loading restaurant configuration"
-            className="h-10 rounded-xl border-[#d8bda7] bg-white text-xs font-extrabold text-[#704d37]"
+            className="h-10 rounded-xl border-[#D8DFC0] bg-white text-xs font-extrabold text-[#3F4C1E]"
           >
             <RefreshCw className={`mr-2 h-3.5 w-3.5 ${dashboard.isFetching ? "animate-spin" : ""}`} />
             Retry
@@ -639,10 +639,10 @@ function AdminWorkspace({ section, slug }: { section: string; slug: string }) {
 
   return (
     <div className="min-h-screen bg-[#f7f2eb] text-[#34251d]">
-      <header className="border-b border-[#e4d5c8] bg-[#fffdf9] px-5 py-5 lg:px-8">
+      <header className="border-b border-[#D8DFC0] bg-[#fffdf9] px-5 py-5 lg:px-8">
         <div className="mx-auto max-w-7xl">
           <nav aria-label="Breadcrumb" className="mb-2">
-            <ol className="flex flex-wrap items-center gap-1.5 text-[11px] font-bold text-[#9b7a66]">
+            <ol className="flex flex-wrap items-center gap-1.5 text-[11px] font-bold text-[#5F6B3C]">
               <li>Kitchen Admin</li>
               <li aria-hidden>/</li>
               <li className="max-w-40 truncate">{data.restaurant.name}</li>
@@ -652,7 +652,7 @@ function AdminWorkspace({ section, slug }: { section: string; slug: string }) {
           </nav>
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div>
-              <p className="text-[10px] font-extrabold uppercase tracking-[0.16em] text-[#9e765e]">
+              <p className="text-[10px] font-extrabold uppercase tracking-[0.16em] text-[#5F6B3C]">
                 Kitchen desk · {data.restaurant.name}
               </p>
               <h1 className="font-display mt-1 text-3xl">
@@ -668,7 +668,7 @@ function AdminWorkspace({ section, slug }: { section: string; slug: string }) {
               <Button
                 onClick={() => window.open("/", "_blank")}
                 variant="outline"
-                className="rounded-xl border-[#d8bda7] bg-white text-xs font-extrabold text-[#704d37]"
+                className="rounded-xl border-[#D8DFC0] bg-white text-xs font-extrabold text-[#3F4C1E]"
               >
                 View storefront <ExternalLink className="ml-2 h-3.5 w-3.5" />
               </Button>
@@ -829,7 +829,7 @@ function OutletSwitcher({
   const outlets = (outletsQuery.data ?? []) as Array<{ id: string; name: string }>;
   if (outletsQuery.isError || (outletsQuery.isSuccess && outlets.length === 0)) {
     return currentOutletName ? (
-      <span className="inline-flex items-center gap-2 rounded-xl border border-[#e4d5c8] bg-white px-3 py-2 text-xs font-extrabold text-[#704d37]">
+      <span className="inline-flex items-center gap-2 rounded-xl border border-[#D8DFC0] bg-white px-3 py-2 text-xs font-extrabold text-[#3F4C1E]">
         <Store className="h-3.5 w-3.5" aria-hidden />
         {currentOutletName}
       </span>
@@ -840,7 +840,7 @@ function OutletSwitcher({
   const value = selectedId ?? currentOutletId ?? "";
 
   return (
-    <label className="inline-flex items-center gap-2 rounded-xl border border-[#d8bda7] bg-white px-3 py-1.5 text-xs font-extrabold text-[#704d37]">
+    <label className="inline-flex items-center gap-2 rounded-xl border border-[#D8DFC0] bg-white px-3 py-1.5 text-xs font-extrabold text-[#3F4C1E]">
       <Store className="h-3.5 w-3.5 shrink-0" aria-hidden />
       <span className="sr-only">Active outlet</span>
       <select
@@ -886,7 +886,7 @@ function OverviewPanel({ data, slug }: { data: any; slug: string }) {
       value: m.todayOrders,
       detail: "All orders started today",
       icon: ClipboardList,
-      tone: "bg-[#f7e4d3] text-[#B95509]",
+      tone: "bg-[#E9EFD6] text-[#B95509]",
     },
     {
       label: "Today's sales",
@@ -963,7 +963,7 @@ function OverviewPanel({ data, slug }: { data: any; slug: string }) {
               {card.label}
             </p>
             <p className="font-display mt-1 text-3xl">{card.value}</p>
-            <p className="mt-2 text-xs text-[#9b7a66]">{card.detail}</p>
+            <p className="mt-2 text-xs text-[#5F6B3C]">{card.detail}</p>
           </article>
         ))}
       </section>
@@ -973,19 +973,19 @@ function OverviewPanel({ data, slug }: { data: any; slug: string }) {
         style={{ contentVisibility: "auto", containIntrinsicSize: "auto 160px" }}
         className="rounded-2xl bg-[#fffdf9] p-5 shadow-sm"
       >
-        <p className="text-[10px] font-extrabold uppercase tracking-[0.16em] text-[#9e765e]">
+        <p className="text-[10px] font-extrabold uppercase tracking-[0.16em] text-[#5F6B3C]">
           Order pipeline
         </p>
         <div className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
           {statusCards.map((card) => (
             <div
               key={card.label}
-              className="flex items-center gap-3 rounded-xl border border-[#eadccf] bg-[#fffaf5] p-3"
+              className="flex items-center gap-3 rounded-xl border border-[#D8DFC0] bg-[#E9EFD6] p-3"
             >
               <card.icon className={`h-5 w-5 ${card.color}`} />
               <div>
                 <p className="text-lg font-extrabold">{card.value}</p>
-                <p className="text-xs text-[#8e6d59]">{card.label}</p>
+                <p className="text-xs text-[#5F6B3C]">{card.label}</p>
               </div>
             </div>
           ))}
@@ -999,31 +999,31 @@ function OverviewPanel({ data, slug }: { data: any; slug: string }) {
       >
         <div className="flex items-center justify-between">
           <div>
-            <p className="text-[10px] font-extrabold uppercase tracking-[0.16em] text-[#9e765e]">
+            <p className="text-[10px] font-extrabold uppercase tracking-[0.16em] text-[#5F6B3C]">
               Recent orders
             </p>
             <h2 className="font-display mt-1 text-2xl">
               Latest activity
             </h2>
           </div>
-          <span className="rounded-full bg-[#f7e4d3] px-3 py-1 text-xs font-extrabold text-[#a64130]">
+          <span className="rounded-full bg-[#E9EFD6] px-3 py-1 text-xs font-extrabold text-[#a64130]">
             {m.openOrders} open
           </span>
         </div>
         <div className="mt-5 space-y-3">
           {(data.orders ?? []).length === 0 ? (
-            <p className="rounded-xl border border-dashed border-[#dbc3b0] bg-[#fff9f3] p-5 text-center text-xs font-bold text-[#91725e]">
+            <p className="rounded-xl border border-dashed border-[#D8DFC0] bg-[#E9EFD6] p-5 text-center text-xs font-bold text-[#5F6B3C]">
               No orders yet — new orders will appear here as soon as they're placed.
             </p>
           ) : (
           (data.orders ?? []).slice(0, 8).map((order: any) => (
             <div
               key={order.id}
-              className="flex items-center justify-between rounded-xl border border-[#eadccf] bg-[#fffaf5] p-3"
+              className="flex items-center justify-between rounded-xl border border-[#D8DFC0] bg-[#E9EFD6] p-3"
             >
               <div>
                 <p className="text-sm font-extrabold">{order.orderNumber}</p>
-                <p className="mt-1 text-xs text-[#8e6d59]">
+                <p className="mt-1 text-xs text-[#5F6B3C]">
                   {statusLabel[order.status] || order.status} ·{" "}
                   {money(order.totalPaise)}
                 </p>
@@ -1044,7 +1044,7 @@ function OverviewPanel({ data, slug }: { data: any; slug: string }) {
       <section className="grid gap-5 lg:grid-cols-[1.35fr_0.65fr]">
         <article
           style={{ contentVisibility: "auto", containIntrinsicSize: "auto 240px" }}
-          className="rounded-2xl bg-[#38271f] p-6 text-white shadow-sm"
+          className="rounded-2xl bg-[#2A3A0C] p-6 text-white shadow-sm"
         >
           <div className="flex items-center gap-3">
             <div
@@ -1072,43 +1072,43 @@ function OverviewPanel({ data, slug }: { data: any; slug: string }) {
         </article>
 
         <article className="rounded-2xl bg-[#fffdf9] p-5 shadow-sm">
-          <p className="text-[10px] font-extrabold uppercase tracking-[0.16em] text-[#9e765e]">
+          <p className="text-[10px] font-extrabold uppercase tracking-[0.16em] text-[#5F6B3C]">
             Quick actions
           </p>
           <h2 className="font-display mt-1 text-2xl">Kitchen controls</h2>
           <div className="mt-5 space-y-3">
             <button
               onClick={() => go("orders")}
-              className="flex w-full items-center gap-3 rounded-xl border border-[#eadccf] bg-[#fffaf5] p-3 text-left hover:bg-[#f8ecdf]"
+              className="flex w-full items-center gap-3 rounded-xl border border-[#D8DFC0] bg-[#E9EFD6] p-3 text-left hover:bg-[#E9EFD6]"
             >
               <ClipboardList className="h-5 w-5 text-[#B95509]" />
               <div>
                 <p className="text-sm font-bold">Manage orders</p>
-                <p className="text-xs text-[#8e6d59]">
+                <p className="text-xs text-[#5F6B3C]">
                   View and update order status
                 </p>
               </div>
             </button>
             <button
               onClick={() => go("menu")}
-              className="flex w-full items-center gap-3 rounded-xl border border-[#eadccf] bg-[#fffaf5] p-3 text-left hover:bg-[#f8ecdf]"
+              className="flex w-full items-center gap-3 rounded-xl border border-[#D8DFC0] bg-[#E9EFD6] p-3 text-left hover:bg-[#E9EFD6]"
             >
               <UtensilsCrossed className="h-5 w-5 text-[#B95509]" />
               <div>
                 <p className="text-sm font-bold">Menu studio</p>
-                <p className="text-xs text-[#8e6d59]">
+                <p className="text-xs text-[#5F6B3C]">
                   Add dishes and manage availability
                 </p>
               </div>
             </button>
             <button
               onClick={() => go("integrations")}
-              className="flex w-full items-center gap-3 rounded-xl border border-[#eadccf] bg-[#fffaf5] p-3 text-left hover:bg-[#f8ecdf]"
+              className="flex w-full items-center gap-3 rounded-xl border border-[#D8DFC0] bg-[#E9EFD6] p-3 text-left hover:bg-[#E9EFD6]"
             >
               <AlertCircle className="h-5 w-5 text-[#B95509]" />
               <div>
                 <p className="text-sm font-bold">Integrations</p>
-                <p className="text-xs text-[#8e6d59]">
+                <p className="text-xs text-[#5F6B3C]">
                   Configure payments and delivery
                 </p>
               </div>
@@ -1192,7 +1192,7 @@ const OrderActions = memo(function OrderActions({
   const transitions = ORDER_TRANSITIONS[order.status] ?? [];
   const showInvoice = order.status === "DELIVERED" || order.status === "READY_FOR_PICKUP";
   if (!transitions.length && !showInvoice)
-    return <span className="text-xs text-[#a37d64]">No actions</span>;
+    return <span className="text-xs text-[#5F6B3C]">No actions</span>;
   return (
     <div className="flex flex-col gap-2">
       {transitions.map((t) => (
@@ -1204,7 +1204,7 @@ const OrderActions = memo(function OrderActions({
           className={`min-h-11 rounded-lg px-3 py-2 text-xs font-extrabold disabled:opacity-50 ${
             t.danger
               ? "border border-red-200 bg-white text-red-600 hover:bg-red-50"
-              : "bg-[#382719] text-white hover:bg-[#4a3527]"
+              : "bg-[#2A3A0C] text-white hover:bg-[#4a3527]"
           }`}
         >
           {busy ? "Saving..." : t.label}
@@ -1232,18 +1232,18 @@ const OrderDesktopRow = memo(function OrderDesktopRow({
 }) {
   return (
     <>
-    <tr className="border-t border-[#f0e4d9]">
+    <tr className="border-t border-[#E9EFD6]">
       <td className="px-5 py-4">
         <button
           onClick={() => onToggleExpand(order.id)}
           aria-expanded={expanded}
           aria-label={`${expanded ? "Hide" : "Show"} details for order ${order.orderNumber}`}
-          className="text-left font-extrabold text-[#382719] underline decoration-dotted decoration-[#c9a88f] underline-offset-4 hover:text-[#B95509]"
+          className="text-left font-extrabold text-[#2A3A0C] underline decoration-dotted decoration-[#c9a88f] underline-offset-4 hover:text-[#B95509]"
         >
           {order.orderNumber}
         </button>
         <div className="mt-1 flex items-center gap-2">
-          <p className="text-xs text-[#8c6d58]">
+          <p className="text-xs text-[#5F6B3C]">
             {new Date(order.createdAt).toLocaleString("en-IN", {
               dateStyle: "medium",
               timeStyle: "short",
@@ -1263,7 +1263,7 @@ const OrderDesktopRow = memo(function OrderDesktopRow({
       </td>
       <td className="px-5 py-4">
         <p className="text-sm font-bold">{order.customerName || "Guest"}</p>
-        <p className="text-xs text-[#8c6d58]">{order.customerPhone || "-"}</p>
+        <p className="text-xs text-[#5F6B3C]">{order.customerPhone || "-"}</p>
       </td>
       <td className="px-5 py-4">
         <span
@@ -1319,18 +1319,18 @@ const OrderMobileCard = memo(function OrderMobileCard({
   onChange: (order: any, next: string, danger?: boolean, confirm?: boolean) => void;
 }) {
   return (
-    <article className="rounded-xl border border-[#eadccf] bg-[#fffaf5] p-4">
+    <article className="rounded-xl border border-[#D8DFC0] bg-[#E9EFD6] p-4">
       <div className="flex items-start justify-between gap-2">
         <div>
           <button
             onClick={() => onToggleExpand(order.id)}
             aria-expanded={expanded}
             aria-label={`${expanded ? "Hide" : "Show"} details for order ${order.orderNumber}`}
-            className="text-left text-sm font-extrabold text-[#382719] underline decoration-dotted decoration-[#c9a88f] underline-offset-4"
+            className="text-left text-sm font-extrabold text-[#2A3A0C] underline decoration-dotted decoration-[#c9a88f] underline-offset-4"
           >
             {order.orderNumber}
           </button>
-          <p className="mt-0.5 text-xs text-[#8c6d58]">
+          <p className="mt-0.5 text-xs text-[#5F6B3C]">
             {new Date(order.createdAt).toLocaleString("en-IN", {
               dateStyle: "medium",
               timeStyle: "short",
@@ -1349,13 +1349,13 @@ const OrderMobileCard = memo(function OrderMobileCard({
         <p className="font-bold">{order.customerName || "Guest"}</p>
         <p className="font-extrabold">{money(order.totalPaise)}</p>
       </div>
-      <p className="mt-1 text-xs text-[#8c6d58]">{order.customerPhone || "No phone"} · {order.paymentStatus}</p>
+      <p className="mt-1 text-xs text-[#5F6B3C]">{order.customerPhone || "No phone"} · {order.paymentStatus}</p>
       {expanded && (
-        <div className="mt-3 border-t border-[#f0e4d9] pt-3">
+        <div className="mt-3 border-t border-[#E9EFD6] pt-3">
           <OrderDetails orderId={order.id} />
         </div>
       )}
-      <div className="mt-3 border-t border-[#f0e4d9] pt-3">
+      <div className="mt-3 border-t border-[#E9EFD6] pt-3">
         <OrderActions order={order} busy={busy} onChange={onChange} />
       </div>
     </article>
@@ -1369,8 +1369,8 @@ function OrderDetails({ orderId }: { orderId: string }) {
   if (detail.isLoading) {
     return (
       <div className="space-y-2" aria-label="Loading order details">
-        <div className="h-8 animate-pulse rounded-lg bg-[#f0e2d3]" />
-        <div className="h-8 animate-pulse rounded-lg bg-[#f0e2d3]" />
+        <div className="h-8 animate-pulse rounded-lg bg-[#E9EFD6]" />
+        <div className="h-8 animate-pulse rounded-lg bg-[#E9EFD6]" />
       </div>
     );
   }
@@ -1392,14 +1392,14 @@ function OrderDetails({ orderId }: { orderId: string }) {
       <div className="space-y-1.5">
         {(d.items ?? []).map((it: any) => (
           <div key={it.id} className="flex items-start gap-2">
-            <span className="w-8 shrink-0 font-extrabold text-[#382719]">{it.quantity}x</span>
+            <span className="w-8 shrink-0 font-extrabold text-[#2A3A0C]">{it.quantity}x</span>
             <div className="min-w-0">
-              <p className="font-bold text-[#382719]">{it.itemNameSnapshot}</p>
+              <p className="font-bold text-[#2A3A0C]">{it.itemNameSnapshot}</p>
               {it.variantNameSnapshot && (
-                <p className="text-xs text-[#8c6d58]">{it.variantNameSnapshot}</p>
+                <p className="text-xs text-[#5F6B3C]">{it.variantNameSnapshot}</p>
               )}
               {Array.isArray(it.selectedModifiers) && it.selectedModifiers.length > 0 && (
-                <p className="text-xs italic text-[#8c6d58]">
+                <p className="text-xs italic text-[#5F6B3C]">
                   + {it.selectedModifiers.map((m: any) => m.optionName ?? "").filter(Boolean).join(", ")}
                 </p>
               )}
@@ -1407,16 +1407,16 @@ function OrderDetails({ orderId }: { orderId: string }) {
                 <p className="text-xs font-bold text-[#a3541f]">Note: {it.specialInstructions}</p>
               )}
             </div>
-            <span className="ml-auto shrink-0 font-bold text-[#553d2c]">
+            <span className="ml-auto shrink-0 font-bold text-[#2A3A0C]">
               {money((it.unitPricePaise ?? 0) * (it.quantity ?? 1))}
             </span>
           </div>
         ))}
         {(d.items ?? []).length === 0 && (
-          <p className="text-xs text-[#8c6d58]">No line items recorded.</p>
+          <p className="text-xs text-[#5F6B3C]">No line items recorded.</p>
         )}
       </div>
-      <div className="grid gap-2 border-t border-[#f0e4d9] pt-3 text-xs text-[#71513e] sm:grid-cols-2">
+      <div className="grid gap-2 border-t border-[#E9EFD6] pt-3 text-xs text-[#71513e] sm:grid-cols-2">
         <p><span className="font-extrabold">Deliver to: </span>{addrLine || "—"}</p>
         <p><span className="font-extrabold">Instructions: </span>{d.specialInstructions || d.deliveryNotes || "—"}</p>
         <p><span className="font-extrabold">Payment: </span>{d.paymentStatus}{d.payment ? ` via ${d.payment.method ?? d.payment.provider ?? "—"}` : ""}</p>
@@ -1517,17 +1517,17 @@ function OrdersPanel({ restaurantId }: { restaurantId: string }) {
 
   return (
     <section className="overflow-hidden rounded-2xl bg-[#fffdf9] shadow-sm">
-      <div className="border-b border-[#eadccf] p-5">
+      <div className="border-b border-[#D8DFC0] p-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <p className="text-[10px] font-extrabold uppercase tracking-[0.16em] text-[#9e765e]">
+            <p className="text-[10px] font-extrabold uppercase tracking-[0.16em] text-[#5F6B3C]">
               Live operations
             </p>
             <h2 className="font-display mt-1 text-2xl">Order queue</h2>
           </div>
           <div className="flex items-center gap-2">
             <span
-              className="rounded-full bg-[#f7e4d3] px-3 py-1 text-xs font-extrabold text-[#a64130]"
+              className="rounded-full bg-[#E9EFD6] px-3 py-1 text-xs font-extrabold text-[#a64130]"
               title="Counts only the orders loaded on this page — the workspace total lives on the overview."
             >
               {openOnPage} open on this page
@@ -1536,7 +1536,7 @@ function OrdersPanel({ restaurantId }: { restaurantId: string }) {
               onClick={() => ordersQuery.refetch()}
               disabled={ordersQuery.isFetching}
               aria-label="Refresh orders"
-              className="grid h-11 w-11 place-items-center rounded-xl border border-[#ddc6b5] bg-white text-[#704d37] disabled:opacity-50"
+              className="grid h-11 w-11 place-items-center rounded-xl border border-[#D8DFC0] bg-white text-[#3F4C1E] disabled:opacity-50"
             >
               <RefreshCw className={`h-4 w-4 ${ordersQuery.isFetching ? "animate-spin" : ""}`} />
             </button>
@@ -1545,13 +1545,13 @@ function OrdersPanel({ restaurantId }: { restaurantId: string }) {
         <div className="mt-4 flex flex-col gap-2 sm:flex-row">
           <label htmlFor="orders-search" className="sr-only">Search orders</label>
           <div className="relative flex-1">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#a37d64]" />
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#5F6B3C]" />
             <Input
               id="orders-search"
               value={searchInput}
               onChange={(e) => { setSearchInput(e.target.value); setPage(0); }}
               placeholder="Search order, name, or phone..."
-              className="h-11 rounded-xl border-[#e8d6c5] pl-9 text-sm"
+              className="h-11 rounded-xl border-[#D8DFC0] pl-9 text-sm"
             />
           </div>
         </div>
@@ -1571,8 +1571,8 @@ function OrdersPanel({ restaurantId }: { restaurantId: string }) {
               aria-pressed={filter === value}
               className={`min-h-11 whitespace-nowrap rounded-full px-3 py-1.5 text-xs font-extrabold ${
                 filter === value
-                  ? "bg-[#382719] text-white"
-                  : "border border-[#ddc6b5] bg-white text-[#704d37]"
+                  ? "bg-[#2A3A0C] text-white"
+                  : "border border-[#D8DFC0] bg-white text-[#3F4C1E]"
               }`}
             >
               {label}
@@ -1626,8 +1626,8 @@ function OrdersPanel({ restaurantId }: { restaurantId: string }) {
           </div>
 
           {/* Server pagination */}
-          <div className="flex items-center justify-between border-t border-[#eadccf] px-5 py-3">
-            <p className="text-xs font-bold text-[#856652]">
+          <div className="flex items-center justify-between border-t border-[#D8DFC0] px-5 py-3">
+            <p className="text-xs font-bold text-[#5F6B3C]">
               {searching
                 ? `Searching recent ${orders.length} · ${filtered.length} match${filtered.length === 1 ? "" : "es"}`
                 : `Page ${page + 1} · ${filtered.length} shown`}
@@ -1638,7 +1638,7 @@ function OrdersPanel({ restaurantId }: { restaurantId: string }) {
                 onClick={() => setPage((p) => Math.max(0, p - 1))}
                 disabled={page === 0 || ordersQuery.isFetching}
                 variant="outline"
-                className="h-11 min-h-11 rounded-xl border-[#ddc6b5] px-4 text-xs font-extrabold text-[#704d37]"
+                className="h-11 min-h-11 rounded-xl border-[#D8DFC0] px-4 text-xs font-extrabold text-[#3F4C1E]"
               >
                 Previous
               </Button>
@@ -1646,7 +1646,7 @@ function OrdersPanel({ restaurantId }: { restaurantId: string }) {
                 onClick={() => setPage((p) => p + 1)}
                 disabled={!hasMore || ordersQuery.isFetching}
                 variant="outline"
-                className="h-11 min-h-11 rounded-xl border-[#ddc6b5] px-4 text-xs font-extrabold text-[#704d37]"
+                className="h-11 min-h-11 rounded-xl border-[#D8DFC0] px-4 text-xs font-extrabold text-[#3F4C1E]"
               >
                 Next
               </Button>
@@ -1656,8 +1656,8 @@ function OrdersPanel({ restaurantId }: { restaurantId: string }) {
         </>
       ) : searching || filter !== "all" ? (
         <div className="space-y-3 p-8 text-center">
-          <p className="text-sm font-extrabold text-[#593f2d]">No orders match this search</p>
-          <p className="text-xs text-[#91725e]">
+          <p className="text-sm font-extrabold text-[#2A3A0C]">No orders match this search</p>
+          <p className="text-xs text-[#5F6B3C]">
             {searching
               ? "Search covers the 200 most recent orders — older orders need a narrower status filter."
               : "Try a different status filter."}
@@ -1665,7 +1665,7 @@ function OrdersPanel({ restaurantId }: { restaurantId: string }) {
           <Button
             onClick={() => { setSearchInput(""); setFilter("all"); setPage(0); }}
             variant="outline"
-            className="h-11 rounded-xl border-[#ddc6b5] px-4 text-xs font-extrabold text-[#704d37]"
+            className="h-11 rounded-xl border-[#D8DFC0] px-4 text-xs font-extrabold text-[#3F4C1E]"
           >
             Clear search & filters
           </Button>
@@ -1708,7 +1708,7 @@ const MenuItemRow = memo(function MenuItemRow({
     <div className="flex items-center gap-4">
       <input type="checkbox" aria-label={`Select ${item.name}`} checked={selected} onChange={() => onToggleSelect(item.id)} className="shrink-0 accent-[#B95509]" />
       {item.imageUrl ? (
-        <img src={item.imageUrl} alt="" className="h-10 w-10 shrink-0 rounded-lg object-cover border border-[#eadccf]" />
+        <img src={item.imageUrl} alt="" className="h-10 w-10 shrink-0 rounded-lg object-cover border border-[#D8DFC0]" />
       ) : (
         <div className={`grid h-10 w-10 shrink-0 place-items-center rounded-xl text-xs font-extrabold ${
           item.dietaryType === "veg" ? "bg-green-50 text-green-700" : item.dietaryType === "egg" ? "bg-amber-50 text-amber-700" : "bg-red-50 text-red-700"
@@ -1730,7 +1730,7 @@ const MenuItemRow = memo(function MenuItemRow({
         </div>
       </div>
       <div className="flex items-center gap-2">
-        <button onClick={() => onStartEdit(item)} disabled={listPending} className="rounded-lg border border-[#ddc6b5] bg-white px-2 py-1.5 text-[10px] font-bold text-[#5c4332] hover:bg-[#fff4e9] disabled:opacity-50">Edit</button>
+        <button onClick={() => onStartEdit(item)} disabled={listPending} className="rounded-lg border border-[#D8DFC0] bg-white px-2 py-1.5 text-[10px] font-bold text-[#2A3A0C] hover:bg-[#E9EFD6] disabled:opacity-50">Edit</button>
         <button onClick={() => onDeleteRequest(item.id)} disabled={listPending} className="rounded-lg border border-red-200 bg-white px-2 py-1.5 text-[10px] font-bold text-red-600 hover:bg-red-50 disabled:opacity-50">Delete</button>
         <label className="relative inline-flex cursor-pointer items-center">
           <input type="checkbox" role="switch" aria-checked={item.isOpen} aria-label={`Show ${item.name} on storefront`} checked={item.isOpen} onChange={(e) => {
@@ -1748,7 +1748,7 @@ const MenuItemRow = memo(function MenuItemRow({
             if (e.target.value === "DISABLED" && !window.confirm(`Hide "${item.name}" from the storefront?`)) return;
             onAvailability(item.id, e.target.value);
           }}
-          className="rounded-lg border border-[#ddc6b5] bg-white px-2 py-2 text-xs font-extrabold disabled:opacity-50"
+          className="rounded-lg border border-[#D8DFC0] bg-white px-2 py-2 text-xs font-extrabold disabled:opacity-50"
         >
           <option value="AVAILABLE">Available</option>
           <option value="SOLD_OUT">Sold out</option>
@@ -1918,7 +1918,7 @@ function MenuPanel({
   return (
     <div className="grid gap-5 xl:grid-cols-[0.72fr_1.28fr]">
       {/* Add Item Form */}
-      <aside className="rounded-2xl bg-[#38271f] p-5 text-white shadow-sm">
+      <aside className="rounded-2xl bg-[#2A3A0C] p-5 text-white shadow-sm">
         <p className="text-[10px] font-extrabold uppercase tracking-[0.16em] text-[#e7b99d]">
           Add a dish
         </p>
@@ -2006,7 +2006,7 @@ function MenuPanel({
           <Button
             onClick={onCreate}
             disabled={uploading || createPending}
-            className="h-11 w-full rounded-xl bg-[#f7e4d3] font-extrabold text-[#40291c] hover:bg-white"
+            className="h-11 w-full rounded-xl bg-[#E9EFD6] font-extrabold text-[#40291c] hover:bg-white"
           >
             <Plus className="mr-2 h-4 w-4" />
             {createPending ? "Adding..." : "Add to menu"}
@@ -2016,32 +2016,32 @@ function MenuPanel({
 
       {/* Menu Items List */}
       <section className="overflow-hidden rounded-2xl bg-[#fffdf9] shadow-sm">
-        <div className="border-b border-[#eadccf] p-5">
+        <div className="border-b border-[#D8DFC0] p-5">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-[10px] font-extrabold uppercase tracking-[0.16em] text-[#9e765e]">
+              <p className="text-[10px] font-extrabold uppercase tracking-[0.16em] text-[#5F6B3C]">
                 Live menu
               </p>
               <h2 className="font-display mt-1 text-2xl">Availability controls</h2>
             </div>
-            <span className="text-sm font-bold text-[#856652]">
+            <span className="text-sm font-bold text-[#5F6B3C]">
               {(data.items ?? []).length} dishes
             </span>
           </div>
           <div className="mt-3 flex gap-2">
             <div className="relative flex-1">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#a37d64]" />
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#5F6B3C]" />
               <label htmlFor="menu-search" className="sr-only">Search menu items</label>
               <Input
                 id="menu-search"
                 value={searchInput}
                 onChange={(e) => setSearchInput(e.target.value)}
                 placeholder="Search menu items..."
-                className="h-11 min-h-11 rounded-xl border-[#e8d6c5] pl-9 text-sm"
+                className="h-11 min-h-11 rounded-xl border-[#D8DFC0] pl-9 text-sm"
               />
             </div>
             {items.length > 0 && (
-              <label className="flex min-h-11 cursor-pointer items-center gap-2 rounded-xl border border-[#e8d6c5] bg-white px-3 text-xs font-bold text-[#856652]">
+              <label className="flex min-h-11 cursor-pointer items-center gap-2 rounded-xl border border-[#D8DFC0] bg-white px-3 text-xs font-bold text-[#5F6B3C]">
                 <input type="checkbox" aria-label="Select all dishes" checked={selectedIds.size === items.length && items.length > 0} onChange={toggleAll} className="accent-[#B95509]" />
                 All
               </label>
@@ -2050,7 +2050,7 @@ function MenuPanel({
 
           {/* Bulk action bar */}
           {selectedIds.size > 0 && (
-            <div className="mt-3 flex flex-wrap items-center gap-2 rounded-xl bg-[#38271f] px-4 py-2.5">
+            <div className="mt-3 flex flex-wrap items-center gap-2 rounded-xl bg-[#2A3A0C] px-4 py-2.5">
               <span className="text-xs font-bold text-white">{selectedIds.size} selected</span>
               <button onClick={() => onBulkUpdate({ itemIds: Array.from(selectedIds), availability: "AVAILABLE" })} disabled={listPending} className="rounded-lg bg-white/10 px-2.5 py-1 text-[10px] font-bold text-white hover:bg-white/20 disabled:opacity-50">Set available</button>
               <button onClick={() => onBulkUpdate({ itemIds: Array.from(selectedIds), availability: "SOLD_OUT" })} disabled={listPending} className="rounded-lg bg-white/10 px-2.5 py-1 text-[10px] font-bold text-white hover:bg-white/20 disabled:opacity-50">Sold out</button>
@@ -2059,20 +2059,20 @@ function MenuPanel({
             </div>
           )}
         </div>
-        <div className="divide-y divide-[#f0e4d9]">
+        <div className="divide-y divide-[#E9EFD6]">
           {(data.items ?? []).length === 0 ? (
             <div className="p-10 text-center">
               <UtensilsCrossed className="mx-auto h-8 w-8 text-[#B95509]" />
-              <p className="mt-3 text-sm font-extrabold text-[#593f2d]">No dishes yet</p>
-              <p className="mt-1 text-xs text-[#91725e]">Add your first dish from the panel, or import the whole menu as CSV.</p>
+              <p className="mt-3 text-sm font-extrabold text-[#2A3A0C]">No dishes yet</p>
+              <p className="mt-1 text-xs text-[#5F6B3C]">Add your first dish from the panel, or import the whole menu as CSV.</p>
             </div>
           ) : items.length === 0 ? (
             <div className="space-y-3 p-10 text-center">
-              <p className="text-sm font-extrabold text-[#593f2d]">No dishes match “{search.trim()}”</p>
+              <p className="text-sm font-extrabold text-[#2A3A0C]">No dishes match “{search.trim()}”</p>
               <Button
                 onClick={() => setSearchInput("")}
                 variant="outline"
-                className="h-11 rounded-xl border-[#ddc6b5] px-4 text-xs font-extrabold text-[#704d37]"
+                className="h-11 rounded-xl border-[#D8DFC0] px-4 text-xs font-extrabold text-[#3F4C1E]"
               >
                 Clear search
               </Button>
@@ -2082,41 +2082,41 @@ function MenuPanel({
             <article key={item.id} className="p-4">
               {editingId === item.id ? (
                 /* Inline Edit Form */
-                <div className="space-y-3 rounded-xl border border-[#d9b89e] bg-[#fff4e9] p-4">
+                <div className="space-y-3 rounded-xl border border-[#D8DFC0] bg-[#E9EFD6] p-4">
                   <div className="flex items-start gap-3">
                     {editForm.imageUrl ? (
-                      <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-lg border border-[#dfcbb9]">
+                      <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-lg border border-[#D8DFC0]">
                         <img src={editForm.imageUrl} alt="" className="h-full w-full object-cover" />
                         <button type="button" aria-label="Remove dish photo" onClick={() => setEditForm({ ...editForm, imageUrl: null })} className="absolute right-0.5 top-0.5 grid h-5 w-5 place-items-center rounded-full bg-red-500 text-white"><X className="h-3 w-3" /></button>
                       </div>
                     ) : (
-                      <label className="flex h-14 w-14 shrink-0 cursor-pointer items-center justify-center rounded-lg border-2 border-dashed border-[#d9b89e] hover:border-[#B95509]">
-                        <Plus className="h-4 w-4 text-[#a37d64]" />
+                      <label className="flex h-14 w-14 shrink-0 cursor-pointer items-center justify-center rounded-lg border-2 border-dashed border-[#D8DFC0] hover:border-[#B95509]">
+                        <Plus className="h-4 w-4 text-[#5F6B3C]" />
                         <input type="file" accept="image/jpeg,image/png,image/webp" aria-label="Upload dish photo" className="hidden" onChange={(e) => { const file = e.target.files?.[0]; e.target.value = ""; if (file) void handleImageUpload(file, "edit", restaurantId); }} />
                       </label>
                     )}
                     <div className="flex-1 space-y-2">
-                      <Input value={editForm.name ?? ""} aria-label="Dish name" onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} placeholder="Name" className="h-9 rounded-lg border-[#dfcbb9] text-sm" />
-                      <textarea value={editForm.description ?? ""} aria-label="Dish description" onChange={(e) => setEditForm({ ...editForm, description: e.target.value })} placeholder="Description" rows={2} className="w-full rounded-lg border border-[#dfcbb9] px-3 py-1.5 text-sm resize-none" />
+                      <Input value={editForm.name ?? ""} aria-label="Dish name" onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} placeholder="Name" className="h-9 rounded-lg border-[#D8DFC0] text-sm" />
+                      <textarea value={editForm.description ?? ""} aria-label="Dish description" onChange={(e) => setEditForm({ ...editForm, description: e.target.value })} placeholder="Description" rows={2} className="w-full rounded-lg border border-[#D8DFC0] px-3 py-1.5 text-sm resize-none" />
                     </div>
                   </div>
                   <div className="grid grid-cols-3 gap-2">
-                    <Input value={Number.isFinite(editForm.pricePaise) ? (editForm.pricePaise / 100).toFixed(2) : ""} aria-label="Price in rupees" onChange={(e) => setEditForm({ ...editForm, pricePaise: Math.round(Number(e.target.value) * 100) })} placeholder="Price ₹" inputMode="numeric" className="h-9 rounded-lg border-[#dfcbb9] text-sm" />
-                    <Input value={editForm.offerPricePaise != null && Number.isFinite(Number(editForm.offerPricePaise)) ? (Number(editForm.offerPricePaise) / 100).toFixed(2) : ""} aria-label="Offer price in rupees" onChange={(e) => setEditForm({ ...editForm, offerPricePaise: e.target.value ? Math.round(Number(e.target.value) * 100) : null })} placeholder="Offer ₹" inputMode="numeric" className="h-9 rounded-lg border-[#dfcbb9] text-sm" />
+                    <Input value={Number.isFinite(editForm.pricePaise) ? (editForm.pricePaise / 100).toFixed(2) : ""} aria-label="Price in rupees" onChange={(e) => setEditForm({ ...editForm, pricePaise: Math.round(Number(e.target.value) * 100) })} placeholder="Price ₹" inputMode="numeric" className="h-9 rounded-lg border-[#D8DFC0] text-sm" />
+                    <Input value={editForm.offerPricePaise != null && Number.isFinite(Number(editForm.offerPricePaise)) ? (Number(editForm.offerPricePaise) / 100).toFixed(2) : ""} aria-label="Offer price in rupees" onChange={(e) => setEditForm({ ...editForm, offerPricePaise: e.target.value ? Math.round(Number(e.target.value) * 100) : null })} placeholder="Offer ₹" inputMode="numeric" className="h-9 rounded-lg border-[#D8DFC0] text-sm" />
                     <label className="sr-only" htmlFor={`edit-diet-${item.id}`}>Dietary type</label>
-                    <select id={`edit-diet-${item.id}`} value={editForm.dietaryType ?? "veg"} onChange={(e) => setEditForm({ ...editForm, dietaryType: e.target.value })} className="h-9 rounded-lg border border-[#dfcbb9] px-2 text-sm">
+                    <select id={`edit-diet-${item.id}`} value={editForm.dietaryType ?? "veg"} onChange={(e) => setEditForm({ ...editForm, dietaryType: e.target.value })} className="h-9 rounded-lg border border-[#D8DFC0] px-2 text-sm">
                       <option value="veg">Veg</option>
                       <option value="nonveg">Non-veg</option>
                       <option value="egg">Egg</option>
                     </select>
                   </div>
                   <div className="flex items-center gap-3">
-                    <label className="flex items-center gap-1.5 text-xs font-bold text-[#5c4332]">
+                    <label className="flex items-center gap-1.5 text-xs font-bold text-[#2A3A0C]">
                       <input type="checkbox" checked={editForm.isBestseller ?? false} onChange={(e) => setEditForm({ ...editForm, isBestseller: e.target.checked })} className="accent-[#B95509]" />
                       Bestseller
                     </label>
                     <div className="ml-auto flex gap-2">
-                      <Button onClick={() => setEditingId(null)} variant="outline" className="h-8 rounded-lg border-[#dfcbb9] text-xs font-bold">Cancel</Button>
+                      <Button onClick={() => setEditingId(null)} variant="outline" className="h-8 rounded-lg border-[#D8DFC0] text-xs font-bold">Cancel</Button>
                       <Button onClick={saveEdit} disabled={listPending} className="h-8 rounded-lg bg-[#B95509] text-xs font-bold text-white">Save</Button>
                     </div>
                   </div>
@@ -2200,7 +2200,7 @@ function CategoriesPanel({
   return (
     <div className="grid gap-5 lg:grid-cols-[0.7fr_1.3fr]">
       {/* Create Category */}
-      <aside className="rounded-2xl bg-[#38271f] p-5 text-white shadow-sm">
+      <aside className="rounded-2xl bg-[#2A3A0C] p-5 text-white shadow-sm">
         <p className="text-[10px] font-extrabold uppercase tracking-[0.16em] text-[#e7b99d]">
           New category
         </p>
@@ -2224,7 +2224,7 @@ function CategoriesPanel({
           <Button
             onClick={handleCreate}
             disabled={!newName.trim() || pending}
-            className="h-11 w-full rounded-xl bg-[#f7e4d3] font-extrabold text-[#40291c] hover:bg-white"
+            className="h-11 w-full rounded-xl bg-[#E9EFD6] font-extrabold text-[#40291c] hover:bg-white"
           >
             <Plus className="mr-2 h-4 w-4" />
             Add category
@@ -2234,20 +2234,20 @@ function CategoriesPanel({
 
       {/* Category List */}
       <section className="overflow-hidden rounded-2xl bg-[#fffdf9] shadow-sm">
-        <div className="border-b border-[#eadccf] p-5">
-          <p className="text-[10px] font-extrabold uppercase tracking-[0.16em] text-[#9e765e]">
+        <div className="border-b border-[#D8DFC0] p-5">
+          <p className="text-[10px] font-extrabold uppercase tracking-[0.16em] text-[#5F6B3C]">
             All categories
           </p>
           <h2 className="font-display mt-1 text-2xl">Visibility & availability</h2>
-          <span className="mt-1 block text-sm font-bold text-[#856652]">
+          <span className="mt-1 block text-sm font-bold text-[#5F6B3C]">
             {categories.length} categories · {items.length} items total
           </span>
         </div>
-        <div className="divide-y divide-[#f0e4d9]">
+        <div className="divide-y divide-[#E9EFD6]">
           {categories.length === 0 ? (
             <div className="p-10 text-center">
-              <p className="text-sm font-extrabold text-[#593f2d]">No categories yet</p>
-              <p className="mt-1 text-xs text-[#91725e]">Create a category to start organising your menu.</p>
+              <p className="text-sm font-extrabold text-[#2A3A0C]">No categories yet</p>
+              <p className="mt-1 text-xs text-[#5F6B3C]">Create a category to start organising your menu.</p>
             </div>
           ) : (
             categories.map((cat: any) => {
@@ -2314,18 +2314,18 @@ function CategoryRow({
     <article className="space-y-3 p-4">
       <div className="flex items-center gap-4">
         <div className="min-w-0 flex-1">
-          <p className="text-sm font-extrabold text-[#382719]">{flatLabel}</p>
+          <p className="text-sm font-extrabold text-[#2A3A0C]">{flatLabel}</p>
           {cat.description && (
             <p className="mt-0.5 truncate text-xs text-[#8b6b57]">{cat.description}</p>
           )}
-          <p className="mt-0.5 text-[10px] font-bold text-[#a37d64]">
+          <p className="mt-0.5 text-[10px] font-bold text-[#5F6B3C]">
             {itemCount} {itemCount === 1 ? "item" : "items"}
             {cat.sortOrder != null ? ` · Order ${cat.sortOrder}` : ""}
           </p>
         </div>
         <div className="flex items-center gap-3">
           <label className="flex flex-col items-center gap-1">
-            <span className="text-[9px] font-extrabold uppercase text-[#a37d64]">Visible</span>
+            <span className="text-[9px] font-extrabold uppercase text-[#5F6B3C]">Visible</span>
             <Switch
               checked={cat.isVisible !== false}
               disabled={pending}
@@ -2334,7 +2334,7 @@ function CategoryRow({
             />
           </label>
           <label className="flex flex-col items-center gap-1">
-            <span className="text-[9px] font-extrabold uppercase text-[#a37d64]">Open</span>
+            <span className="text-[9px] font-extrabold uppercase text-[#5F6B3C]">Open</span>
             <Switch
               checked={cat.isOpen !== false}
               disabled={pending}
@@ -2353,17 +2353,17 @@ function CategoryRow({
         </div>
       </div>
       <div className="flex flex-col gap-2 sm:flex-row">
-        <label className="flex-1 text-[10px] font-extrabold uppercase text-[#a37d64]">
+        <label className="flex-1 text-[10px] font-extrabold uppercase text-[#5F6B3C]">
           Rename
           <Input
             value={name}
             onChange={(e) => setName(e.target.value)}
             disabled={pending}
             aria-label={`Rename category ${cat.name}`}
-            className="mt-1 h-10 rounded-lg border-[#dfcbb9] text-sm font-normal normal-case"
+            className="mt-1 h-10 rounded-lg border-[#D8DFC0] text-sm font-normal normal-case"
           />
         </label>
-        <label className="w-full text-[10px] font-extrabold uppercase text-[#a37d64] sm:w-28">
+        <label className="w-full text-[10px] font-extrabold uppercase text-[#5F6B3C] sm:w-28">
           Sort order
           <Input
             value={sortOrder}
@@ -2371,14 +2371,14 @@ function CategoryRow({
             disabled={pending}
             inputMode="numeric"
             aria-label={`Sort order for ${cat.name}`}
-            className="mt-1 h-10 rounded-lg border-[#dfcbb9] text-sm font-normal"
+            className="mt-1 h-10 rounded-lg border-[#D8DFC0] text-sm font-normal"
           />
         </label>
         <Button
           onClick={saveMeta}
           disabled={pending || (!dirtyName && !dirtyOrder)}
           variant="outline"
-          className="h-10 self-end rounded-lg border-[#dfcbb9] text-xs font-bold"
+          className="h-10 self-end rounded-lg border-[#D8DFC0] text-xs font-bold"
         >
           Save
         </Button>
@@ -2435,7 +2435,7 @@ function CouponsPanel({
   return (
     <div className="grid gap-5 lg:grid-cols-[0.8fr_1.2fr]">
       <section className="rounded-2xl bg-[#fffdf9] p-5 shadow-sm">
-        <p className="text-[10px] font-extrabold uppercase tracking-[0.16em] text-[#9e765e]">
+        <p className="text-[10px] font-extrabold uppercase tracking-[0.16em] text-[#5F6B3C]">
           New offer
         </p>
         <h2 className="font-display mt-1 text-2xl">Give guests a reason</h2>
@@ -2447,7 +2447,7 @@ function CouponsPanel({
             }
             placeholder="CODE"
             aria-label="Coupon code"
-            className="h-11 rounded-xl border-[#ddc6b5] font-extrabold"
+            className="h-11 rounded-xl border-[#D8DFC0] font-extrabold"
           />
           <Input
             value={form.description}
@@ -2456,7 +2456,7 @@ function CouponsPanel({
             }
             placeholder="Offer description"
             aria-label="Offer description"
-            className="h-11 rounded-xl border-[#ddc6b5]"
+            className="h-11 rounded-xl border-[#D8DFC0]"
           />
           <div className="flex gap-2">
             <label className="sr-only" htmlFor="coupon-type">Discount type</label>
@@ -2466,7 +2466,7 @@ function CouponsPanel({
               onChange={(e) =>
                 setForm({ ...form, discountType: e.target.value })
               }
-              className="h-11 min-h-11 rounded-xl border border-[#ddc6b5] bg-white px-3 text-sm font-bold"
+              className="h-11 min-h-11 rounded-xl border border-[#D8DFC0] bg-white px-3 text-sm font-bold"
             >
               <option value="flat">Flat (₹)</option>
               <option value="percent">Percentage (%)</option>
@@ -2477,7 +2477,7 @@ function CouponsPanel({
               inputMode="numeric"
               placeholder={form.discountType === "flat" ? "₹ off" : "% off (1-100)"}
               aria-label={form.discountType === "flat" ? "Flat discount in rupees" : "Percentage discount 1 to 100"}
-              className="h-11 rounded-xl border-[#ddc6b5]"
+              className="h-11 rounded-xl border-[#D8DFC0]"
             />
           </div>
           <Input
@@ -2486,7 +2486,7 @@ function CouponsPanel({
             inputMode="numeric"
             placeholder="Minimum order in ₹"
             aria-label="Minimum order in rupees"
-            className="h-11 rounded-xl border-[#ddc6b5]"
+            className="h-11 rounded-xl border-[#D8DFC0]"
           />
           <Button
             onClick={onSave}
@@ -2500,7 +2500,7 @@ function CouponsPanel({
       </section>
 
       <section className="rounded-2xl bg-[#fffdf9] p-5 shadow-sm">
-        <p className="text-[10px] font-extrabold uppercase tracking-[0.16em] text-[#9e765e]">
+        <p className="text-[10px] font-extrabold uppercase tracking-[0.16em] text-[#5F6B3C]">
           Live offers
         </p>
         <h2 className="font-display mt-1 text-2xl">On the counter now</h2>
@@ -2511,7 +2511,7 @@ function CouponsPanel({
               return (
                 <article
                   key={coupon.id}
-                  className="rounded-xl border border-[#eadccf] bg-[#fff9f3] p-4"
+                  className="rounded-xl border border-[#D8DFC0] bg-[#E9EFD6] p-4"
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div>
@@ -2535,7 +2535,7 @@ function CouponsPanel({
                     · Min {money(coupon.minOrderPaise)}
                   </p>
                   <div className="mt-3 flex items-center gap-3 border-t border-[#f0e4d8] pt-3">
-                    <label className="flex items-center gap-2 text-xs font-extrabold text-[#553d2c]">
+                    <label className="flex items-center gap-2 text-xs font-extrabold text-[#2A3A0C]">
                       <Switch
                         checked={active}
                         disabled={savePending}
@@ -2552,7 +2552,7 @@ function CouponsPanel({
                         <button
                           onClick={() => onReactivate(coupon)}
                           disabled={savePending}
-                          className="rounded-lg border border-[#ddc6b5] bg-white px-2.5 py-1.5 text-[11px] font-bold text-[#5c4332] hover:bg-[#fff4e9] disabled:opacity-50"
+                          className="rounded-lg border border-[#D8DFC0] bg-white px-2.5 py-1.5 text-[11px] font-bold text-[#2A3A0C] hover:bg-[#E9EFD6] disabled:opacity-50"
                         >
                           Re-enable
                         </button>
@@ -2571,10 +2571,10 @@ function CouponsPanel({
               );
             })
           ) : (
-            <div className="rounded-2xl border border-dashed border-[#dbc3b0] bg-[#fff9f3] p-10 text-center">
+            <div className="rounded-2xl border border-dashed border-[#D8DFC0] bg-[#E9EFD6] p-10 text-center">
               <TicketPercent className="mx-auto h-8 w-8 text-[#B95509]" />
-              <p className="font-display mt-3 text-xl text-[#593f2d]">No offers yet</p>
-              <p className="mt-1 text-sm text-[#91725e]">Create your first coupon from the panel — it goes live immediately.</p>
+              <p className="font-display mt-3 text-xl text-[#2A3A0C]">No offers yet</p>
+              <p className="mt-1 text-sm text-[#5F6B3C]">Create your first coupon from the panel — it goes live immediately.</p>
             </div>
           )}
         </div>
@@ -2620,16 +2620,16 @@ const CustomerRow = memo(function CustomerRow({
   return (
     <tr
       onClick={() => onSelect(customer.id)}
-      className="cursor-pointer hover:bg-[#fff9f3] transition-colors"
+      className="cursor-pointer hover:bg-[#E9EFD6] transition-colors"
     >
       <td className="px-5 py-4">
-        <p className="text-sm font-bold text-[#382719]">{customer.userName || customer.preferredName || "Guest"}</p>
-        <p className="mt-0.5 text-xs text-[#91725e]">{customer.userEmail ?? "—"}</p>
+        <p className="text-sm font-bold text-[#2A3A0C]">{customer.userName || customer.preferredName || "Guest"}</p>
+        <p className="mt-0.5 text-xs text-[#5F6B3C]">{customer.userEmail ?? "—"}</p>
       </td>
-      <td className="px-5 py-4 text-sm text-[#553d2c]">{customer.mobileNumber ?? "—"}</td>
-      <td className="px-5 py-4 text-sm font-bold text-[#382719]">{customer.totalOrders ?? 0}</td>
-      <td className="px-5 py-4 text-sm font-extrabold text-[#382719]">₹{((customer.totalSpentPaise ?? 0) / 100).toLocaleString("en-IN")}</td>
-      <td className="px-5 py-4 text-xs text-[#91725e]">
+      <td className="px-5 py-4 text-sm text-[#2A3A0C]">{customer.mobileNumber ?? "—"}</td>
+      <td className="px-5 py-4 text-sm font-bold text-[#2A3A0C]">{customer.totalOrders ?? 0}</td>
+      <td className="px-5 py-4 text-sm font-extrabold text-[#2A3A0C]">₹{((customer.totalSpentPaise ?? 0) / 100).toLocaleString("en-IN")}</td>
+      <td className="px-5 py-4 text-xs text-[#5F6B3C]">
         {customer.createdAt ? new Date(customer.createdAt).toLocaleDateString("en-IN") : "—"}
       </td>
     </tr>
@@ -2679,32 +2679,32 @@ function CustomersPanel({ restaurantId }: { restaurantId: string }) {
         >
           ← Back to customers
         </button>
-        <div className="rounded-2xl border border-[#eadccf] bg-white p-6 shadow-sm">
+        <div className="rounded-2xl border border-[#D8DFC0] bg-white p-6 shadow-sm">
           <div className="flex items-start justify-between">
             <div>
-              <h3 className="font-display text-2xl text-[#382719]">
+              <h3 className="font-display text-2xl text-[#2A3A0C]">
                 {detail.userName || detail.preferredName || "Guest Customer"}
               </h3>
-              <p className="mt-1 text-sm text-[#91725e]">
+              <p className="mt-1 text-sm text-[#5F6B3C]">
                 {detail.mobileNumber ?? "No phone"} · {detail.userEmail ?? "No email"}
               </p>
             </div>
-            <span className="rounded-full bg-[#f0e4d8] px-3 py-1 text-[10px] font-extrabold text-[#a77d63]">
+            <span className="rounded-full bg-[#f0e4d8] px-3 py-1 text-[10px] font-extrabold text-[#5F6B3C]">
               {detail.totalOrders ?? 0} orders
             </span>
           </div>
           <div className="mt-5 grid gap-4 sm:grid-cols-3">
-            <div className="rounded-xl bg-[#fff9f3] p-4">
-              <p className="text-[10px] font-extrabold uppercase tracking-wider text-[#a77d63]">Lifetime value</p>
-              <p className="mt-1 text-xl font-extrabold text-[#382719]">₹{((detail.totalSpentPaise ?? 0) / 100).toLocaleString("en-IN")}</p>
+            <div className="rounded-xl bg-[#E9EFD6] p-4">
+              <p className="text-[10px] font-extrabold uppercase tracking-wider text-[#5F6B3C]">Lifetime value</p>
+              <p className="mt-1 text-xl font-extrabold text-[#2A3A0C]">₹{((detail.totalSpentPaise ?? 0) / 100).toLocaleString("en-IN")}</p>
             </div>
-            <div className="rounded-xl bg-[#fff9f3] p-4">
-              <p className="text-[10px] font-extrabold uppercase tracking-wider text-[#a77d63]">Total orders</p>
-              <p className="mt-1 text-xl font-extrabold text-[#382719]">{detail.totalOrders ?? 0}</p>
+            <div className="rounded-xl bg-[#E9EFD6] p-4">
+              <p className="text-[10px] font-extrabold uppercase tracking-wider text-[#5F6B3C]">Total orders</p>
+              <p className="mt-1 text-xl font-extrabold text-[#2A3A0C]">{detail.totalOrders ?? 0}</p>
             </div>
-            <div className="rounded-xl bg-[#fff9f3] p-4">
-              <p className="text-[10px] font-extrabold uppercase tracking-wider text-[#a77d63]">Registered</p>
-              <p className="mt-1 text-sm font-bold text-[#382719]">
+            <div className="rounded-xl bg-[#E9EFD6] p-4">
+              <p className="text-[10px] font-extrabold uppercase tracking-wider text-[#5F6B3C]">Registered</p>
+              <p className="mt-1 text-sm font-bold text-[#2A3A0C]">
                 {detail.createdAt ? new Date(detail.createdAt).toLocaleDateString("en-IN") : "—"}
               </p>
             </div>
@@ -2712,14 +2712,14 @@ function CustomersPanel({ restaurantId }: { restaurantId: string }) {
         </div>
 
         {/* Admin Notes */}
-        <div className="rounded-2xl border border-[#eadccf] bg-white p-6 shadow-sm">
-          <label htmlFor="customer-notes" className="text-[10px] font-extrabold uppercase tracking-wider text-[#a77d63]">Admin notes</label>
+        <div className="rounded-2xl border border-[#D8DFC0] bg-white p-6 shadow-sm">
+          <label htmlFor="customer-notes" className="text-[10px] font-extrabold uppercase tracking-wider text-[#5F6B3C]">Admin notes</label>
           <textarea
             id="customer-notes"
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
             placeholder="Add private notes about this customer..."
-            className="mt-3 min-h-20 w-full rounded-xl border border-[#ddc6b5] bg-[#fff9f3] p-3 text-sm outline-none focus:ring-2 focus:ring-[#B95509]"
+            className="mt-3 min-h-20 w-full rounded-xl border border-[#D8DFC0] bg-[#E9EFD6] p-3 text-sm outline-none focus:ring-2 focus:ring-[#B95509]"
           />
           <Button
             onClick={() => updateNotes.mutate({ customerId: selectedId, notes })}
@@ -2731,22 +2731,22 @@ function CustomersPanel({ restaurantId }: { restaurantId: string }) {
         </div>
 
         {/* Order History */}
-        <div className="rounded-2xl border border-[#eadccf] bg-white shadow-sm">
-          <div className="border-b border-[#eadccf] px-6 py-4">
-            <p className="text-[10px] font-extrabold uppercase tracking-wider text-[#a77d63]">Order history</p>
+        <div className="rounded-2xl border border-[#D8DFC0] bg-white shadow-sm">
+          <div className="border-b border-[#D8DFC0] px-6 py-4">
+            <p className="text-[10px] font-extrabold uppercase tracking-wider text-[#5F6B3C]">Order history</p>
           </div>
           {detail.orderHistory?.length ? (
             <div className="divide-y divide-[#f0e4d8]">
               {detail.orderHistory.map((order: any) => (
                 <div key={order.id} className="flex items-center justify-between px-6 py-4">
                   <div>
-                    <p className="text-sm font-bold text-[#382719]">{order.orderNumber}</p>
-                    <p className="mt-0.5 text-xs text-[#91725e]">
+                    <p className="text-sm font-bold text-[#2A3A0C]">{order.orderNumber}</p>
+                    <p className="mt-0.5 text-xs text-[#5F6B3C]">
                       {new Date(order.createdAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
                     </p>
                   </div>
                   <div className="text-right">
-                    <p className="text-sm font-extrabold text-[#382719]">₹{((order.totalPaise ?? 0) / 100).toLocaleString("en-IN")}</p>
+                    <p className="text-sm font-extrabold text-[#2A3A0C]">₹{((order.totalPaise ?? 0) / 100).toLocaleString("en-IN")}</p>
                     <span className={`inline-block rounded-full px-2 py-0.5 text-[10px] font-extrabold ${
                       order.status === "DELIVERED" ? "bg-green-50 text-green-700"
                       : order.status === "CANCELLED" ? "bg-red-50 text-red-700"
@@ -2759,7 +2759,7 @@ function CustomersPanel({ restaurantId }: { restaurantId: string }) {
               ))}
             </div>
           ) : (
-            <p className="px-6 py-8 text-center text-sm text-[#91725e]">No orders yet.</p>
+            <p className="px-6 py-8 text-center text-sm text-[#5F6B3C]">No orders yet.</p>
           )}
         </div>
       </div>
@@ -2770,14 +2770,14 @@ function CustomersPanel({ restaurantId }: { restaurantId: string }) {
     <div className="space-y-5">
       <div className="flex items-center gap-3">
         <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#a77d63]" />
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#5F6B3C]" />
           <label htmlFor="customers-search" className="sr-only">Search customers</label>
           <input
             id="customers-search"
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
             placeholder="Search by name, phone, or email..."
-            className="h-11 min-h-11 w-full rounded-xl border border-[#ddc6b5] bg-white pl-10 pr-4 text-sm outline-none focus:ring-2 focus:ring-[#B95509]"
+            className="h-11 min-h-11 w-full rounded-xl border border-[#D8DFC0] bg-white pl-10 pr-4 text-sm outline-none focus:ring-2 focus:ring-[#B95509]"
           />
         </div>
       </div>
@@ -2785,7 +2785,7 @@ function CustomersPanel({ restaurantId }: { restaurantId: string }) {
       {customers.isLoading ? (
         <div className="space-y-3">
           {[1, 2, 3].map(i => (
-            <div key={i} className="h-16 animate-pulse rounded-xl bg-[#eadfd4]" />
+            <div key={i} className="h-16 animate-pulse rounded-xl bg-[#E9EFD6]" />
           ))}
         </div>
       ) : customers.isError ? (
@@ -2794,21 +2794,21 @@ function CustomersPanel({ restaurantId }: { restaurantId: string }) {
           onRetry={() => customers.refetch()}
         />
       ) : list.length === 0 ? (
-        <div className="rounded-2xl border border-dashed border-[#dbc3b0] bg-[#fff9f3] p-10 text-center">
+        <div className="rounded-2xl border border-dashed border-[#D8DFC0] bg-[#E9EFD6] p-10 text-center">
           <Users className="mx-auto h-8 w-8 text-[#B95509]" />
-          <p className="mt-3 font-display text-xl text-[#593f2d]">No customers yet</p>
-          <p className="mt-1 text-sm text-[#91725e]">Customers will appear here once they place their first order.</p>
+          <p className="mt-3 font-display text-xl text-[#2A3A0C]">No customers yet</p>
+          <p className="mt-1 text-sm text-[#5F6B3C]">Customers will appear here once they place their first order.</p>
         </div>
       ) : (
-        <div className="overflow-x-auto rounded-2xl border border-[#eadccf] bg-white shadow-sm">
+        <div className="overflow-x-auto rounded-2xl border border-[#D8DFC0] bg-white shadow-sm">
           <table className="w-full min-w-[640px]">
             <thead>
-              <tr className="border-b border-[#eadccf] bg-[#faf5ef]">
-                <th className="px-5 py-3 text-left text-[10px] font-extrabold uppercase tracking-wider text-[#a77d63]">Customer</th>
-                <th className="px-5 py-3 text-left text-[10px] font-extrabold uppercase tracking-wider text-[#a77d63]">Phone</th>
-                <th className="px-5 py-3 text-left text-[10px] font-extrabold uppercase tracking-wider text-[#a77d63]">Orders</th>
-                <th className="px-5 py-3 text-left text-[10px] font-extrabold uppercase tracking-wider text-[#a77d63]">Lifetime value</th>
-                <th className="px-5 py-3 text-left text-[10px] font-extrabold uppercase tracking-wider text-[#a77d63]">Joined</th>
+              <tr className="border-b border-[#D8DFC0] bg-[#faf5ef]">
+                <th className="px-5 py-3 text-left text-[10px] font-extrabold uppercase tracking-wider text-[#5F6B3C]">Customer</th>
+                <th className="px-5 py-3 text-left text-[10px] font-extrabold uppercase tracking-wider text-[#5F6B3C]">Phone</th>
+                <th className="px-5 py-3 text-left text-[10px] font-extrabold uppercase tracking-wider text-[#5F6B3C]">Orders</th>
+                <th className="px-5 py-3 text-left text-[10px] font-extrabold uppercase tracking-wider text-[#5F6B3C]">Lifetime value</th>
+                <th className="px-5 py-3 text-left text-[10px] font-extrabold uppercase tracking-wider text-[#5F6B3C]">Joined</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-[#f0e4d8]">
@@ -2942,7 +2942,7 @@ function RestaurantPanel({
 
   return (
     <section className="max-w-3xl rounded-2xl bg-[#fffdf9] p-5 shadow-sm">
-      <p className="text-[10px] font-extrabold uppercase tracking-[0.16em] text-[#9e765e]">
+      <p className="text-[10px] font-extrabold uppercase tracking-[0.16em] text-[#5F6B3C]">
         Restaurant identity & service
       </p>
       <h2 className="font-display mt-1 text-2xl">
@@ -2971,17 +2971,17 @@ function RestaurantPanel({
               <img
                 src={form.logoUrl}
                 alt="Restaurant logo preview"
-                className="h-12 w-12 shrink-0 rounded-xl border border-[#ddc6b5] bg-white object-cover"
+                className="h-12 w-12 shrink-0 rounded-xl border border-[#D8DFC0] bg-white object-cover"
               />
             ) : (
               <span
                 aria-hidden="true"
-                className="grid h-12 w-12 shrink-0 place-items-center rounded-xl border border-dashed border-[#ddc6b5] bg-[#fff8f0] text-[#a37960]"
+                className="grid h-12 w-12 shrink-0 place-items-center rounded-xl border border-dashed border-[#D8DFC0] bg-[#E9EFD6] text-[#5F6B3C]"
               >
                 <Store className="h-5 w-5" />
               </span>
             )}
-            <label className="inline-flex min-h-[44px] cursor-pointer items-center rounded-xl border border-[#ddc6b5] bg-white px-4 text-sm font-extrabold text-[#704d37] hover:border-[#B95509] hover:text-[#B95509]">
+            <label className="inline-flex min-h-[44px] cursor-pointer items-center rounded-xl border border-[#D8DFC0] bg-white px-4 text-sm font-extrabold text-[#3F4C1E] hover:border-[#B95509] hover:text-[#B95509]">
               {logoUploading ? "Uploading…" : "Upload image"}
               <input
                 type="file"
@@ -3014,7 +3014,7 @@ function RestaurantPanel({
               value={/^#[0-9A-Fa-f]{6}$/.test(form.primaryColor) ? form.primaryColor : "#B95509"}
               onChange={(e) => setForm({ ...form, primaryColor: e.target.value })}
               aria-label="Primary color picker"
-              className="h-10 w-12 shrink-0 cursor-pointer rounded-lg border border-[#ddc6b5] bg-white p-1"
+              className="h-10 w-12 shrink-0 cursor-pointer rounded-lg border border-[#D8DFC0] bg-white p-1"
             />
             <Input
               value={form.primaryColor}
@@ -3092,7 +3092,7 @@ function RestaurantPanel({
           />
         </Field>
       </div>
-      <label className="mt-4 block text-sm font-extrabold text-[#553d2c]">
+      <label className="mt-4 block text-sm font-extrabold text-[#2A3A0C]">
         Description
         <textarea
           value={form.description}
@@ -3100,7 +3100,7 @@ function RestaurantPanel({
           onChange={(e) =>
             setForm({ ...form, description: e.target.value })
           }
-          className="mt-2 min-h-24 w-full rounded-xl border border-[#ddc6b5] bg-white p-3 text-sm outline-none focus:ring-2 focus:ring-[#B95509]"
+          className="mt-2 min-h-24 w-full rounded-xl border border-[#D8DFC0] bg-white p-3 text-sm outline-none focus:ring-2 focus:ring-[#B95509]"
         />
       </label>
       <div className="mt-4 grid gap-4 sm:grid-cols-3">
@@ -3167,7 +3167,7 @@ function Field({
   children: React.ReactNode;
 }) {
   return (
-    <label className="text-sm font-extrabold text-[#553d2c]">
+    <label className="text-sm font-extrabold text-[#2A3A0C]">
       {label}
       <div className="mt-2">{children}</div>
     </label>
@@ -3184,7 +3184,7 @@ function Toggle({
   onChange: (next: boolean) => void;
 }) {
   return (
-    <label className="flex items-center justify-between rounded-xl border border-[#eadccf] bg-[#fff9f3] p-3 text-sm font-extrabold text-[#553d2c]">
+    <label className="flex items-center justify-between rounded-xl border border-[#D8DFC0] bg-[#E9EFD6] p-3 text-sm font-extrabold text-[#2A3A0C]">
       {label}
       <input
         checked={checked}
@@ -3234,7 +3234,7 @@ function InvoiceButton({ orderId }: { orderId: string }) {
       onClick={handlePrint}
       disabled={isLoading}
       aria-label="Print invoice"
-      className="rounded-lg border border-[#ddc6b5] bg-white px-2 py-1.5 text-[10px] font-bold text-[#B95509] hover:bg-[#fdf5ef] disabled:opacity-50"
+      className="rounded-lg border border-[#D8DFC0] bg-white px-2 py-1.5 text-[10px] font-bold text-[#B95509] hover:bg-[#fdf5ef] disabled:opacity-50"
     >
       {isLoading ? "Loading..." : "Invoice"}
     </button>
@@ -3243,12 +3243,12 @@ function InvoiceButton({ orderId }: { orderId: string }) {
 
 function EmptyKitchen() {
   return (
-    <div className="rounded-xl border border-dashed border-[#dbc3b0] bg-[#fff9f3] p-5 text-center">
+    <div className="rounded-xl border border-dashed border-[#D8DFC0] bg-[#E9EFD6] p-5 text-center">
       <CookingPot className="mx-auto h-6 w-6 text-[#B95509]" />
-      <p className="mt-3 text-sm font-extrabold text-[#593f2d]">
+      <p className="mt-3 text-sm font-extrabold text-[#2A3A0C]">
         The counter is clear for now
       </p>
-      <p className="mt-1 text-xs text-[#91725e]">
+      <p className="mt-1 text-xs text-[#5F6B3C]">
         New customer orders will appear here as soon as they're placed.
       </p>
     </div>
@@ -3259,13 +3259,13 @@ function AdminLoading() {
   return (
     <main className="min-h-screen bg-[#f7f2eb] p-8">
       <div className="mx-auto max-w-7xl animate-pulse space-y-5">
-        <div className="h-20 rounded-2xl bg-[#eadfd4]" />
+        <div className="h-20 rounded-2xl bg-[#E9EFD6]" />
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           {[1, 2, 3, 4].map((key) => (
-            <div key={key} className="h-40 rounded-2xl bg-[#eadfd4]" />
+            <div key={key} className="h-40 rounded-2xl bg-[#E9EFD6]" />
           ))}
         </div>
-        <div className="h-80 rounded-2xl bg-[#eadfd4]" />
+        <div className="h-80 rounded-2xl bg-[#E9EFD6]" />
       </div>
     </main>
   );

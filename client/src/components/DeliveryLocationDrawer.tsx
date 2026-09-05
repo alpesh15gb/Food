@@ -427,13 +427,13 @@ export default function DeliveryLocationDrawer({
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="max-w-md rounded-[1.5rem] border-[#dfcbb9] bg-[#fffaf3] p-0 max-h-[90vh] overflow-y-auto">
-        <div className="paper-grain rounded-t-[1.5rem] border-b border-[#ead8c6] p-6">
+      <DialogContent className="max-w-md rounded-[1.5rem] border-[#D8DFC0] bg-[#fffaf3] p-0 max-h-[90vh] overflow-y-auto">
+        <div className="paper-grain rounded-t-[1.5rem] border-b border-[#D8DFC0] p-6">
           <DialogHeader>
-            <DialogTitle className="font-display text-3xl text-[#382719]">
+            <DialogTitle className="font-display text-3xl text-[#2A3A0C]">
               Delivery Location
             </DialogTitle>
-            <DialogDescription className="text-[#856653]">
+            <DialogDescription className="text-[#5F6B3C]">
               {step === "confirmed" && existingLocation
                 ? "Your delivery location is confirmed."
                 : "Choose how to set your delivery location."}
@@ -471,7 +471,7 @@ export default function DeliveryLocationDrawer({
                   <div className="w-full border-t border-[#e7d2c0]" />
                 </div>
                 <div className="relative flex justify-center text-xs">
-                  <span className="bg-[#fffaf3] px-2 text-[#a37960]">or</span>
+                  <span className="bg-[#fffaf3] px-2 text-[#5F6B3C]">or</span>
                 </div>
               </div>
 
@@ -488,13 +488,13 @@ export default function DeliveryLocationDrawer({
                         void runSearchNow();
                       }
                     }}
-                    className="h-12 rounded-xl border-[#dfcbb9] bg-white text-[#382719]"
+                    className="h-12 rounded-xl border-[#D8DFC0] bg-white text-[#2A3A0C]"
                   />
                   <Button
                     variant="outline"
                     aria-label="Search places"
                     onClick={() => void runSearchNow()}
-                    className="h-12 rounded-xl border-[#dfcbb9] bg-white font-bold text-[#5c4332]"
+                    className="h-12 rounded-xl border-[#D8DFC0] bg-white font-bold text-[#2A3A0C]"
                     disabled={!searchQuery.trim() || searching}
                   >
                     {searching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
@@ -502,13 +502,13 @@ export default function DeliveryLocationDrawer({
                 </div>
 
                 {searchResults.length > 0 && (
-                  <div className="absolute left-0 right-0 top-14 z-50 max-h-48 overflow-y-auto rounded-xl border border-[#dfcbb9] bg-white shadow-lg">
+                  <div className="absolute left-0 right-0 top-14 z-50 max-h-48 overflow-y-auto rounded-xl border border-[#D8DFC0] bg-white shadow-lg">
                     {searchResults.map((result) => (
                       <button
                         key={result.placeId}
                         type="button"
                         onClick={() => handlePlaceSelect(result.placeId, result.description)}
-                        className="w-full px-4 py-3 text-left text-sm text-[#382719] hover:bg-[#fff4e9]"
+                        className="w-full px-4 py-3 text-left text-sm text-[#2A3A0C] hover:bg-[#E9EFD6]"
                       >
                         <MapPin className="mr-2 inline h-3 w-3 text-[#B95509]" />
                         {result.description}
@@ -540,7 +540,7 @@ export default function DeliveryLocationDrawer({
                   });
                 }}
                 variant="outline"
-                className="h-11 w-full rounded-xl border-[#dfcbb9] bg-white font-bold text-[#5c4332]"
+                className="h-11 w-full rounded-xl border-[#D8DFC0] bg-white font-bold text-[#2A3A0C]"
               >
                 <MapPin className="mr-2 h-4 w-4" />
                 Place Pin on Map
@@ -552,15 +552,15 @@ export default function DeliveryLocationDrawer({
           {step === "loading" && (
             <div className="flex flex-col items-center gap-4 py-8">
               <Loader2 className="h-8 w-8 animate-spin text-[#B95509]" />
-              <p className="text-sm text-[#856653]">Getting your location...</p>
+              <p className="text-sm text-[#5F6B3C]">Getting your location...</p>
             </div>
           )}
 
           {/* Step: Map Confirm — real interactive map with fixed-center pin */}
           {step === "map_confirm" && (
             <>
-              <div className="rounded-xl border border-[#d9b89e] bg-[#fff4e9] p-4">
-                <p className="text-sm font-semibold text-[#5c4332]">
+              <div className="rounded-xl border border-[#D8DFC0] bg-[#E9EFD6] p-4">
+                <p className="text-sm font-semibold text-[#2A3A0C]">
                   <Crosshair className="mr-1 inline h-4 w-4 text-[#B95509]" />
                   Confirm your delivery pin
                 </p>
@@ -584,10 +584,10 @@ export default function DeliveryLocationDrawer({
               )}
 
               {/* Interactive Map with fixed-center pin */}
-              <div className="relative overflow-hidden rounded-xl border border-[#dfcbb9]">
+              <div className="relative overflow-hidden rounded-xl border border-[#D8DFC0]">
                 <Suspense
                   fallback={
-                    <div className="grid h-[300px] place-items-center bg-[#f6ecdf] text-sm font-bold text-[#856653]">
+                    <div className="grid h-[300px] place-items-center bg-[#f6ecdf] text-sm font-bold text-[#5F6B3C]">
                       <span className="inline-flex items-center gap-2">
                         <Loader2 className="h-5 w-5 animate-spin text-[#B95509]" aria-hidden="true" />
                         Loading the map…
@@ -625,7 +625,7 @@ export default function DeliveryLocationDrawer({
                   <Button
                     onClick={() => setStep("choose_method")}
                     variant="outline"
-                    className="h-11 flex-1 rounded-xl border-[#dfcbb9] bg-white font-bold text-[#5c4332]"
+                    className="h-11 flex-1 rounded-xl border-[#D8DFC0] bg-white font-bold text-[#2A3A0C]"
                   >
                     Back
                   </Button>
@@ -657,7 +657,7 @@ export default function DeliveryLocationDrawer({
                 </div>
               )}
               {geoState && (
-                <div className="rounded-xl border border-[#d9b89e] bg-[#fff4e9] p-3 text-xs text-[#885e43]">
+                <div className="rounded-xl border border-[#D8DFC0] bg-[#E9EFD6] p-3 text-xs text-[#885e43]">
                   Location: {geoState.latitude.toFixed(6)}, {geoState.longitude.toFixed(6)}
                   {geoState.deviceAccuracyMeters && <> · Accuracy: ~{Math.round(geoState.deviceAccuracyMeters)}m</>}
                   {geoState.source === "map_pin" && <> · Source: Map pin</>}
@@ -670,35 +670,35 @@ export default function DeliveryLocationDrawer({
                   aria-label="Flat or house number"
                   value={flatHouse}
                   onChange={(e) => setFlatHouse(e.target.value)}
-                  className="h-11 rounded-xl border-[#dfcbb9] bg-white text-[#382719]"
+                  className="h-11 rounded-xl border-[#D8DFC0] bg-white text-[#2A3A0C]"
                 />
                 <Input
                   placeholder="Building / Apartment name"
                   aria-label="Building or apartment name"
                   value={building}
                   onChange={(e) => setBuilding(e.target.value)}
-                  className="h-11 rounded-xl border-[#dfcbb9] bg-white text-[#382719]"
+                  className="h-11 rounded-xl border-[#D8DFC0] bg-white text-[#2A3A0C]"
                 />
                 <Input
                   placeholder="Street"
                   aria-label="Street"
                   value={street}
                   onChange={(e) => setStreet(e.target.value)}
-                  className="h-11 rounded-xl border-[#dfcbb9] bg-white text-[#382719]"
+                  className="h-11 rounded-xl border-[#D8DFC0] bg-white text-[#2A3A0C]"
                 />
                 <Input
                   placeholder="Landmark"
                   aria-label="Landmark"
                   value={landmark}
                   onChange={(e) => setLandmark(e.target.value)}
-                  className="h-11 rounded-xl border-[#dfcbb9] bg-white text-[#382719]"
+                  className="h-11 rounded-xl border-[#D8DFC0] bg-white text-[#2A3A0C]"
                 />
                 <Input
                   placeholder="Area / Locality *"
                   aria-label="Area or locality"
                   value={area}
                   onChange={(e) => setArea(e.target.value)}
-                  className="h-11 rounded-xl border-[#dfcbb9] bg-white text-[#382719]"
+                  className="h-11 rounded-xl border-[#D8DFC0] bg-white text-[#2A3A0C]"
                 />
                 <div className="grid grid-cols-2 gap-2">
                   <Input
@@ -706,7 +706,7 @@ export default function DeliveryLocationDrawer({
                     aria-label="City"
                     value={city}
                     onChange={(e) => setCity(e.target.value)}
-                    className="h-11 rounded-xl border-[#dfcbb9] bg-white text-[#382719]"
+                    className="h-11 rounded-xl border-[#D8DFC0] bg-white text-[#2A3A0C]"
                   />
                   <Input
                     placeholder="PIN code *"
@@ -716,7 +716,7 @@ export default function DeliveryLocationDrawer({
                     maxLength={6}
                     inputMode="numeric"
                     autoComplete="postal-code"
-                    className="h-11 rounded-xl border-[#dfcbb9] bg-white text-[#382719]"
+                    className="h-11 rounded-xl border-[#D8DFC0] bg-white text-[#2A3A0C]"
                   />
                 </div>
               </div>
@@ -725,7 +725,7 @@ export default function DeliveryLocationDrawer({
                 <Button
                   onClick={() => setStep(cameViaMap ? "map_confirm" : "choose_method")}
                   variant="outline"
-                  className="h-11 flex-1 rounded-xl border-[#dfcbb9] bg-white font-bold text-[#5c4332]"
+                  className="h-11 flex-1 rounded-xl border-[#D8DFC0] bg-white font-bold text-[#2A3A0C]"
                 >
                   Back
                 </Button>
@@ -760,7 +760,7 @@ export default function DeliveryLocationDrawer({
               <Button
                 onClick={reset}
                 variant="outline"
-                className="h-11 w-full rounded-xl border-[#dfcbb9] bg-white font-bold text-[#5c4332]"
+                className="h-11 w-full rounded-xl border-[#D8DFC0] bg-white font-bold text-[#2A3A0C]"
               >
                 Change Location
               </Button>

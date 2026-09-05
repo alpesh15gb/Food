@@ -10,8 +10,8 @@ export interface RestaurantTheme {
 }
 
 const defaultTheme: RestaurantTheme = {
-  primaryColor: "#38271F",
-  accentColor: "#38271F",
+  primaryColor: "#B95509",
+  accentColor: "#4E750E",
   fontFamily: "'Playfair Display', serif",
   bodyFontFamily: "'Inter', sans-serif",
   logoUrl: "",

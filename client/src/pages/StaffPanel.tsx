@@ -68,16 +68,16 @@ export default function StaffPanel({ restaurantId }: { restaurantId: string }) {
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-xl font-bold text-[#38271F]" style={{ fontFamily: "var(--font-display)" }}>Team Management</h2>
-        <p className="text-sm text-[#6b5c52] mt-1">Invite staff, assign roles, manage access levels.</p>
+        <h2 className="text-xl font-bold text-[#2A3A0C]" style={{ fontFamily: "var(--font-display)" }}>Team Management</h2>
+        <p className="text-sm text-[#3F4C1E] mt-1">Invite staff, assign roles, manage access levels.</p>
       </div>
 
       {!showInvite ? (
-        <Button onClick={() => setShowInvite(true)} className="bg-[#38271F] hover:bg-[#2a1d17] text-white gap-2">
+        <Button onClick={() => setShowInvite(true)} className="bg-[#2A3A0C] hover:bg-[#2A3A0C] text-white gap-2">
           <Plus className="w-4 h-4" /> Invite Member
         </Button>
       ) : (
-        <div className="bg-white rounded-xl border border-[#e8ddd0] p-4 space-y-3">
+        <div className="bg-white rounded-xl border border-[#D8DFC0] p-4 space-y-3">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="space-y-1">
               <Label htmlFor="invite-email">Email</Label>
@@ -91,7 +91,7 @@ export default function StaffPanel({ restaurantId }: { restaurantId: string }) {
             </div>
           </div>
           <div className="flex flex-wrap gap-2 pt-2">
-            <Button onClick={() => { const email = inviteForm.email.trim().toLowerCase(); if (!email) { toast.error("Email required"); return; } if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { toast.error("Enter a valid email address."); return; } inviteMember.mutate({ restaurantId, email, role: inviteForm.role }); }} disabled={inviteMember.isPending} className="bg-[#38271F] hover:bg-[#2a1d17] text-white">
+            <Button onClick={() => { const email = inviteForm.email.trim().toLowerCase(); if (!email) { toast.error("Email required"); return; } if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { toast.error("Enter a valid email address."); return; } inviteMember.mutate({ restaurantId, email, role: inviteForm.role }); }} disabled={inviteMember.isPending} className="bg-[#2A3A0C] hover:bg-[#2A3A0C] text-white">
               {inviteMember.isPending ? <LoaderCircle className="w-4 h-4 animate-spin mr-1" /> : null} Send Invite
             </Button>
             <Button variant="outline" onClick={() => setShowInvite(false)}>Cancel</Button>
@@ -102,7 +102,7 @@ export default function StaffPanel({ restaurantId }: { restaurantId: string }) {
       {members.isLoading ? (
         <div className="space-y-3" aria-label="Loading team members">
           {[1, 2, 3].map(i => (
-            <div key={i} className="h-14 animate-pulse rounded-xl bg-[#eadfd4]" />
+            <div key={i} className="h-14 animate-pulse rounded-xl bg-[#E9EFD6]" />
           ))}
         </div>
       ) : members.isError ? (
@@ -111,21 +111,21 @@ export default function StaffPanel({ restaurantId }: { restaurantId: string }) {
           onRetry={() => members.refetch()}
         />
       ) : (
-      <div className="bg-white rounded-xl border border-[#e8ddd0] overflow-x-auto">
+      <div className="bg-white rounded-xl border border-[#D8DFC0] overflow-x-auto">
         <table className="w-full min-w-[640px] text-sm">
           <thead className="bg-[#f7f2eb] text-left">
             <tr>
-              <th className="px-4 py-2.5 font-semibold text-[#6b5c52]">Name</th>
-              <th className="px-4 py-2.5 font-semibold text-[#6b5c52]">Email</th>
-              <th className="px-4 py-2.5 font-semibold text-[#6b5c52]">Role</th>
-              <th className="px-4 py-2.5 font-semibold text-[#6b5c52]">Status</th>
-              <th className="px-4 py-2.5 font-semibold text-[#6b5c52]">Joined</th>
+              <th className="px-4 py-2.5 font-semibold text-[#3F4C1E]">Name</th>
+              <th className="px-4 py-2.5 font-semibold text-[#3F4C1E]">Email</th>
+              <th className="px-4 py-2.5 font-semibold text-[#3F4C1E]">Role</th>
+              <th className="px-4 py-2.5 font-semibold text-[#3F4C1E]">Status</th>
+              <th className="px-4 py-2.5 font-semibold text-[#3F4C1E]">Joined</th>
               <th className="px-4 py-2.5"></th>
             </tr>
           </thead>
           <tbody>
             {list.length === 0 ? (
-              <tr><td colSpan={6} className="px-4 py-8 text-center text-[#a09080]">
+              <tr><td colSpan={6} className="px-4 py-8 text-center text-[#9AA07E]">
                 <Users className="w-8 h-8 mx-auto mb-2 opacity-40" />
                 No team members yet
               </td></tr>
@@ -136,7 +136,7 @@ export default function StaffPanel({ restaurantId }: { restaurantId: string }) {
                 <td className="px-4 py-2.5">
                   <select
                     aria-label={`Role for ${m.userEmail ?? m.userName ?? "member"}`}
-                    className="min-h-11 text-xs font-bold px-2 py-1 rounded border border-[#e8ddd0] bg-transparent"
+                    className="min-h-11 text-xs font-bold px-2 py-1 rounded border border-[#D8DFC0] bg-transparent"
                     value={m.role}
                     disabled={updateRole.isPending}
                     onChange={e => updateRole.mutate({ memberId: m.id, role: e.target.value as RoleValue, restaurantId })}
@@ -149,7 +149,7 @@ export default function StaffPanel({ restaurantId }: { restaurantId: string }) {
                     {m.isActive ? "Active" : "Inactive"}
                   </span>
                 </td>
-                <td className="px-4 py-2.5 text-[#6b5c52]">{formatJoinedAt(m.joinedAt)}</td>
+                <td className="px-4 py-2.5 text-[#3F4C1E]">{formatJoinedAt(m.joinedAt)}</td>
                 <td className="px-4 py-2.5 text-right">
                   {m.isActive && (
                     <Button size="sm" variant="ghost" aria-label={`Deactivate ${m.userEmail ?? m.userName ?? "member"}`} className="text-red-500 hover:text-red-700 hover:bg-red-50 h-7 px-2" disabled={deactivate.isPending} onClick={() => setDeactivateId(m.id)}>
@@ -185,13 +185,13 @@ export default function StaffPanel({ restaurantId }: { restaurantId: string }) {
       </AlertDialog>
 
       {/* Role Reference */}
-      <div className="bg-white rounded-xl border border-[#e8ddd0] p-4">
-        <h3 className="font-semibold text-[#38271F] mb-3 flex items-center gap-2"><Shield className="w-4 h-4" /> Role Permissions</h3>
+      <div className="bg-white rounded-xl border border-[#D8DFC0] p-4">
+        <h3 className="font-semibold text-[#2A3A0C] mb-3 flex items-center gap-2"><Shield className="w-4 h-4" /> Role Permissions</h3>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           {ROLES.map(r => (
             <div key={r.value} className="p-3 rounded-lg bg-[#f7f2eb]">
-              <p className="font-bold text-sm text-[#38271F]">{r.label}</p>
-              <p className="text-xs text-[#6b5c52] mt-1">{r.desc}</p>
+              <p className="font-bold text-sm text-[#2A3A0C]">{r.label}</p>
+              <p className="text-xs text-[#3F4C1E] mt-1">{r.desc}</p>
             </div>
           ))}
         </div>

@@ -170,7 +170,7 @@ export function AdminError({ message, onRetry }: { message: string; onRetry?: ()
           <Button
             onClick={onRetry}
             variant="outline"
-            className="mt-4 h-10 rounded-xl border-[#d8bda7] bg-white text-xs font-extrabold text-[#704d37]"
+            className="mt-4 h-10 rounded-xl border-[#D8DFC0] bg-white text-xs font-extrabold text-[#3F4C1E]"
           >
             <RefreshCw className="mr-2 h-3.5 w-3.5" aria-hidden />
             Retry
@@ -365,7 +365,7 @@ function DashboardLayoutContent({
           </SidebarHeader>
 
           <SidebarContent className="gap-0 px-1">
-            {!isCollapsed && <div className="mx-2 mt-3 rounded-2xl bg-[#38271f] p-4 text-white"><p className="text-[10px] font-extrabold uppercase tracking-[0.16em] text-[#e9bda2]">Kitchen status</p><p className="font-display mt-2 text-lg">Ready to configure</p><p className="mt-1 text-xs leading-relaxed text-white/65">Add your menu, then switch the kitchen on when you are ready for real orders.</p></div>}
+            {!isCollapsed && <div className="mx-2 mt-3 rounded-2xl bg-[#2A3A0C] p-4 text-white"><p className="text-[10px] font-extrabold uppercase tracking-[0.16em] text-[#e9bda2]">Kitchen status</p><p className="font-display mt-2 text-lg">Ready to configure</p><p className="mt-1 text-xs leading-relaxed text-white/65">Add your menu, then switch the kitchen on when you are ready for real orders.</p></div>}
             <SidebarMenu className="px-2 py-4">
               {visibleItems.map(item => {
                 const isActive = isActiveSection(item.section);
@@ -375,7 +375,7 @@ function DashboardLayoutContent({
                       isActive={isActive}
                       onClick={() => setLocation(pathFor(item.section))}
                       tooltip={item.label}
-                      className={`h-11 rounded-xl transition-all font-semibold ${isActive ? "bg-[#f9e4d5] text-[#B95509] hover:bg-[#f9e4d5]" : "text-[#6d5140] hover:bg-[#f8eee6]"}`}
+                      className={`h-11 rounded-xl transition-all font-semibold ${isActive ? "bg-[#E9EFD6] text-[#B95509] hover:bg-[#E9EFD6]" : "text-[#6d5140] hover:bg-[#f8eee6]"}`}
                     >
                       <item.icon
                         className={`h-4 w-4 ${isActive ? "text-primary" : ""}`}
@@ -431,9 +431,9 @@ function DashboardLayoutContent({
 
       <SidebarInset className="min-h-screen bg-[#f7f2eb]">
         {isMobile && (
-          <div className="sticky top-0 z-40 flex h-16 items-center justify-between border-b border-[#eadccf] bg-[#fffdf9]/95 px-4 backdrop-blur">
+          <div className="sticky top-0 z-40 flex h-16 items-center justify-between border-b border-[#D8DFC0] bg-[#fffdf9]/95 px-4 backdrop-blur">
             <div className="min-w-0"><p className="text-[9px] font-extrabold uppercase tracking-[0.16em] text-[#a06e53]">Kitchen Admin</p><span className="font-display block truncate text-xl text-[#3f2c20]">{sectionTitle(section)}</span></div>
-            <SidebarTrigger className="h-10 w-10 rounded-xl border border-[#e4cdbb] bg-[#fff8f0] text-[#B95509]" aria-label="Open operations navigation"><Menu className="h-5 w-5" /></SidebarTrigger>
+            <SidebarTrigger className="h-10 w-10 rounded-xl border border-[#D8DFC0] bg-[#E9EFD6] text-[#B95509]" aria-label="Open operations navigation"><Menu className="h-5 w-5" /></SidebarTrigger>
           </div>
         )}
         <main className="flex-1 p-0 pb-24 md:p-0 md:pb-0">{children}</main>
@@ -491,7 +491,7 @@ function DashboardLayoutContent({
                                     setMoreOpen(false);
                                   }}
                                   aria-current={active ? "page" : undefined}
-                                  className={`flex min-h-14 items-center gap-3 rounded-xl border px-3 text-left text-xs font-extrabold ${active ? "border-[#B95509] bg-[#f8e3d4] text-[#9C4A07]" : "border-[#eadccf] bg-white text-[#6d5140]"}`}
+                                  className={`flex min-h-14 items-center gap-3 rounded-xl border px-3 text-left text-xs font-extrabold ${active ? "border-[#B95509] bg-[#f8e3d4] text-[#9C4A07]" : "border-[#D8DFC0] bg-white text-[#6d5140]"}`}
                                 >
                                   <item.icon className="h-4 w-4 shrink-0" aria-hidden />
                                   {item.label}

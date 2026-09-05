@@ -15,11 +15,11 @@ export default function InventoryPanel({ restaurantId }: { restaurantId: string 
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-xl font-bold text-[#38271F]" style={{ fontFamily: "var(--font-display)" }}>Inventory & Recipes</h2>
-        <p className="text-sm text-[#6b5c52] mt-1">Track raw materials, link ingredients to menu items, manage suppliers and purchase orders.</p>
+        <h2 className="text-xl font-bold text-[#2A3A0C]" style={{ fontFamily: "var(--font-display)" }}>Inventory & Recipes</h2>
+        <p className="text-sm text-[#3F4C1E] mt-1">Track raw materials, link ingredients to menu items, manage suppliers and purchase orders.</p>
       </div>
 
-      <div className="flex gap-1 border-b border-[#e8ddd0] pb-0 overflow-x-auto">
+      <div className="flex gap-1 border-b border-[#D8DFC0] pb-0 overflow-x-auto">
         {([
           { id: "materials", label: "Materials", icon: Box },
           { id: "recipes", label: "Recipes", icon: UtensilsCrossed },
@@ -31,8 +31,8 @@ export default function InventoryPanel({ restaurantId }: { restaurantId: string 
             onClick={() => setTab(t.id)}
             className={`flex shrink-0 whitespace-nowrap items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
               tab === t.id
-                ? "border-[#38271F] text-[#38271F]"
-                : "border-transparent text-[#6b5c52] hover:text-[#38271F]"
+                ? "border-[#2A3A0C] text-[#2A3A0C]"
+                : "border-transparent text-[#3F4C1E] hover:text-[#2A3A0C]"
             }`}
           >
             <t.icon className="w-4 h-4" />
@@ -77,7 +77,7 @@ function MaterialsTab({ restaurantId }: { restaurantId: string }) {
     return (
       <div className="space-y-3" aria-label="Loading materials">
         {[1, 2, 3].map(i => (
-          <div key={i} className="h-14 animate-pulse rounded-xl bg-[#eadfd4]" />
+          <div key={i} className="h-14 animate-pulse rounded-xl bg-[#E9EFD6]" />
         ))}
       </div>
     );
@@ -105,11 +105,11 @@ function MaterialsTab({ restaurantId }: { restaurantId: string }) {
       )}
 
       {!showForm ? (
-        <Button onClick={() => setShowForm(true)} className="bg-[#38271F] hover:bg-[#2a1d17] text-white gap-2">
+        <Button onClick={() => setShowForm(true)} className="bg-[#2A3A0C] hover:bg-[#2A3A0C] text-white gap-2">
           <Plus className="w-4 h-4" /> Add Material
         </Button>
       ) : (
-        <div className="bg-white rounded-xl border border-[#e8ddd0] p-4 space-y-3">
+        <div className="bg-white rounded-xl border border-[#D8DFC0] p-4 space-y-3">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="space-y-1">
               <Label>Name</Label>
@@ -156,7 +156,7 @@ function MaterialsTab({ restaurantId }: { restaurantId: string }) {
                 costPerUnitPaise,
                 category: form.category.trim() || undefined,
               });
-            }} disabled={createMaterial.isPending} className="bg-[#38271F] hover:bg-[#2a1d17] text-white">
+            }} disabled={createMaterial.isPending} className="bg-[#2A3A0C] hover:bg-[#2A3A0C] text-white">
               {createMaterial.isPending ? <LoaderCircle className="w-4 h-4 animate-spin mr-1" /> : null} Save
             </Button>
             <Button variant="outline" onClick={() => setShowForm(false)}>Cancel</Button>
@@ -164,20 +164,20 @@ function MaterialsTab({ restaurantId }: { restaurantId: string }) {
         </div>
       )}
 
-      <div className="bg-white rounded-xl border border-[#e8ddd0] overflow-x-auto">
+      <div className="bg-white rounded-xl border border-[#D8DFC0] overflow-x-auto">
         <table className="w-full min-w-[640px] text-sm">
           <thead className="bg-[#f7f2eb] text-left">
             <tr>
-              <th className="px-4 py-2.5 font-semibold text-[#6b5c52]">Material</th>
-              <th className="px-4 py-2.5 font-semibold text-[#6b5c52]">Stock</th>
-              <th className="px-4 py-2.5 font-semibold text-[#6b5c52]">Min</th>
-              <th className="px-4 py-2.5 font-semibold text-[#6b5c52]">Cost/Unit</th>
-              <th className="px-4 py-2.5 font-semibold text-[#6b5c52]">Category</th>
+              <th className="px-4 py-2.5 font-semibold text-[#3F4C1E]">Material</th>
+              <th className="px-4 py-2.5 font-semibold text-[#3F4C1E]">Stock</th>
+              <th className="px-4 py-2.5 font-semibold text-[#3F4C1E]">Min</th>
+              <th className="px-4 py-2.5 font-semibold text-[#3F4C1E]">Cost/Unit</th>
+              <th className="px-4 py-2.5 font-semibold text-[#3F4C1E]">Category</th>
             </tr>
           </thead>
           <tbody>
             {list.length === 0 ? (
-              <tr><td colSpan={5} className="px-4 py-8 text-center text-[#a09080]">No materials added yet</td></tr>
+              <tr><td colSpan={5} className="px-4 py-8 text-center text-[#9AA07E]">No materials added yet</td></tr>
             ) : list.map(m => {
               const rawStock = parseFloat(String(m.currentStock));
               const rawMin = parseFloat(String(m.minStock));
@@ -189,9 +189,9 @@ function MaterialsTab({ restaurantId }: { restaurantId: string }) {
                 <tr key={m.id} className="border-t border-[#f0e8de]">
                   <td className="px-4 py-2.5 font-medium">{m.name}</td>
                   <td className={`px-4 py-2.5 ${isLow ? "text-red-600 font-bold" : ""}`}>{stock} {m.unit}</td>
-                  <td className="px-4 py-2.5 text-[#6b5c52]">{min} {m.unit}</td>
+                  <td className="px-4 py-2.5 text-[#3F4C1E]">{min} {m.unit}</td>
                   <td className="px-4 py-2.5">₹{(cost / 100).toFixed(2)}</td>
-                  <td className="px-4 py-2.5 text-[#6b5c52]">{m.category ?? "-"}</td>
+                  <td className="px-4 py-2.5 text-[#3F4C1E]">{m.category ?? "-"}</td>
                 </tr>
               );
             })}
@@ -208,7 +208,7 @@ function MaterialsTab({ restaurantId }: { restaurantId: string }) {
 
 function RecipesTab({ restaurantId }: { restaurantId: string }) {
   return (
-    <div className="text-center py-12 text-[#a09080]">
+    <div className="text-center py-12 text-[#9AA07E]">
       <UtensilsCrossed className="w-12 h-12 mx-auto mb-3 opacity-40" />
       <p className="font-medium">Recipe Builder</p>
       <p className="text-sm mt-1">Link menu items to raw material ingredients. Select a menu item from the Menu panel to configure its recipe.</p>
@@ -241,7 +241,7 @@ function SuppliersTab({ restaurantId }: { restaurantId: string }) {
     return (
       <div className="space-y-3" aria-label="Loading suppliers">
         {[1, 2].map(i => (
-          <div key={i} className="h-14 animate-pulse rounded-xl bg-[#eadfd4]" />
+          <div key={i} className="h-14 animate-pulse rounded-xl bg-[#E9EFD6]" />
         ))}
       </div>
     );
@@ -259,11 +259,11 @@ function SuppliersTab({ restaurantId }: { restaurantId: string }) {
   return (
     <div className="space-y-4">
       {!showForm ? (
-        <Button onClick={() => setShowForm(true)} className="bg-[#38271F] hover:bg-[#2a1d17] text-white gap-2">
+        <Button onClick={() => setShowForm(true)} className="bg-[#2A3A0C] hover:bg-[#2A3A0C] text-white gap-2">
           <Plus className="w-4 h-4" /> Add Supplier
         </Button>
       ) : (
-        <div className="bg-white rounded-xl border border-[#e8ddd0] p-4 space-y-3">
+        <div className="bg-white rounded-xl border border-[#D8DFC0] p-4 space-y-3">
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div className="space-y-1"><Label>Name</Label><Input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} /></div>
             <div className="space-y-1"><Label>Phone</Label><Input value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} /></div>
@@ -282,7 +282,7 @@ function SuppliersTab({ restaurantId }: { restaurantId: string }) {
                 phone: phone || undefined,
                 email: email || undefined,
               });
-            }} disabled={createSupplier.isPending} className="bg-[#38271F] hover:bg-[#2a1d17] text-white">
+            }} disabled={createSupplier.isPending} className="bg-[#2A3A0C] hover:bg-[#2A3A0C] text-white">
               {createSupplier.isPending ? <LoaderCircle className="w-4 h-4 animate-spin mr-1" /> : null} Save
             </Button>
             <Button variant="outline" onClick={() => setShowForm(false)}>Cancel</Button>
@@ -290,18 +290,18 @@ function SuppliersTab({ restaurantId }: { restaurantId: string }) {
         </div>
       )}
 
-      <div className="bg-white rounded-xl border border-[#e8ddd0] overflow-x-auto">
+      <div className="bg-white rounded-xl border border-[#D8DFC0] overflow-x-auto">
         <table className="w-full min-w-[640px] text-sm">
           <thead className="bg-[#f7f2eb] text-left">
             <tr>
-              <th className="px-4 py-2.5 font-semibold text-[#6b5c52]">Name</th>
-              <th className="px-4 py-2.5 font-semibold text-[#6b5c52]">Phone</th>
-              <th className="px-4 py-2.5 font-semibold text-[#6b5c52]">Email</th>
+              <th className="px-4 py-2.5 font-semibold text-[#3F4C1E]">Name</th>
+              <th className="px-4 py-2.5 font-semibold text-[#3F4C1E]">Phone</th>
+              <th className="px-4 py-2.5 font-semibold text-[#3F4C1E]">Email</th>
             </tr>
           </thead>
           <tbody>
             {list.length === 0 ? (
-              <tr><td colSpan={3} className="px-4 py-8 text-center text-[#a09080]">No suppliers added yet</td></tr>
+              <tr><td colSpan={3} className="px-4 py-8 text-center text-[#9AA07E]">No suppliers added yet</td></tr>
             ) : list.map(s => (
               <tr key={s.id} className="border-t border-[#f0e8de]">
                 <td className="px-4 py-2.5 font-medium">{s.name}</td>
@@ -337,7 +337,7 @@ function PurchaseOrdersTab({ restaurantId }: { restaurantId: string }) {
     return (
       <div className="space-y-3" aria-label="Loading purchase orders">
         {[1, 2, 3].map(i => (
-          <div key={i} className="h-14 animate-pulse rounded-xl bg-[#eadfd4]" />
+          <div key={i} className="h-14 animate-pulse rounded-xl bg-[#E9EFD6]" />
         ))}
       </div>
     );
@@ -354,21 +354,21 @@ function PurchaseOrdersTab({ restaurantId }: { restaurantId: string }) {
 
   return (
     <div className="space-y-4">
-      <div className="bg-white rounded-xl border border-[#e8ddd0] overflow-x-auto">
+      <div className="bg-white rounded-xl border border-[#D8DFC0] overflow-x-auto">
         <table className="w-full min-w-[640px] text-sm">
           <thead className="bg-[#f7f2eb] text-left">
             <tr>
-              <th className="px-4 py-2.5 font-semibold text-[#6b5c52]">PO #</th>
-              <th className="px-4 py-2.5 font-semibold text-[#6b5c52]">Supplier</th>
-              <th className="px-4 py-2.5 font-semibold text-[#6b5c52]">Status</th>
-              <th className="px-4 py-2.5 font-semibold text-[#6b5c52]">Total</th>
-              <th className="px-4 py-2.5 font-semibold text-[#6b5c52]">Date</th>
-              <th className="px-4 py-2.5 font-semibold text-[#6b5c52]"></th>
+              <th className="px-4 py-2.5 font-semibold text-[#3F4C1E]">PO #</th>
+              <th className="px-4 py-2.5 font-semibold text-[#3F4C1E]">Supplier</th>
+              <th className="px-4 py-2.5 font-semibold text-[#3F4C1E]">Status</th>
+              <th className="px-4 py-2.5 font-semibold text-[#3F4C1E]">Total</th>
+              <th className="px-4 py-2.5 font-semibold text-[#3F4C1E]">Date</th>
+              <th className="px-4 py-2.5 font-semibold text-[#3F4C1E]"></th>
             </tr>
           </thead>
           <tbody>
             {list.length === 0 ? (
-              <tr><td colSpan={6} className="px-4 py-8 text-center text-[#a09080]">
+              <tr><td colSpan={6} className="px-4 py-8 text-center text-[#9AA07E]">
                 <Package className="w-8 h-8 mx-auto mb-2 opacity-40" />
                 No purchase orders yet
               </td></tr>
@@ -389,7 +389,7 @@ function PurchaseOrdersTab({ restaurantId }: { restaurantId: string }) {
                   }`}>{po.status}</span>
                 </td>
                 <td className="px-4 py-2.5">₹{(total / 100).toLocaleString("en-IN")}</td>
-                <td className="px-4 py-2.5 text-[#6b5c52]">{Number.isNaN(created.getTime()) ? "—" : created.toLocaleDateString()}</td>
+                <td className="px-4 py-2.5 text-[#3F4C1E]">{Number.isNaN(created.getTime()) ? "—" : created.toLocaleDateString()}</td>
                 <td className="px-4 py-2.5 text-right">
                   {canReceive && (
                     <Button

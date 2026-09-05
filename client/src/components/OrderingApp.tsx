@@ -144,7 +144,7 @@ function Quantity({
         type="button"
         aria-label={atMinimum && allowZero ? "Remove item" : "Decrease quantity"}
         onClick={() => onChange(atMinimum ? (allowZero ? 0 : 1) : value - 1)}
-        className="grid h-full min-h-[44px] w-11 place-items-center rounded-l-full text-[#7f5a45] hover:text-[#B95509] focus-visible:outline-2 focus-visible:outline-[#B95509]"
+        className="grid h-full min-h-[44px] w-11 place-items-center rounded-l-full text-[#5F6B3C] hover:text-[#B95509] focus-visible:outline-2 focus-visible:outline-[#B95509]"
       >
         <Minus className="h-3.5 w-3.5" />
       </button>
@@ -155,7 +155,7 @@ function Quantity({
         type="button"
         aria-label="Increase quantity"
         onClick={() => onChange(value + 1)}
-        className="grid h-full min-h-[44px] w-11 place-items-center rounded-r-full text-[#7f5a45] hover:text-[#B95509] focus-visible:outline-2 focus-visible:outline-[#B95509]"
+        className="grid h-full min-h-[44px] w-11 place-items-center rounded-r-full text-[#5F6B3C] hover:text-[#B95509] focus-visible:outline-2 focus-visible:outline-[#B95509]"
       >
         <Plus className="h-3.5 w-3.5" />
       </button>
@@ -974,7 +974,7 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
         {lowData && !lowDataDismissed && (
           <div
             role="status"
-            className="flex items-center justify-center gap-1 border-b border-[#ead8c6] bg-[#fff6ea] py-1 pl-4 pr-2 text-xs font-bold text-[#8a6b56]"
+            className="flex items-center justify-center gap-1 border-b border-[#D8DFC0] bg-[#fff6ea] py-1 pl-4 pr-2 text-xs font-bold text-[#5F6B3C]"
           >
             <span>Slow network — showing light mode.</span>
             <button
@@ -989,7 +989,7 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
         )}
 
         {/* Hero Banner */}
-        <section className="relative overflow-hidden bg-[#2d1f17] text-white">
+        <section className="relative overflow-hidden bg-[#22330A] text-white">
           {!lowData && restaurant.bannerImage ? (
             <SmartImage
               src={restaurant.bannerImage}
@@ -1001,7 +1001,7 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
               imgClassName="opacity-60"
             />
           ) : null}
-          <div className="absolute inset-0 bg-gradient-to-r from-[#1a1210]/95 via-[#2b1e16]/80 to-[#2b1e16]/30" />
+          <div className="absolute inset-0 bg-gradient-to-r from-[#141F04]/95 via-[#2E420C]/85 to-[#2E420C]/30" />
           <div className="relative mx-auto flex min-h-[280px] max-w-[1440px] items-end px-4 pb-7 pt-16 sm:px-6 lg:min-h-[320px] lg:px-10 lg:pb-10">
             <div className="rise-in max-w-xl">
               <div className="mb-4 flex items-center gap-3">
@@ -1076,15 +1076,15 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
               className="flex w-full items-center justify-between gap-3 text-left"
             >
               <div className="flex min-w-0 items-center gap-3">
-                <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-[#faede0] text-[#B95509]">
+                <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-[#E9EFD6] text-[#B95509]">
                   <MapPin className="h-4 w-4" />
                 </span>
                 <div className="min-w-0">
-                  <p className="text-xs font-extrabold uppercase tracking-[0.14em] text-[#9a7660]">
+                  <p className="text-xs font-extrabold uppercase tracking-[0.14em] text-[#5F6B3C]">
                     {deliveryAddress?.confirmed ? "Delivering to" : "Set delivery location"}
                   </p>
                   {deliveryAddress?.confirmed ? (
-                    <p className="truncate text-sm font-bold text-[#382719]">
+                    <p className="truncate text-sm font-bold text-[#2A3A0C]">
                       {deliveryAddress.flatHouse}, {deliveryAddress.area}, {deliveryAddress.city} {deliveryAddress.postalCode}
                     </p>
                   ) : (
@@ -1094,7 +1094,7 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
                   )}
                 </div>
               </div>
-              <ChevronRight className="h-4 w-4 text-[#9a7660]" />
+              <ChevronRight className="h-4 w-4 text-[#5F6B3C]" />
             </button>
           </section>
 
@@ -1106,7 +1106,7 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
             {/* Desktop Category Sidebar */}
             <aside className="hidden lg:block">
               <div className="sticky top-24">
-                <p className="mb-3 text-xs font-extrabold uppercase tracking-[0.16em] text-[#9a7660]">
+                <p className="mb-3 text-xs font-extrabold uppercase tracking-[0.16em] text-[#5F6B3C]">
                   On the menu
                 </p>
                 <nav aria-label="Menu categories" className="space-y-1">
@@ -1122,7 +1122,7 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
                       }`}
                     >
                       <span className="truncate">{category.name}</span>
-                      <span className="shrink-0 text-xs font-bold tabular-nums text-[#a37960]">
+                      <span className="shrink-0 text-xs font-bold tabular-nums text-[#5F6B3C]">
                         {countByCategory.get(category.name) ?? 0}
                       </span>
                     </button>
@@ -1137,7 +1137,7 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
               <div className="sticky top-[76px] z-20 -mx-4 bg-[#fffaf3]/95 px-4 pb-2 pt-4 backdrop-blur sm:-mx-6 sm:px-6 lg:static lg:mx-0 lg:bg-transparent lg:px-0 lg:pt-0">
                 <div className="flex gap-2">
                   <div className="relative flex-1">
-                    <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-[#a37d64]" />
+                    <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-[#5F6B3C]" />
                     <label htmlFor="dish-search" className="sr-only">
                       Search dishes, cuisines, or categories
                     </label>
@@ -1147,14 +1147,14 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
                       value={query}
                       onChange={(event) => setQuery(event.target.value)}
                       placeholder="Search dishes, cuisines, or categories"
-                      className="h-12 rounded-2xl border-[#e8d6c5] bg-white pl-11 pr-12 text-sm shadow-sm placeholder:text-[#ac8b73]"
+                      className="h-12 rounded-2xl border-[#D8DFC0] bg-white pl-11 pr-12 text-sm shadow-sm placeholder:text-[#ac8b73]"
                     />
                     {query && (
                       <button
                         type="button"
                         onClick={clearSearch}
                         aria-label="Clear search"
-                        className="absolute right-1 top-1/2 grid h-11 w-11 -translate-y-1/2 place-items-center rounded-full text-[#a37d64] hover:text-[#B95509]"
+                        className="absolute right-1 top-1/2 grid h-11 w-11 -translate-y-1/2 place-items-center rounded-full text-[#5F6B3C] hover:text-[#B95509]"
                       >
                         <X className="h-4 w-4" aria-hidden="true" />
                       </button>
@@ -1174,7 +1174,7 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
                         aria-pressed={isActive}
                         className={`min-h-[44px] shrink-0 whitespace-nowrap rounded-full px-3.5 py-2 text-xs font-extrabold ${
                           isActive
-                            ? "bg-[#382719] text-white"
+                            ? "bg-[#2A3A0C] text-white"
                             : "border border-[#ead8c7] bg-white text-[#76523e]"
                         }`}
                       >
@@ -1221,7 +1221,7 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
                   </p>
                   <button
                     onClick={clearSearch}
-                    className="min-h-[44px] shrink-0 px-2 text-xs font-bold text-[#9b6a52] hover:text-[#B95509]"
+                    className="min-h-[44px] shrink-0 px-2 text-xs font-bold text-[#4A5729] hover:text-[#B95509]"
                   >
                     Clear
                   </button>
@@ -1235,7 +1235,7 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
                     <div key={collection.name}>
                       <div className="mb-3 flex items-center gap-2">
                         <Sparkles className="h-4 w-4 text-[#B95509]" aria-hidden="true" />
-                        <h3 className="text-sm font-extrabold text-[#382719]">
+                        <h3 className="text-sm font-extrabold text-[#2A3A0C]">
                           {collection.name}
                         </h3>
                       </div>
@@ -1338,12 +1338,12 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
       {/* Customer Auth — Dialog on sm+ screens, Drawer on mobile */}
       {isDesktop ? (
         <Dialog open={authOpen} onOpenChange={handleAuthOpenChange}>
-          <DialogContent className="border-[#dfcbb9] bg-[#fffaf3] sm:max-w-md">
+          <DialogContent className="border-[#D8DFC0] bg-[#fffaf3] sm:max-w-md">
             <DialogHeader className="text-left">
-              <DialogTitle className="font-display text-2xl text-[#382719]">
+              <DialogTitle className="font-display text-2xl text-[#2A3A0C]">
                 {loggedInPhone ? "Your Account" : "Sign in to order"}
               </DialogTitle>
-              <DialogDescription className="text-[#91725e]">
+              <DialogDescription className="text-[#5F6B3C]">
                 {loggedInPhone
                   ? `Logged in as ${loggedInPhone}`
                   : "Enter your phone number to get started"}
@@ -1372,10 +1372,10 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
         <Drawer open={authOpen} onOpenChange={handleAuthOpenChange}>
           <DrawerContent className="max-h-[85vh]">
             <DrawerHeader className="px-6 pb-2 text-left">
-              <DrawerTitle className="font-display text-2xl text-[#382719]">
+              <DrawerTitle className="font-display text-2xl text-[#2A3A0C]">
                 {loggedInPhone ? "Your Account" : "Sign in to order"}
               </DrawerTitle>
-              <DrawerDescription className="text-[#91725e]">
+              <DrawerDescription className="text-[#5F6B3C]">
                 {loggedInPhone
                   ? `Logged in as ${loggedInPhone}`
                   : "Enter your phone number to get started"}
@@ -1447,22 +1447,22 @@ function AuthBody({
   if (loggedInPhone) {
     return (
       <div className="space-y-4">
-        <div className="rounded-xl border border-[#eadccf] bg-[#fff9f3] p-4">
+        <div className="rounded-xl border border-[#D8DFC0] bg-[#E9EFD6] p-4">
           <div className="grid grid-cols-2 gap-4 text-sm">
             <div>
-              <p className="text-xs font-extrabold uppercase tracking-wider text-[#a77d63]">Phone</p>
-              <p className="mt-1 font-bold text-[#382719]">{loggedInPhone}</p>
+              <p className="text-xs font-extrabold uppercase tracking-wider text-[#5F6B3C]">Phone</p>
+              <p className="mt-1 font-bold text-[#2A3A0C]">{loggedInPhone}</p>
             </div>
             <div>
-              <p className="text-xs font-extrabold uppercase tracking-wider text-[#a77d63]">Total Orders</p>
-              <p className="mt-1 font-bold text-[#382719]">{totalOrders ?? 0}</p>
+              <p className="text-xs font-extrabold uppercase tracking-wider text-[#5F6B3C]">Total Orders</p>
+              <p className="mt-1 font-bold text-[#2A3A0C]">{totalOrders ?? 0}</p>
             </div>
           </div>
         </div>
         <Button
           onClick={onLogout}
           variant="outline"
-          className="min-h-[44px] w-full rounded-xl border-[#ddc6b5] text-[#B95509] font-extrabold"
+          className="min-h-[44px] w-full rounded-xl border-[#D8DFC0] text-[#B95509] font-extrabold"
         >
           Sign out
         </Button>
@@ -1485,7 +1485,7 @@ function AuthBody({
           inputMode="numeric"
           autoComplete="tel"
           maxLength={15}
-          className="h-12 rounded-xl border-[#ddc6b5] text-base"
+          className="h-12 rounded-xl border-[#D8DFC0] text-base"
         />
         {otpError && (
           <p role="alert" className="text-sm font-bold text-[#B95509]">{otpError}</p>
@@ -1497,7 +1497,7 @@ function AuthBody({
         >
           {otpLoading ? "Sending..." : "Send verification code"}
         </Button>
-        <p className="text-center text-xs text-[#a77d63]">
+        <p className="text-center text-xs text-[#5F6B3C]">
           We'll send a 6-digit code to verify your number.
         </p>
       </div>
@@ -1521,7 +1521,7 @@ function AuthBody({
         inputMode="numeric"
         autoComplete="one-time-code"
         maxLength={6}
-        className="h-12 rounded-xl border-[#ddc6b5] text-center text-2xl font-mono tracking-[0.3em]"
+        className="h-12 rounded-xl border-[#D8DFC0] text-center text-2xl font-mono tracking-[0.3em]"
       />
       {otpError && (
         <p role="alert" className="text-sm font-bold text-[#B95509]">{otpError}</p>
@@ -1534,21 +1534,21 @@ function AuthBody({
         {otpLoading ? "Verifying..." : "Verify & continue"}
       </Button>
       {resendCooldown > 0 ? (
-        <p aria-live="polite" className="text-center text-xs font-bold text-[#a77d63]">
+        <p aria-live="polite" className="text-center text-xs font-bold text-[#5F6B3C]">
           Resend code in {resendCooldown}s
         </p>
       ) : (
         <button
           onClick={onSendOtp}
           disabled={otpLoading}
-          className="min-h-[44px] w-full text-center text-xs font-bold text-[#a77d63] underline disabled:opacity-50"
+          className="min-h-[44px] w-full text-center text-xs font-bold text-[#5F6B3C] underline disabled:opacity-50"
         >
           Resend code
         </button>
       )}
       <button
         onClick={onBackToPhone}
-        className="min-h-[44px] w-full text-center text-xs font-bold text-[#a77d63] underline"
+        className="min-h-[44px] w-full text-center text-xs font-bold text-[#5F6B3C] underline"
       >
         Change phone number
       </button>
@@ -1588,11 +1588,11 @@ function TopBar({
         >
           <BrandMark />
           <span className="min-w-0">
-            <span className="font-display block truncate text-xl leading-tight text-[#382719]">
+            <span className="font-display block truncate text-xl leading-tight text-[#2A3A0C]">
               {restaurantName}
             </span>
             {/* Single compact meta row — fixed height so it never shifts layout */}
-            <span className="flex h-5 items-center gap-2 overflow-hidden whitespace-nowrap text-[11px] font-bold text-[#9a7660]">
+            <span className="flex h-5 items-center gap-2 overflow-hidden whitespace-nowrap text-[11px] font-bold text-[#5F6B3C]">
               {eta ? (
                 <span className="inline-flex items-center gap-1">
                   <Clock3 className="h-3 w-3 shrink-0" aria-hidden="true" />
@@ -1623,7 +1623,7 @@ function TopBar({
         <nav className="flex shrink-0 items-center gap-1 sm:gap-2">
           <button
             onClick={onAccount}
-            className="flex min-h-[44px] items-center gap-1.5 rounded-xl border border-[#ddc6b5] bg-white px-3 py-2 text-xs font-extrabold text-[#553d2c] hover:bg-[#f9e6d9]"
+            className="flex min-h-[44px] items-center gap-1.5 rounded-xl border border-[#D8DFC0] bg-white px-3 py-2 text-xs font-extrabold text-[#2A3A0C] hover:bg-[#f9e6d9]"
             aria-label="Account"
           >
             <UserRound className="h-4 w-4" />
@@ -1631,7 +1631,7 @@ function TopBar({
           </button>
           <button
             onClick={onCart}
-            className="relative grid h-11 w-11 place-items-center rounded-xl bg-[#382719] text-white hover:bg-[#B95509]"
+            className="relative grid h-11 w-11 place-items-center rounded-xl bg-[#2A3A0C] text-white hover:bg-[#B95509]"
             aria-label={itemCount > 0 ? `Open cart, ${itemCount} items` : "Open cart"}
           >
             <ShoppingBag className="h-4 w-4" />
@@ -1679,7 +1679,7 @@ function OfferStrip({
         {offers.slice(0, 6).map((offer) => (
           <article
             key={offer.code}
-            className="w-[260px] shrink-0 snap-start rounded-2xl border border-[#e8d6c5] bg-gradient-to-r from-[#fff9f0] to-[#fff3e5] p-3"
+            className="w-[260px] shrink-0 snap-start rounded-2xl border border-[#D8DFC0] bg-gradient-to-r from-[#fff9f0] to-[#fff3e5] p-3"
           >
             <div className="flex items-center gap-2.5">
               <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[#B95509]/10 text-[#B95509]">
@@ -1726,7 +1726,7 @@ const CollectionCard = memo(function CollectionCard({
   item: StorefrontMenuItem;
 }) {
   return (
-    <div className="menu-cv flex w-[220px] shrink-0 snap-start gap-3 rounded-2xl border border-[#ead8c6] bg-[#fffdf9] p-3 shadow-sm">
+    <div className="menu-cv flex w-[220px] shrink-0 snap-start gap-3 rounded-2xl border border-[#D8DFC0] bg-[#fffdf9] p-3 shadow-sm">
       <SmartImage
         src={item.image}
         alt={item.name}
@@ -1736,7 +1736,7 @@ const CollectionCard = memo(function CollectionCard({
       />
       <div className="flex min-w-0 flex-1 flex-col justify-between">
         <div className="min-w-0">
-          <p className="truncate text-xs font-extrabold text-[#382719]">
+          <p className="truncate text-xs font-extrabold text-[#2A3A0C]">
             {item.name}
           </p>
           <p className="mt-0.5 text-xs font-bold tabular-nums text-[#B95509]">
@@ -1829,7 +1829,7 @@ const MenuStream = memo(function MenuStream({
     if (items.length === 0)
       return (
         <div className="ticket-edge mt-5 bg-[#fffdf8] p-9 text-center shadow-sm">
-          <div className="mx-auto grid h-14 w-14 place-items-center rounded-full bg-[#faede0] text-[#B95509]">
+          <div className="mx-auto grid h-14 w-14 place-items-center rounded-full bg-[#E9EFD6] text-[#B95509]">
             <Utensils className="h-6 w-6" />
           </div>
           <h2 className="font-display mt-4 text-2xl">
@@ -1845,14 +1845,14 @@ const MenuStream = memo(function MenuStream({
       <div className="space-y-3 pb-3">
         <div className="mb-4 flex items-end justify-between">
           <div>
-            <p className="text-xs font-extrabold uppercase tracking-[0.16em] text-[#a37960]">
+            <p className="text-xs font-extrabold uppercase tracking-[0.16em] text-[#5F6B3C]">
               Fresh from the kitchen
             </p>
-            <h2 className="font-display mt-1 text-3xl text-[#382719]">
+            <h2 className="font-display mt-1 text-3xl text-[#2A3A0C]">
               What we found
             </h2>
           </div>
-          <span role="status" aria-live="polite" className="text-xs font-bold tabular-nums text-[#94715c]">
+          <span role="status" aria-live="polite" className="text-xs font-bold tabular-nums text-[#5F6B3C]">
             {items.length} dish{items.length !== 1 ? "es" : ""}
           </span>
         </div>
@@ -1867,7 +1867,7 @@ const MenuStream = memo(function MenuStream({
   if (!searching && categories.length === 0) {
     return (
       <div className="ticket-edge mt-5 bg-[#fffdf8] p-9 text-center shadow-sm">
-        <div className="mx-auto grid h-14 w-14 place-items-center rounded-full bg-[#faede0] text-[#B95509]">
+        <div className="mx-auto grid h-14 w-14 place-items-center rounded-full bg-[#E9EFD6] text-[#B95509]">
           <Utensils className="h-6 w-6" />
         </div>
         <h2 className="font-display mt-4 text-2xl">
@@ -1892,10 +1892,10 @@ const MenuStream = memo(function MenuStream({
             className="section-anchor"
           >
             <div className="mb-3 flex items-end justify-between">
-              <h2 className="font-display text-2xl text-[#382719]">
+              <h2 className="font-display text-2xl text-[#2A3A0C]">
                 {category.name}
               </h2>
-              <span className="text-xs font-bold tabular-nums text-[#94715c]">
+              <span className="text-xs font-bold tabular-nums text-[#5F6B3C]">
                 {catItems.length} dish{catItems.length !== 1 ? "es" : ""}
               </span>
             </div>
@@ -1939,7 +1939,7 @@ const MenuCard = memo(function MenuCard({
 
   return (
     <article
-      className={`menu-cv flex gap-3 rounded-2xl border border-[#ead8c6] bg-[#fffdf9] p-3 shadow-[0_6px_18px_rgba(89,55,31,0.05)] sm:p-4 ${
+      className={`menu-cv flex gap-3 rounded-2xl border border-[#D8DFC0] bg-[#fffdf9] p-3 shadow-[0_6px_18px_rgba(89,55,31,0.05)] sm:p-4 ${
         unavailable ? "opacity-70" : ""
       }`}
     >
@@ -1967,10 +1967,10 @@ const MenuCard = memo(function MenuCard({
             </span>
           )}
         </div>
-        <h3 className="font-display mt-1.5 text-[17px] leading-snug text-[#382719]">
+        <h3 className="font-display mt-1.5 text-[17px] leading-snug text-[#2A3A0C]">
           {item.name}
         </h3>
-        <p className="mt-0.5 flex items-baseline gap-2 text-sm font-extrabold tabular-nums text-[#382719]">
+        <p className="mt-0.5 flex items-baseline gap-2 text-sm font-extrabold tabular-nums text-[#2A3A0C]">
           {formatINR(item.price)}
           {hasDiscount && (
             <span className="text-xs font-bold text-[#999] line-through">
@@ -2012,12 +2012,12 @@ const MenuCard = memo(function MenuCard({
         </div>
         <div className="relative z-10 -mt-5 flex justify-center px-2">
           {showStepper ? (
-            <div className="flex h-11 min-h-[44px] items-center rounded-xl border border-[#f0d9cd] bg-white text-[#B95509] shadow-[0_8px_20px_rgba(185,85,9,0.28)]">
+            <div className="flex h-11 min-h-[44px] items-center rounded-xl border border-[#E9EFD6] bg-white text-[#B95509] shadow-[0_8px_20px_rgba(185,85,9,0.28)]">
               <button
                 type="button"
                 aria-label={`Remove one ${item.name} from your order`}
                 onClick={() => onDecrement?.(item)}
-                className="grid h-full w-11 place-items-center rounded-l-xl hover:bg-[#fff0e9]"
+                className="grid h-full w-11 place-items-center rounded-l-xl hover:bg-[#E9EFD6]"
               >
                 <Minus className="h-3.5 w-3.5" aria-hidden="true" />
               </button>
@@ -2028,7 +2028,7 @@ const MenuCard = memo(function MenuCard({
                 type="button"
                 aria-label={`Add one more ${item.name} to your order`}
                 onClick={() => onIncrement?.(item)}
-                className="grid h-full w-11 place-items-center rounded-r-xl hover:bg-[#fff0e9]"
+                className="grid h-full w-11 place-items-center rounded-r-xl hover:bg-[#E9EFD6]"
               >
                 <Plus className="h-3.5 w-3.5" aria-hidden="true" />
               </button>
@@ -2041,7 +2041,7 @@ const MenuCard = memo(function MenuCard({
               aria-label={
                 unavailable ? `${item.name} unavailable` : `Add ${item.name} to your order`
               }
-              className="h-11 min-h-[44px] min-w-[104px] rounded-xl border border-[#e8c9b8] bg-white px-6 text-[13px] font-extrabold tracking-wide text-[#B95509] shadow-[0_8px_20px_rgba(185,85,9,0.28)] hover:bg-[#B95509] hover:text-white disabled:cursor-not-allowed disabled:border-[#bfae9f] disabled:text-[#9d8d80] disabled:shadow-none"
+              className="h-11 min-h-[44px] min-w-[104px] rounded-xl border border-[#E9EFD6] bg-white px-6 text-[13px] font-extrabold tracking-wide text-[#B95509] shadow-[0_8px_20px_rgba(185,85,9,0.28)] hover:bg-[#B95509] hover:text-white disabled:cursor-not-allowed disabled:border-[#9AA07E] disabled:text-[#9d8d80] disabled:shadow-none"
             >
               {item.availability !== "AVAILABLE"
                 ? "Sold out"
@@ -2069,7 +2069,7 @@ function MobileCartBar({
     <button
       onClick={onCart}
       aria-label={`View cart, ${quantity} item${quantity !== 1 ? "s" : ""}, total ${formatINR(total)}`}
-      className="ticket-edge safe-bottom fixed left-4 right-4 z-40 flex min-h-[44px] items-center justify-between px-5 py-3.5 text-left text-white shadow-[0_18px_45px_rgba(54,35,24,0.25)] lg:hidden bg-[#382719]"
+      className="ticket-edge safe-bottom fixed left-4 right-4 z-40 flex min-h-[44px] items-center justify-between px-5 py-3.5 text-left text-white shadow-[0_18px_45px_rgba(54,35,24,0.25)] lg:hidden bg-[#2A3A0C]"
     >
       <span aria-live="polite" aria-atomic="true">
         <span className="block text-xs font-semibold text-white/70">
@@ -2118,10 +2118,10 @@ function CartTicket({
   const checkoutDisabled = processing || belowMinimum || checkoutBlocked;
   return (
     <div className="ticket-edge sticky top-24 overflow-hidden bg-[#fffdf8] shadow-[0_15px_35px_rgba(84,48,26,0.1)]">
-      <div className="paper-grain border-b border-[#ead8c6] p-5">
+      <div className="paper-grain border-b border-[#D8DFC0] p-5">
         <div className="flex items-center justify-between">
           <div>
-            <p className="text-xs font-extrabold uppercase tracking-[0.15em] text-[#a37960]">
+            <p className="text-xs font-extrabold uppercase tracking-[0.15em] text-[#5F6B3C]">
               Your order
             </p>
             <h2 className="font-display mt-1 text-2xl">
@@ -2140,7 +2140,7 @@ function CartTicket({
                   <p className="text-sm font-extrabold text-[#442f20]">
                     {line.item.name}
                   </p>
-                  <p className="mt-0.5 text-xs text-[#967762]">
+                  <p className="mt-0.5 text-xs text-[#5F6B3C]">
                     {line.modifiers?.join(" · ") || "As listed"}
                   </p>
                   <p className="mt-1 text-xs font-bold">
@@ -2150,7 +2150,7 @@ function CartTicket({
                     type="button"
                     onClick={() => onQuantity(line.id, 0)}
                     aria-label={`Remove ${line.item.name} from cart`}
-                    className="mt-1 min-h-[44px] text-xs font-bold text-[#a26d50] hover:text-[#B95509]"
+                    className="mt-1 min-h-[44px] text-xs font-bold text-[#4A5729] hover:text-[#B95509]"
                   >
                     Remove
                   </button>
@@ -2164,19 +2164,19 @@ function CartTicket({
               </div>
             ))}
             <div className="dotted-rule pt-4 space-y-2">
-              <div className="flex justify-between text-xs text-[#8a6b56]">
+              <div className="flex justify-between text-xs text-[#5F6B3C]">
                 <span>Item total</span>
                 <span>{formatINR(itemTotal)}</span>
               </div>
-              <div className="flex justify-between text-xs text-[#8a6b56]">
+              <div className="flex justify-between text-xs text-[#5F6B3C]">
                 <span>Packaging</span>
                 <span>{formatINR(packaging)}</span>
               </div>
-              <div className="flex justify-between text-xs text-[#8a6b56]">
+              <div className="flex justify-between text-xs text-[#5F6B3C]">
                 <span>Delivery</span>
                 <span>{formatINR(delivery)}</span>
               </div>
-              <div className="flex justify-between text-xs text-[#8a6b56]">
+              <div className="flex justify-between text-xs text-[#5F6B3C]">
                 <span>Taxes</span>
                 <span>{formatINR(taxes)}</span>
               </div>
@@ -2185,7 +2185,7 @@ function CartTicket({
                 <span>{formatINR(total)}</span>
               </div>
               {estimated && (
-                <p className="text-xs text-[#94715c]">
+                <p className="text-xs text-[#5F6B3C]">
                   Final amount is confirmed by the kitchen at payment.
                 </p>
               )}
@@ -2210,7 +2210,7 @@ function CartTicket({
             </Button>
           </>
         ) : (
-          <p className="text-sm font-bold text-[#9b7a66]">
+          <p className="text-sm font-bold text-[#5F6B3C]">
             Browse the menu to add items
           </p>
         )}
@@ -2261,7 +2261,7 @@ function CustomizationDrawer({
 
   return (
     <Drawer open={!!item} onOpenChange={(open) => !open && onClose()}>
-      <DrawerContent className="max-h-[92dvh] border-[#dfcbb9] bg-[#fffaf3]">
+      <DrawerContent className="max-h-[92dvh] border-[#D8DFC0] bg-[#fffaf3]">
         <div className="mx-auto w-full max-w-xl overflow-y-auto px-5 pb-3">
           <DrawerHeader className="px-0 text-left">
             <div className="mb-3 flex items-start justify-between gap-3">
@@ -2272,7 +2272,7 @@ function CustomizationDrawer({
                     CUSTOMIZE
                   </span>
                 </div>
-                <DrawerTitle className="font-display mt-2 text-3xl text-[#382719]">
+                <DrawerTitle className="font-display mt-2 text-3xl text-[#2A3A0C]">
                   {item.name}
                 </DrawerTitle>
                 <DrawerDescription className="mt-1 max-w-md text-sm leading-relaxed text-[#836552]">
@@ -2282,7 +2282,7 @@ function CustomizationDrawer({
               <button
                 onClick={onClose}
                 aria-label="Close customization"
-                className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-[#f5e7da] text-[#805a43]"
+                className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-[#f5e7da] text-[#5F6B3C]"
               >
                 <X className="h-4 w-4" />
               </button>
@@ -2307,7 +2307,7 @@ function CustomizationDrawer({
           ))}
 
           {!hasRealModifiers && (
-            <p className="mt-6 rounded-xl border border-dashed border-[#e5d0bd] bg-white p-3 text-xs leading-relaxed text-[#967762]">
+            <p className="mt-6 rounded-xl border border-dashed border-[#e5d0bd] bg-white p-3 text-xs leading-relaxed text-[#5F6B3C]">
               This dish has no extra options right now — add a note below if the
               kitchen should know something.
             </p>
@@ -2315,7 +2315,7 @@ function CustomizationDrawer({
 
           <div className="mt-6">
             <label
-              className="text-sm font-extrabold text-[#382719]"
+              className="text-sm font-extrabold text-[#2A3A0C]"
               htmlFor="special-note"
             >
               Special instructions
@@ -2334,7 +2334,7 @@ function CustomizationDrawer({
             <Quantity value={quantity} onChange={(next) => onQuantity(Math.min(MAX_LINE_QTY, Math.max(1, next)))} />
           </div>
         </div>
-        <DrawerFooter className="border-t border-[#ead8c6] bg-[#fffdf9] px-5 pb-5 pt-4">
+        <DrawerFooter className="border-t border-[#D8DFC0] bg-[#fffdf9] px-5 pb-5 pt-4">
           <Button
             onClick={onAdd}
             className="h-13 min-h-[44px] w-full rounded-xl bg-[#B95509] text-sm font-extrabold hover:bg-[#9C4A07]"
@@ -2359,9 +2359,9 @@ function VariantGroup({
 }) {
   return (
     <div className="mt-6" role="radiogroup" aria-label="Choose a variant">
-      <p className="text-sm font-extrabold text-[#382719]">
+      <p className="text-sm font-extrabold text-[#2A3A0C]">
         Choose a variant{" "}
-        <span className="font-medium text-[#967762]">(optional)</span>
+        <span className="font-medium text-[#5F6B3C]">(optional)</span>
       </p>
       <div className="mt-3 grid gap-2">
         {variants.map((variant) => {
@@ -2376,7 +2376,7 @@ function VariantGroup({
               onClick={() => onSelect(variant.id)}
               className={`flex min-h-[44px] items-center justify-between rounded-xl border px-3.5 py-3 text-left text-sm font-bold disabled:cursor-not-allowed disabled:opacity-50 ${
                 active
-                  ? "border-[#B95509] bg-[#fff0e9] text-[#9C4A07]"
+                  ? "border-[#B95509] bg-[#E9EFD6] text-[#9C4A07]"
                   : "border-[#ead7c5] bg-white text-[#5f4534]"
               }`}
             >
@@ -2418,16 +2418,16 @@ function AddonGroupBlock({
   const single = group.selectionType === "single";
   return (
     <div className="mt-6" role={single ? "radiogroup" : "group"} aria-label={group.name}>
-      <p className="text-sm font-extrabold text-[#382719]">
+      <p className="text-sm font-extrabold text-[#2A3A0C]">
         {group.name}{" "}
         {group.isRequired ? (
           <span className="font-medium text-[#B95509]">Required</span>
         ) : (
-          <span className="font-medium text-[#967762]">(optional)</span>
+          <span className="font-medium text-[#5F6B3C]">(optional)</span>
         )}
       </p>
       {!single && group.maxSelections > 1 && (
-        <p className="mt-1 text-xs text-[#967762]">Pick up to {group.maxSelections}</p>
+        <p className="mt-1 text-xs text-[#5F6B3C]">Pick up to {group.maxSelections}</p>
       )}
       <div className="mt-3 grid gap-2">
         {group.options.map((option) => {
@@ -2442,7 +2442,7 @@ function AddonGroupBlock({
               onClick={() => onToggle(option.id)}
               className={`flex min-h-[44px] items-center justify-between rounded-xl border px-3.5 py-3 text-left text-sm font-bold disabled:cursor-not-allowed disabled:opacity-50 ${
                 active
-                  ? "border-[#B95509] bg-[#fff0e9] text-[#9C4A07]"
+                  ? "border-[#B95509] bg-[#E9EFD6] text-[#9C4A07]"
                   : "border-[#ead7c5] bg-white text-[#5f4534]"
               }`}
             >
@@ -2549,20 +2549,20 @@ function ServiceSetupScreen({
   if (screen === "cart") {
     return (
       <main className="min-h-screen bg-[#fffaf3]">
-        <header className="paper-grain relative overflow-hidden border-b border-[#ead8c6] bg-[#fffdf9]">
+        <header className="paper-grain relative overflow-hidden border-b border-[#D8DFC0] bg-[#fffdf9]">
           <div className="relative mx-auto flex min-h-20 max-w-5xl items-center gap-4 px-4 py-4 sm:px-6">
             <button
               onClick={onMenu}
               aria-label="Back to menu"
-              className="grid h-11 w-11 shrink-0 place-items-center rounded-full border border-[#e7d2c0] bg-[#fffdf9] text-[#684d3c] hover:bg-[#f8ecdf]"
+              className="grid h-11 w-11 shrink-0 place-items-center rounded-full border border-[#e7d2c0] bg-[#fffdf9] text-[#684d3c] hover:bg-[#E9EFD6]"
             >
               <ArrowLeft className="h-4 w-4" />
             </button>
             <div>
-              <p className="text-xs font-extrabold uppercase tracking-[0.16em] text-[#a37960]">
+              <p className="text-xs font-extrabold uppercase tracking-[0.16em] text-[#5F6B3C]">
                 Your order
               </p>
-              <h1 className="font-display mt-1 text-3xl leading-none text-[#382719]">
+              <h1 className="font-display mt-1 text-3xl leading-none text-[#2A3A0C]">
                 Review & checkout
               </h1>
             </div>
@@ -2590,7 +2590,7 @@ function ServiceSetupScreen({
             </div>
             {cart.length === 0 ? (
               <div className="py-6 text-center">
-                <p className="text-sm font-bold text-[#9b7a66]">
+                <p className="text-sm font-bold text-[#5F6B3C]">
                   Your cart is empty — let's fix that.
                 </p>
                 <Button
@@ -2605,10 +2605,10 @@ function ServiceSetupScreen({
                 {cart.map((line) => (
                   <div
                     key={line.id}
-                    className="flex gap-3 border-b border-dashed border-[#ead8c6] pb-5 last:border-0 last:pb-0"
+                    className="flex gap-3 border-b border-dashed border-[#D8DFC0] pb-5 last:border-0 last:pb-0"
                   >
                     <div className="min-w-0 flex-1">
-                      <p className="text-sm font-extrabold text-[#382719]">
+                      <p className="text-sm font-extrabold text-[#2A3A0C]">
                         {line.item.name}
                       </p>
                       <p className="mt-1 text-xs text-[#8d705c]">
@@ -2622,7 +2622,7 @@ function ServiceSetupScreen({
                       <button
                         onClick={() => onQuantity(line.id, 0)}
                         aria-label={`Remove ${line.item.name} from cart`}
-                        className="mt-2 min-h-[44px] text-xs font-bold text-[#a26d50] hover:text-[#B95509]"
+                        className="mt-2 min-h-[44px] text-xs font-bold text-[#4A5729] hover:text-[#B95509]"
                       >
                         Remove
                       </button>
@@ -2690,20 +2690,20 @@ function ServiceSetupScreen({
   if (screen === "checkout") {
     return (
       <main className="min-h-screen bg-[#fffaf3]">
-        <header className="paper-grain relative overflow-hidden border-b border-[#ead8c6] bg-[#fffdf9]">
+        <header className="paper-grain relative overflow-hidden border-b border-[#D8DFC0] bg-[#fffdf9]">
           <div className="relative mx-auto flex min-h-20 max-w-5xl items-center gap-4 px-4 py-4 sm:px-6">
             <button
               onClick={onMenu}
               aria-label="Back to menu"
-              className="grid h-11 w-11 shrink-0 place-items-center rounded-full border border-[#e7d2c0] bg-[#fffdf9] text-[#684d3c] hover:bg-[#f8ecdf]"
+              className="grid h-11 w-11 shrink-0 place-items-center rounded-full border border-[#e7d2c0] bg-[#fffdf9] text-[#684d3c] hover:bg-[#E9EFD6]"
             >
               <ArrowLeft className="h-4 w-4" />
             </button>
             <div>
-              <p className="text-xs font-extrabold uppercase tracking-[0.16em] text-[#a37960]">
+              <p className="text-xs font-extrabold uppercase tracking-[0.16em] text-[#5F6B3C]">
                 Almost there
               </p>
-              <h1 className="font-display mt-1 text-3xl leading-none text-[#382719]">
+              <h1 className="font-display mt-1 text-3xl leading-none text-[#2A3A0C]">
                 Checkout
               </h1>
             </div>
@@ -2793,8 +2793,8 @@ function ServiceSetupScreen({
   return (
     <main className="grid min-h-screen place-items-center bg-[#fffaf3] px-4">
       <section className="w-full max-w-md rounded-2xl bg-[#fffdf9] p-8 text-center shadow-sm">
-        <h1 className="font-display text-3xl text-[#382719]">Back to the menu</h1>
-        <p className="mt-3 text-sm leading-relaxed text-[#856653]">
+        <h1 className="font-display text-3xl text-[#2A3A0C]">Back to the menu</h1>
+        <p className="mt-3 text-sm leading-relaxed text-[#5F6B3C]">
           This page isn't part of ordering — let's get you back to the good stuff.
         </p>
         <Button
@@ -2840,14 +2840,14 @@ function CheckoutDetailsForm({
   disabled?: boolean;
 }) {
   return (
-    <section aria-label="Checkout details" className="space-y-4 rounded-2xl border border-[#ead8c6] bg-[#fffdf9] p-5 shadow-sm">
+    <section aria-label="Checkout details" className="space-y-4 rounded-2xl border border-[#D8DFC0] bg-[#fffdf9] p-5 shadow-sm">
       <div>
-        <p className="text-xs font-extrabold uppercase tracking-[0.15em] text-[#a37960]">
+        <p className="text-xs font-extrabold uppercase tracking-[0.15em] text-[#5F6B3C]">
           Delivery address
         </p>
         {deliveryAddress?.confirmed ? (
           <div className="mt-2 flex items-start justify-between gap-3">
-            <p className="text-sm font-bold leading-relaxed text-[#382719]">
+            <p className="text-sm font-bold leading-relaxed text-[#2A3A0C]">
               {deliveryAddress.flatHouse}, {deliveryAddress.area}, {deliveryAddress.city}{" "}
               {deliveryAddress.postalCode}
             </p>
@@ -2866,14 +2866,14 @@ function CheckoutDetailsForm({
             onClick={onEditLocation}
             disabled={disabled}
             variant="outline"
-            className="mt-2 h-11 min-h-[44px] w-full rounded-xl border-[#ddc6b5] font-extrabold text-[#B95509]"
+            className="mt-2 h-11 min-h-[44px] w-full rounded-xl border-[#D8DFC0] font-extrabold text-[#B95509]"
           >
             <MapPin className="mr-2 h-4 w-4" />
             Set delivery location
           </Button>
         )}
         {serviceChecking && (
-          <p aria-live="polite" className="mt-2 text-xs font-bold text-[#94715c]">
+          <p aria-live="polite" className="mt-2 text-xs font-bold text-[#5F6B3C]">
             Checking delivery availability…
           </p>
         )}
@@ -2887,7 +2887,7 @@ function CheckoutDetailsForm({
       </div>
 
       <div>
-        <label htmlFor="checkout-phone" className="text-xs font-extrabold uppercase tracking-[0.15em] text-[#a37960]">
+        <label htmlFor="checkout-phone" className="text-xs font-extrabold uppercase tracking-[0.15em] text-[#5F6B3C]">
           Phone number
         </label>
         <Input
@@ -2900,15 +2900,15 @@ function CheckoutDetailsForm({
           autoComplete="tel"
           maxLength={15}
           disabled={disabled}
-          className="mt-2 h-12 min-h-[44px] rounded-xl border-[#ddc6b5] text-base"
+          className="mt-2 h-12 min-h-[44px] rounded-xl border-[#D8DFC0] text-base"
         />
-        <p className="mt-1 text-xs text-[#94715c]">
+        <p className="mt-1 text-xs text-[#5F6B3C]">
           Order updates and the delivery partner reach you here.
         </p>
       </div>
 
       <div>
-        <label htmlFor="checkout-coupon" className="text-xs font-extrabold uppercase tracking-[0.15em] text-[#a37960]">
+        <label htmlFor="checkout-coupon" className="text-xs font-extrabold uppercase tracking-[0.15em] text-[#5F6B3C]">
           Coupon code
         </label>
         <Input
@@ -2920,12 +2920,12 @@ function CheckoutDetailsForm({
           autoComplete="off"
           maxLength={48}
           disabled={disabled}
-          className="mt-2 h-12 min-h-[44px] rounded-xl border-[#ddc6b5] uppercase"
+          className="mt-2 h-12 min-h-[44px] rounded-xl border-[#D8DFC0] uppercase"
         />
       </div>
 
       <div>
-        <label htmlFor="checkout-notes" className="text-xs font-extrabold uppercase tracking-[0.15em] text-[#a37960]">
+        <label htmlFor="checkout-notes" className="text-xs font-extrabold uppercase tracking-[0.15em] text-[#5F6B3C]">
           Delivery notes
         </label>
         <textarea
@@ -2935,11 +2935,11 @@ function CheckoutDetailsForm({
           placeholder="Gate code, floor, ring the bell twice…"
           disabled={disabled}
           maxLength={1000}
-          className="mt-2 min-h-20 w-full resize-none rounded-xl border border-[#ddc6b5] bg-white p-3 text-sm outline-none ring-[#B95509] focus:ring-2 disabled:opacity-50"
+          className="mt-2 min-h-20 w-full resize-none rounded-xl border border-[#D8DFC0] bg-white p-3 text-sm outline-none ring-[#B95509] focus:ring-2 disabled:opacity-50"
         />
       </div>
 
-      <label htmlFor="checkout-cutlery" className="flex min-h-[44px] cursor-pointer items-center gap-3 text-sm font-bold text-[#553d2c]">
+      <label htmlFor="checkout-cutlery" className="flex min-h-[44px] cursor-pointer items-center gap-3 text-sm font-bold text-[#2A3A0C]">
         <input
           id="checkout-cutlery"
           type="checkbox"
@@ -2989,13 +2989,13 @@ function OrderStatusView({
       <section aria-live="polite" className="ticket-edge w-full max-w-lg bg-[#fffdf9] p-8 text-center shadow-sm">
         {!hasCredentials ? (
           <>
-            <div className="mx-auto grid h-16 w-16 place-items-center rounded-full bg-[#faede0] text-[#B95509]">
+            <div className="mx-auto grid h-16 w-16 place-items-center rounded-full bg-[#E9EFD6] text-[#B95509]">
               <PackageCheck className="h-7 w-7" />
             </div>
-            <h1 className="font-display mt-5 text-4xl text-[#382719]">
+            <h1 className="font-display mt-5 text-4xl text-[#2A3A0C]">
               {variant === "confirmation" ? "Thank you!" : "Track your order"}
             </h1>
-            <p role="alert" className="mt-3 text-sm leading-relaxed text-[#856653]">
+            <p role="alert" className="mt-3 text-sm leading-relaxed text-[#5F6B3C]">
               We couldn't find your secure order link. Please open tracking from
               your confirmation page or receipt.
             </p>
@@ -3010,19 +3010,19 @@ function OrderStatusView({
           </>
         ) : tracking.isLoading ? (
           <>
-            <div className="mx-auto grid h-16 w-16 place-items-center rounded-full bg-[#faede0] text-[#B95509]">
+            <div className="mx-auto grid h-16 w-16 place-items-center rounded-full bg-[#E9EFD6] text-[#B95509]">
               <Clock3 className="h-7 w-7 animate-pulse" />
             </div>
-            <h1 className="font-display mt-5 text-4xl text-[#382719]">Fetching your order…</h1>
-            <p className="mt-3 text-sm text-[#856653]">One moment while we check the kitchen.</p>
+            <h1 className="font-display mt-5 text-4xl text-[#2A3A0C]">Fetching your order…</h1>
+            <p className="mt-3 text-sm text-[#5F6B3C]">One moment while we check the kitchen.</p>
           </>
         ) : tracking.isError || !tracking.data ? (
           <>
-            <div className="mx-auto grid h-16 w-16 place-items-center rounded-full bg-[#fbe3dc] text-[#B95509]">
+            <div className="mx-auto grid h-16 w-16 place-items-center rounded-full bg-[#E9EFD6] text-[#B95509]">
               <X className="h-7 w-7" />
             </div>
-            <h1 className="font-display mt-5 text-4xl text-[#382719]">Couldn't load your order</h1>
-            <p role="alert" className="mt-3 text-sm leading-relaxed text-[#856653]">
+            <h1 className="font-display mt-5 text-4xl text-[#2A3A0C]">Couldn't load your order</h1>
+            <p role="alert" className="mt-3 text-sm leading-relaxed text-[#5F6B3C]">
               {tracking.isError
                 ? "Something went wrong while fetching your order. Please try again."
                 : "We couldn't find this order — the link may be incomplete."}
@@ -3031,7 +3031,7 @@ function OrderStatusView({
               <Button
                 onClick={() => tracking.refetch()}
                 variant="outline"
-                className="h-12 min-h-[44px] rounded-xl border-[#ddc6b5] px-6 font-extrabold text-[#553d2c]"
+                className="h-12 min-h-[44px] rounded-xl border-[#D8DFC0] px-6 font-extrabold text-[#2A3A0C]"
               >
                 Try again
               </Button>
@@ -3050,16 +3050,16 @@ function OrderStatusView({
             <div className="mx-auto grid h-16 w-16 place-items-center rounded-full bg-[#e5f1e5] text-[#42774b]">
               <Check className="h-7 w-7" />
             </div>
-            <h1 className="font-display mt-5 text-4xl text-[#382719]">
+            <h1 className="font-display mt-5 text-4xl text-[#2A3A0C]">
               {variant === "confirmation" ? "Thank you — order confirmed!" : "Your order"}
             </h1>
-            <p className="mt-3 text-sm leading-relaxed text-[#856653]">
+            <p className="mt-3 text-sm leading-relaxed text-[#5F6B3C]">
               {variant === "confirmation"
                 ? `The kitchen ${restaurantName ? `at ${restaurantName} ` : ""}has your order and the burners are already warming up. Sit back — we'll take it from here.`
                 : `Here's the latest from the kitchen${restaurantName ? ` at ${restaurantName}` : ""}.`}
             </p>
             <div className="mt-5 flex flex-wrap items-center justify-center gap-2 text-xs font-extrabold">
-              <span className="rounded-full bg-[#382719] px-3 py-1.5 text-white">
+              <span className="rounded-full bg-[#2A3A0C] px-3 py-1.5 text-white">
                 Order {tracking.data.orderNumber}
               </span>
               <span className="rounded-full bg-[#f7e6ca] px-3 py-1.5 uppercase tracking-wide text-[#9c5a21]">
@@ -3072,35 +3072,35 @@ function OrderStatusView({
                 </span>
               )}
             </div>
-            <div className="mt-5 space-y-2 border-t border-dashed border-[#ead8c6] pt-4 text-left">
+            <div className="mt-5 space-y-2 border-t border-dashed border-[#D8DFC0] pt-4 text-left">
               {tracking.data.items.map((item: { id: string; itemNameSnapshot: string; quantity: number; unitPricePaise: number }) => (
                 <div key={item.id} className="flex items-center justify-between gap-3 text-sm">
                   <span className="font-bold text-[#442f20]">
                     {item.quantity} × {item.itemNameSnapshot}
                   </span>
-                  <span className="font-bold text-[#94715c]">
+                  <span className="font-bold text-[#5F6B3C]">
                     {formatINR((item.unitPricePaise / 100) * item.quantity)}
                   </span>
                 </div>
               ))}
-              <div className="flex items-center justify-between gap-3 border-t border-dashed border-[#ead8c6] pt-3 text-base font-extrabold text-[#382719]">
+              <div className="flex items-center justify-between gap-3 border-t border-dashed border-[#D8DFC0] pt-3 text-base font-extrabold text-[#2A3A0C]">
                 <span>Paid total</span>
                 <span>{formatINR(tracking.data.totalPaise / 100)}</span>
               </div>
               {(tracking.data.deliveryArea || tracking.data.deliveryCity) && (
-                <p className="flex items-center gap-1.5 text-xs text-[#94715c]">
+                <p className="flex items-center gap-1.5 text-xs text-[#5F6B3C]">
                   <MapPin className="h-3.5 w-3.5" />
                   Delivering to {[tracking.data.deliveryArea, tracking.data.deliveryCity].filter(Boolean).join(", ")}
                 </p>
               )}
             </div>
             {tracking.data.history.length > 0 && (
-              <ol className="mt-5 space-y-2 border-t border-dashed border-[#ead8c6] pt-4 text-left">
+              <ol className="mt-5 space-y-2 border-t border-dashed border-[#D8DFC0] pt-4 text-left">
                 {tracking.data.history.map((entry: { status: string; note: string | null; createdAt: Date | string }, index: number) => (
-                  <li key={`${entry.status}-${index}`} className="flex items-start gap-2 text-xs text-[#856653]">
+                  <li key={`${entry.status}-${index}`} className="flex items-start gap-2 text-xs text-[#5F6B3C]">
                     <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#42774b]" />
                     <span>
-                      <span className="font-extrabold text-[#553d2c]">
+                      <span className="font-extrabold text-[#2A3A0C]">
                         {String(entry.status).replace(/_/g, " ")}
                       </span>
                       {entry.note ? ` — ${entry.note}` : ""}
@@ -3142,11 +3142,11 @@ function NoSlugScreen() {
   return (
     <main className="grid min-h-screen place-items-center bg-[#fffaf3] px-4">
       <section className="w-full max-w-md rounded-2xl bg-[#fffdf9] p-8 text-center shadow-sm">
-        <div className="mx-auto grid h-14 w-14 place-items-center rounded-full bg-[#faede0] text-[#B95509]">
+        <div className="mx-auto grid h-14 w-14 place-items-center rounded-full bg-[#E9EFD6] text-[#B95509]">
           <Store className="h-6 w-6" />
         </div>
-        <h1 className="font-display mt-4 text-3xl text-[#382719]">Pick a kitchen to start</h1>
-        <p className="mt-3 text-sm leading-relaxed text-[#856653]">
+        <h1 className="font-display mt-4 text-3xl text-[#2A3A0C]">Pick a kitchen to start</h1>
+        <p className="mt-3 text-sm leading-relaxed text-[#5F6B3C]">
           This link doesn't point at a restaurant. Ask the restaurant for their
           direct ordering link.
         </p>
@@ -3159,11 +3159,11 @@ function StorefrontUnavailable({ onRetry }: { onRetry: () => void }) {
   return (
     <main className="grid min-h-screen place-items-center bg-[#fffaf3] px-4">
       <section className="w-full max-w-md rounded-2xl bg-[#fffdf9] p-8 text-center shadow-sm">
-        <div className="mx-auto grid h-14 w-14 place-items-center rounded-full bg-[#faede0] text-[#B95509]">
+        <div className="mx-auto grid h-14 w-14 place-items-center rounded-full bg-[#E9EFD6] text-[#B95509]">
           <Utensils className="h-6 w-6" />
         </div>
-        <h1 className="font-display mt-4 text-3xl text-[#382719]">This kitchen isn't available</h1>
-        <p role="alert" className="mt-3 text-sm leading-relaxed text-[#856653]">
+        <h1 className="font-display mt-4 text-3xl text-[#2A3A0C]">This kitchen isn't available</h1>
+        <p role="alert" className="mt-3 text-sm leading-relaxed text-[#5F6B3C]">
           We couldn't load this storefront. It may have moved or be offline.
         </p>
         <Button
@@ -3183,35 +3183,35 @@ function MenuSkeleton() {
       <div className="mx-auto max-w-[1440px] animate-pulse px-4 sm:px-6 lg:px-10">
         {/* Slim header */}
         <div className="flex h-[76px] items-center gap-2.5">
-          <div className="h-10 w-10 rounded-xl bg-[#eadfd4]" />
+          <div className="h-10 w-10 rounded-xl bg-[#E9EFD6]" />
           <div className="space-y-2">
-            <div className="h-5 w-40 rounded bg-[#eadfd4]" />
-            <div className="h-3 w-56 rounded bg-[#eadfd4]" />
+            <div className="h-5 w-40 rounded bg-[#E9EFD6]" />
+            <div className="h-3 w-56 rounded bg-[#E9EFD6]" />
           </div>
         </div>
         {/* Hero */}
-        <div className="h-[220px] rounded-2xl bg-[#eadfd4] lg:h-[260px]" />
+        <div className="h-[220px] rounded-2xl bg-[#E9EFD6] lg:h-[260px]" />
         {/* Search + rail */}
-        <div className="mt-4 h-12 rounded-2xl bg-[#eadfd4]" />
+        <div className="mt-4 h-12 rounded-2xl bg-[#E9EFD6]" />
         <div className="mt-3 flex gap-2">
           {[96, 120, 88, 110].map((width) => (
-            <div key={width} style={{ width }} className="h-11 shrink-0 rounded-full bg-[#eadfd4]" />
+            <div key={width} style={{ width }} className="h-11 shrink-0 rounded-full bg-[#E9EFD6]" />
           ))}
         </div>
         {/* Menu rows shaped like the dish cards */}
         <div className="mt-5 space-y-3">
           {[1, 2, 3, 4].map((key) => (
-            <div key={key} className="flex gap-3 rounded-2xl border border-[#ead8c6] bg-[#fffdf9] p-3">
+            <div key={key} className="flex gap-3 rounded-2xl border border-[#D8DFC0] bg-[#fffdf9] p-3">
               <div className="min-w-0 flex-1 space-y-2 py-1">
-                <div className="h-3 w-16 rounded bg-[#eadfd4]" />
-                <div className="h-5 w-3/4 rounded bg-[#eadfd4]" />
-                <div className="h-4 w-1/4 rounded bg-[#eadfd4]" />
-                <div className="h-3 w-full rounded bg-[#eadfd4]" />
-                <div className="h-3 w-2/3 rounded bg-[#eadfd4]" />
+                <div className="h-3 w-16 rounded bg-[#E9EFD6]" />
+                <div className="h-5 w-3/4 rounded bg-[#E9EFD6]" />
+                <div className="h-4 w-1/4 rounded bg-[#E9EFD6]" />
+                <div className="h-3 w-full rounded bg-[#E9EFD6]" />
+                <div className="h-3 w-2/3 rounded bg-[#E9EFD6]" />
               </div>
               <div className="w-[120px] shrink-0">
-                <div className="aspect-square w-full rounded-xl bg-[#eadfd4]" />
-                <div className="mx-auto -mt-5 h-11 w-[104px] rounded-xl bg-[#eadfd4]" />
+                <div className="aspect-square w-full rounded-xl bg-[#E9EFD6]" />
+                <div className="mx-auto -mt-5 h-11 w-[104px] rounded-xl bg-[#E9EFD6]" />
               </div>
             </div>
           ))}

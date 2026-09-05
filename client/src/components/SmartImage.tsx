@@ -47,7 +47,7 @@ export default function SmartImage({
         aria-label={alt}
         style={{ aspectRatio: ratio }}
         className={cn(
-          "grid w-full place-items-center overflow-hidden bg-[#f3e7d8] text-[#a37960]",
+          "grid w-full place-items-center overflow-hidden bg-[#f3e7d8] text-[#5F6B3C]",
           className
         )}
       >
@@ -64,7 +64,7 @@ export default function SmartImage({
       className={cn("relative w-full overflow-hidden bg-[#f3e7d8]", className)}
     >
       {!loaded && (
-        <div aria-hidden="true" className="absolute inset-0 animate-pulse bg-[#eadfd4]" />
+        <div aria-hidden="true" className="absolute inset-0 animate-pulse bg-[#E9EFD6]" />
       )}
       <img
         src={src}
