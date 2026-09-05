@@ -2624,11 +2624,42 @@ function RestaurantPanel({
   onSave: (value: any) => void;
 }) {
   const [form, setForm] = useState(() => initRestaurantForm(restaurant));
+  const [logoUploading, setLogoUploading] = useState(false);
+  const uploadLogo = trpc.admin.uploadBrandImage.useMutation({
+    onError: (err) => toast.error(err.message || "Logo upload failed."),
+  });
 
   // Reset the form whenever a different restaurant loads.
   useEffect(() => {
     setForm(initRestaurantForm(restaurant));
   }, [restaurant.id]);
+
+  const handleLogoUpload = async (file: File) => {
+    if (file.size > 2 * 1024 * 1024) return toast.error("Image must be under 2 MB.");
+    if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
+      return toast.error("Use a PNG, JPG or WebP image.");
+    }
+    setLogoUploading(true);
+    try {
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result as string);
+        reader.onerror = () => reject(new Error("read failed"));
+        reader.readAsDataURL(file);
+      });
+      const result = await uploadLogo.mutateAsync({
+        data: dataUrl.split(",")[1] ?? "",
+        kind: "logo",
+        contentType: file.type as "image/jpeg" | "image/png" | "image/webp",
+      });
+      setForm((prev) => ({ ...prev, logoUrl: result.url }));
+      toast.success("Logo uploaded — save the form to apply it.");
+    } catch {
+      toast.error("Could not upload logo.");
+    } finally {
+      setLogoUploading(false);
+    }
+  };
 
   const save = () => {
     const radiusNum = form.deliveryRadiusKm.trim() ? Number(form.deliveryRadiusKm) : NaN;
@@ -2681,14 +2712,47 @@ function RestaurantPanel({
             }
           />
         </Field>
-        <Field label="Logo URL">
+        <Field label="Logo">
+          <div className="flex items-center gap-3">
+            {form.logoUrl ? (
+              <img
+                src={form.logoUrl}
+                alt="Restaurant logo preview"
+                className="h-12 w-12 shrink-0 rounded-xl border border-[#ddc6b5] bg-white object-cover"
+              />
+            ) : (
+              <span
+                aria-hidden="true"
+                className="grid h-12 w-12 shrink-0 place-items-center rounded-xl border border-dashed border-[#ddc6b5] bg-[#fff8f0] text-[#a37960]"
+              >
+                <Store className="h-5 w-5" />
+              </span>
+            )}
+            <label className="inline-flex min-h-[44px] cursor-pointer items-center rounded-xl border border-[#ddc6b5] bg-white px-4 text-sm font-extrabold text-[#704d37] hover:border-[#c84630] hover:text-[#c84630]">
+              {logoUploading ? "Uploading…" : "Upload image"}
+              <input
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                aria-label="Upload restaurant logo"
+                className="hidden"
+                disabled={logoUploading}
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  e.target.value = "";
+                  if (file) void handleLogoUpload(file);
+                }}
+              />
+            </label>
+          </div>
           <Input
             value={form.logoUrl}
             aria-label="Logo URL"
             inputMode="url"
-            placeholder="https://..."
+            placeholder="https://… or upload above"
+            className="mt-2"
             onChange={(e) => setForm({ ...form, logoUrl: e.target.value })}
           />
+          <p className="mt-1 text-xs text-[#8a6954]">PNG, JPG or WebP under 2 MB. Saving the form applies it.</p>
         </Field>
         <Field label="Primary color">
           <div className="flex items-center gap-2">

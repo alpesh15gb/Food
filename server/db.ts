@@ -289,6 +289,7 @@ export async function updateRestaurant(input: {
   name: string;
   cuisineSummary: string;
   description?: string;
+  logoUrl?: string;
   primaryColor: string;
   deliveryFeePaise: number;
   packagingFeePaise: number;

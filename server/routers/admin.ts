@@ -56,6 +56,55 @@ const INTEGRATION_KEY_WHITELIST: Record<string, string[]> = {
   otp: ["OTP_PROVIDER_API_KEY"],
 };
 
+const IMAGE_UPLOAD_MAX_BYTES = 2 * 1024 * 1024;
+const IMAGE_TYPE_EXT: Record<string, string> = {
+  "image/jpeg": "jpg",
+  "image/png": "png",
+  "image/webp": "webp",
+};
+
+/** Magic-byte check so a renamed script can't be stored as an image. */
+function assertImageMagic(buffer: Buffer, contentType: string): void {
+  const head = Array.from(buffer.subarray(0, 12));
+  const ok =
+    contentType === "image/jpeg"
+      ? head[0] === 0xff && head[1] === 0xd8
+      : contentType === "image/png"
+        ? head[0] === 0x89 && head[1] === 0x50 && head[2] === 0x4e && head[3] === 0x47
+        : head[0] === 0x52 && head[1] === 0x49 && head[2] === 0x46 && head[3] === 0x46 &&
+          head[8] === 0x57 && head[9] === 0x45 && head[10] === 0x42 && head[11] === 0x50;
+  if (!ok) throw new Error("File content does not match its image type.");
+}
+
+/**
+ * Persist an uploaded image under images/<subdir>/ and return its filename.
+ * Extension comes from the validated content type (never the user filename),
+ * names are unguessable. Served publicly via express.static("/images").
+ */
+async function saveUploadedImage(
+  buffer: Buffer,
+  contentType: string,
+  subdir: "menu" | "brand",
+  prefix: string,
+): Promise<string> {
+  if (buffer.length > IMAGE_UPLOAD_MAX_BYTES) {
+    throw new Error("Image must be under 2 MB.");
+  }
+  const ext = IMAGE_TYPE_EXT[contentType];
+  if (!ext) throw new Error("Unsupported image type.");
+  assertImageMagic(buffer, contentType);
+  const fs = await import("fs/promises");
+  const path = await import("path");
+  const { fileURLToPath } = await import("url");
+  const { randomUUID } = await import("crypto");
+  const __dirname = path.dirname(fileURLToPath(import.meta.url));
+  const dir = path.resolve(__dirname, "../../images", subdir);
+  await fs.mkdir(dir, { recursive: true });
+  const filename = `${prefix}_${Date.now()}_${randomUUID().slice(0, 8)}.${ext}`;
+  await fs.writeFile(path.join(dir, filename), buffer);
+  return filename;
+}
+
 export const adminRouter = router({
   // =========================================================================
   // Dashboard & Analytics
@@ -143,6 +192,7 @@ export const adminRouter = router({
     name: z.string().min(2).max(180),
     cuisineSummary: z.string().min(2).max(255),
     description: z.string().max(2000).optional(),
+    logoUrl: z.string().max(500).optional(),
     primaryColor: z.string().regex(/^#[0-9A-Fa-f]{6}$/),
     deliveryFeePaise: z.number().int().nonnegative(),
     packagingFeePaise: z.number().int().nonnegative(),
@@ -272,22 +322,28 @@ export const adminRouter = router({
     contentType: z.enum(["image/jpeg", "image/png", "image/webp"]),
   }))
     .mutation(async ({ input }) => {
-      const maxSize = 2 * 1024 * 1024;
       const buffer = Buffer.from(input.data, "base64");
-      if (buffer.length > maxSize) {
-        throw new Error("Image must be under 2 MB.");
-      }
-      const fs = await import("fs/promises");
-      const path = await import("path");
-      const { fileURLToPath } = await import("url");
-      const __dirname = path.dirname(fileURLToPath(import.meta.url));
-      const menuDir = path.resolve(__dirname, "../../images/menu");
-      await fs.mkdir(menuDir, { recursive: true });
-      const ext = input.filename.split(".").pop() ?? "jpg";
-      const rand = Math.random().toString(36).slice(2, 8);
-      const filename = `${Date.now()}_${rand}.${ext}`;
-      await fs.writeFile(path.join(menuDir, filename), buffer);
+      const filename = saveUploadedImage(buffer, input.contentType, "menu", "dish");
       return { url: `/images/menu/${filename}` };
+    }),
+
+  uploadBrandImage: requirePermission("restaurant:write").input(z.object({
+    data: z.string().min(1),
+    kind: z.enum(["logo", "banner"]),
+    contentType: z.enum(["image/jpeg", "image/png", "image/webp"]),
+  }))
+    .mutation(async ({ ctx, input }) => {
+      const buffer = Buffer.from(input.data, "base64");
+      const filename = saveUploadedImage(buffer, input.contentType, "brand", input.kind);
+      await logAudit({
+        actorId: ctx.user.id,
+        actorName: ctx.user.name ?? undefined,
+        action: `Brand ${input.kind} uploaded`,
+        targetType: "restaurant",
+        targetId: ctx.restaurantId ?? "",
+        restaurantId: ctx.restaurantId ?? undefined,
+      });
+      return { url: `/images/brand/${filename}` };
     }),
 
   deleteMenuItem: requirePermission("menu:write").input(z.object({

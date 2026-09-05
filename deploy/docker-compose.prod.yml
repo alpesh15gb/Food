@@ -40,6 +40,8 @@ services:
       DOMAIN_CNAME_TARGET: ${DOMAIN_CNAME_TARGET:-cname.yourdomain.com}
     ports:
       - "127.0.0.1:4300:4300"
+    volumes:
+      - cloudkitchen_images:/app/images
     depends_on:
       db:
         condition: service_healthy
@@ -68,3 +70,5 @@ services:
 
 volumes:
   cloudkitchen_pgdata:
+  # Uploaded brand/menu images must survive app recreates.
+  cloudkitchen_images:
