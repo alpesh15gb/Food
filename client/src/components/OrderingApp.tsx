@@ -245,6 +245,10 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
 
   const [cart, setCart] = useState<CartLine[]>([]);
   const [query, setQuery] = useState("");
+  // Restaurant logo fallback: show the monogram when no logo or it fails.
+  const [logoBroken, setLogoBroken] = useState(false);
+  const logoSrc = restaurant?.logo ?? "";
+  useEffect(() => setLogoBroken(false), [logoSrc]);
   // Debounced search: the input stays instant, filtering follows ~200ms later.
   const [debouncedQuery, setDebouncedQuery] = useState("");
   useEffect(() => {
@@ -896,8 +900,19 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
           <div className="relative mx-auto flex min-h-[280px] max-w-[1440px] items-end px-4 pb-7 pt-16 sm:px-6 lg:min-h-[320px] lg:px-10 lg:pb-10">
             <div className="rise-in max-w-xl">
               <div className="mb-4 flex items-center gap-3">
-                <div className="grid h-14 w-14 place-items-center rounded-2xl bg-white/10 backdrop-blur shadow-lg">
-                  <BrandMark />
+                <div className="grid h-14 w-14 place-items-center overflow-hidden rounded-2xl bg-white/10 shadow-lg backdrop-blur">
+                  {restaurant.logo && !logoBroken ? (
+                    <img
+                      src={restaurant.logo}
+                      alt={`${restaurant.name} logo`}
+                      loading="eager"
+                      decoding="async"
+                      className="h-full w-full object-cover"
+                      onError={() => setLogoBroken(true)}
+                    />
+                  ) : (
+                    <BrandMark />
+                  )}
                 </div>
                 <span className="rounded-full border border-white/25 bg-white/10 px-3 py-1 text-xs font-bold tracking-wide backdrop-blur">
                   Direct from the kitchen
