@@ -871,6 +871,16 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
     }
   };
 
+  // Custom-domain roots (no path slug) stay on "/" — pushing /<slug> would
+  // break the clean domain URL the restaurant advertises.
+  // NOTE: hook order — this MUST stay above the early returns below.
+  // A hook after an early return changes the hook count between renders
+  // (loading skeleton first, full UI after data) and crashes React (#310).
+  const goMenu = useCallback(
+    () => navigate(hasPathSlug ? `/${storefrontSlug}` : "/"),
+    [hasPathSlug, navigate, storefrontSlug],
+  );
+
   if (hasSlug && storefrontQuery.isLoading) return <MenuSkeleton />;
 
   // Tracking / confirmation authenticate via ?order=&token= and don't need
@@ -886,12 +896,7 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
     );
   }
 
-  // Custom-domain roots (no path slug) stay on "/" — pushing /<slug> would
-  // break the clean domain URL the restaurant advertises.
-  const goMenu = useCallback(
-    () => navigate(hasPathSlug ? `/${storefrontSlug}` : "/"),
-    [hasPathSlug, navigate, storefrontSlug],
-  );
+  // (goMenu lives above the early returns to keep hook order stable.)
 
   if (["cart", "checkout", "confirmation", "tracking"].includes(screen)) {
     return (
