@@ -115,7 +115,7 @@ function FoodDot({ kind }: { kind: FoodKind }) {
 
 function BrandMark() {
   return (
-    <div className="grid h-10 w-10 place-items-center rounded-xl bg-gradient-to-br from-[#c84630] to-[#e06040] text-white font-display text-lg font-bold">
+    <div className="grid h-10 w-10 place-items-center rounded-xl bg-gradient-to-br from-[#B95509] to-[#E8720C] text-white font-display text-lg font-bold">
       SG
     </div>
   );
@@ -144,7 +144,7 @@ function Quantity({
         type="button"
         aria-label={atMinimum && allowZero ? "Remove item" : "Decrease quantity"}
         onClick={() => onChange(atMinimum ? (allowZero ? 0 : 1) : value - 1)}
-        className="grid h-full min-h-[44px] w-11 place-items-center rounded-l-full text-[#7f5a45] hover:text-[#c84630] focus-visible:outline-2 focus-visible:outline-[#c84630]"
+        className="grid h-full min-h-[44px] w-11 place-items-center rounded-l-full text-[#7f5a45] hover:text-[#B95509] focus-visible:outline-2 focus-visible:outline-[#B95509]"
       >
         <Minus className="h-3.5 w-3.5" />
       </button>
@@ -155,7 +155,7 @@ function Quantity({
         type="button"
         aria-label="Increase quantity"
         onClick={() => onChange(value + 1)}
-        className="grid h-full min-h-[44px] w-11 place-items-center rounded-r-full text-[#7f5a45] hover:text-[#c84630] focus-visible:outline-2 focus-visible:outline-[#c84630]"
+        className="grid h-full min-h-[44px] w-11 place-items-center rounded-r-full text-[#7f5a45] hover:text-[#B95509] focus-visible:outline-2 focus-visible:outline-[#B95509]"
       >
         <Plus className="h-3.5 w-3.5" />
       </button>
@@ -981,7 +981,7 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
               type="button"
               onClick={() => setLowDataDismissed(true)}
               aria-label="Dismiss slow network notice"
-              className="grid h-11 w-11 shrink-0 place-items-center rounded-full hover:text-[#c84630]"
+              className="grid h-11 w-11 shrink-0 place-items-center rounded-full hover:text-[#B95509]"
             >
               <X className="h-4 w-4" aria-hidden="true" />
             </button>
@@ -1076,7 +1076,7 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
               className="flex w-full items-center justify-between gap-3 text-left"
             >
               <div className="flex min-w-0 items-center gap-3">
-                <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-[#faede0] text-[#c84630]">
+                <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-[#faede0] text-[#B95509]">
                   <MapPin className="h-4 w-4" />
                 </span>
                 <div className="min-w-0">
@@ -1088,7 +1088,7 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
                       {deliveryAddress.flatHouse}, {deliveryAddress.area}, {deliveryAddress.city} {deliveryAddress.postalCode}
                     </p>
                   ) : (
-                    <p className="truncate text-sm font-bold text-[#C84630]">
+                    <p className="truncate text-sm font-bold text-[#B95509]">
                       Tap to set your delivery location
                     </p>
                   )}
@@ -1154,7 +1154,7 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
                         type="button"
                         onClick={clearSearch}
                         aria-label="Clear search"
-                        className="absolute right-1 top-1/2 grid h-11 w-11 -translate-y-1/2 place-items-center rounded-full text-[#a37d64] hover:text-[#c84630]"
+                        className="absolute right-1 top-1/2 grid h-11 w-11 -translate-y-1/2 place-items-center rounded-full text-[#a37d64] hover:text-[#B95509]"
                       >
                         <X className="h-4 w-4" aria-hidden="true" />
                       </button>
@@ -1201,7 +1201,7 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
                       aria-pressed={filter === value}
                       className={`inline-flex min-h-[44px] shrink-0 items-center gap-1.5 rounded-full px-3.5 py-2 text-xs font-extrabold ${
                         filter === value
-                          ? "bg-[#c84630] text-white"
+                          ? "bg-[#B95509] text-white"
                           : "border border-[#ead8c7] bg-[#fffdf9] text-[#76523e]"
                       }`}
                     >
@@ -1217,11 +1217,11 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
                 <div className="mb-4 flex items-center justify-between gap-3">
                   <p role="status" aria-live="polite" className="text-sm font-bold text-[#5b4233]">
                     {results.length} result{results.length !== 1 ? "s" : ""} for{" "}
-                    <span className="text-[#c84630]">"{debouncedQuery}"</span>
+                    <span className="text-[#B95509]">"{debouncedQuery}"</span>
                   </p>
                   <button
                     onClick={clearSearch}
-                    className="min-h-[44px] shrink-0 px-2 text-xs font-bold text-[#9b6a52] hover:text-[#c84630]"
+                    className="min-h-[44px] shrink-0 px-2 text-xs font-bold text-[#9b6a52] hover:text-[#B95509]"
                   >
                     Clear
                   </button>
@@ -1234,7 +1234,7 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
                   {collections.map((collection) => (
                     <div key={collection.name}>
                       <div className="mb-3 flex items-center gap-2">
-                        <Sparkles className="h-4 w-4 text-[#c84630]" aria-hidden="true" />
+                        <Sparkles className="h-4 w-4 text-[#B95509]" aria-hidden="true" />
                         <h3 className="text-sm font-extrabold text-[#382719]">
                           {collection.name}
                         </h3>
@@ -1462,7 +1462,7 @@ function AuthBody({
         <Button
           onClick={onLogout}
           variant="outline"
-          className="min-h-[44px] w-full rounded-xl border-[#ddc6b5] text-[#c84630] font-extrabold"
+          className="min-h-[44px] w-full rounded-xl border-[#ddc6b5] text-[#B95509] font-extrabold"
         >
           Sign out
         </Button>
@@ -1488,12 +1488,12 @@ function AuthBody({
           className="h-12 rounded-xl border-[#ddc6b5] text-base"
         />
         {otpError && (
-          <p role="alert" className="text-sm font-bold text-[#c84630]">{otpError}</p>
+          <p role="alert" className="text-sm font-bold text-[#B95509]">{otpError}</p>
         )}
         <Button
           onClick={onSendOtp}
           disabled={otpLoading || normalizePhone(otpPhone).length !== 10}
-          className="h-12 min-h-[44px] w-full rounded-xl bg-[#c84630] font-extrabold text-base hover:bg-[#ad3627]"
+          className="h-12 min-h-[44px] w-full rounded-xl bg-[#B95509] font-extrabold text-base hover:bg-[#9C4A07]"
         >
           {otpLoading ? "Sending..." : "Send verification code"}
         </Button>
@@ -1524,12 +1524,12 @@ function AuthBody({
         className="h-12 rounded-xl border-[#ddc6b5] text-center text-2xl font-mono tracking-[0.3em]"
       />
       {otpError && (
-        <p role="alert" className="text-sm font-bold text-[#c84630]">{otpError}</p>
+        <p role="alert" className="text-sm font-bold text-[#B95509]">{otpError}</p>
       )}
       <Button
         onClick={onVerifyOtp}
         disabled={otpLoading || otpCode.length !== 6}
-        className="h-12 min-h-[44px] w-full rounded-xl bg-[#c84630] font-extrabold text-base hover:bg-[#ad3627]"
+        className="h-12 min-h-[44px] w-full rounded-xl bg-[#B95509] font-extrabold text-base hover:bg-[#9C4A07]"
       >
         {otpLoading ? "Verifying..." : "Verify & continue"}
       </Button>
@@ -1612,7 +1612,7 @@ function TopBar({
                 </span>
               ) : null}
               {offerCount != null && offerCount > 0 ? (
-                <span className="inline-flex items-center gap-1 text-[#c84630]">
+                <span className="inline-flex items-center gap-1 text-[#B95509]">
                   <TicketPercent className="h-3 w-3 shrink-0" aria-hidden="true" />
                   {offerCount} offer{offerCount !== 1 ? "s" : ""}
                 </span>
@@ -1631,12 +1631,12 @@ function TopBar({
           </button>
           <button
             onClick={onCart}
-            className="relative grid h-11 w-11 place-items-center rounded-xl bg-[#382719] text-white hover:bg-[#c84630]"
+            className="relative grid h-11 w-11 place-items-center rounded-xl bg-[#382719] text-white hover:bg-[#B95509]"
             aria-label={itemCount > 0 ? `Open cart, ${itemCount} items` : "Open cart"}
           >
             <ShoppingBag className="h-4 w-4" />
             {itemCount > 0 && (
-              <span aria-hidden="true" className="absolute -right-1 -top-1 grid h-5 min-w-5 place-items-center rounded-full bg-[#c84630] px-1 text-xs font-extrabold tabular-nums">
+              <span aria-hidden="true" className="absolute -right-1 -top-1 grid h-5 min-w-5 place-items-center rounded-full bg-[#B95509] px-1 text-xs font-extrabold tabular-nums">
                 {itemCount}
               </span>
             )}
@@ -1682,7 +1682,7 @@ function OfferStrip({
             className="w-[260px] shrink-0 snap-start rounded-2xl border border-[#e8d6c5] bg-gradient-to-r from-[#fff9f0] to-[#fff3e5] p-3"
           >
             <div className="flex items-center gap-2.5">
-              <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[#c84630]/10 text-[#c84630]">
+              <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[#B95509]/10 text-[#B95509]">
                 <TicketPercent className="h-5 w-5" aria-hidden="true" />
               </span>
               <div className="min-w-0 flex-1">
@@ -1691,7 +1691,7 @@ function OfferStrip({
                   onClick={() => void copyCode(offer.code)}
                   aria-label={`Copy offer code ${offer.code}`}
                   title="Tap to copy"
-                  className="flex min-h-[44px] items-center gap-1.5 text-left text-sm font-extrabold tracking-wide text-[#c84630]"
+                  className="flex min-h-[44px] items-center gap-1.5 text-left text-sm font-extrabold tracking-wide text-[#B95509]"
                 >
                   <span className="truncate">{offer.code}</span>
                   <Copy className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
@@ -1701,7 +1701,7 @@ function OfferStrip({
               <button
                 type="button"
                 onClick={() => onApplyCoupon(offer.code)}
-                className="min-h-[44px] shrink-0 rounded-lg px-3 text-xs font-extrabold text-[#c84630] hover:bg-[#c84630]/10"
+                className="min-h-[44px] shrink-0 rounded-lg px-3 text-xs font-extrabold text-[#B95509] hover:bg-[#B95509]/10"
               >
                 Apply
               </button>
@@ -1739,14 +1739,14 @@ const CollectionCard = memo(function CollectionCard({
           <p className="truncate text-xs font-extrabold text-[#382719]">
             {item.name}
           </p>
-          <p className="mt-0.5 text-xs font-bold tabular-nums text-[#c84630]">
+          <p className="mt-0.5 text-xs font-bold tabular-nums text-[#B95509]">
             {formatINR(item.price)}
           </p>
         </div>
         <button
           onClick={() => onAdd(item)}
           disabled={disabled}
-          className="mt-1 min-h-[44px] w-full rounded-lg border border-[#c84630] bg-white px-2 py-1 text-xs font-extrabold text-[#c84630] hover:bg-[#c84630] hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+          className="mt-1 min-h-[44px] w-full rounded-lg border border-[#B95509] bg-white px-2 py-1 text-xs font-extrabold text-[#B95509] hover:bg-[#B95509] hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
         >
           {disabled ? "Closed" : "ADD"}
         </button>
@@ -1829,7 +1829,7 @@ const MenuStream = memo(function MenuStream({
     if (items.length === 0)
       return (
         <div className="ticket-edge mt-5 bg-[#fffdf8] p-9 text-center shadow-sm">
-          <div className="mx-auto grid h-14 w-14 place-items-center rounded-full bg-[#faede0] text-[#c84630]">
+          <div className="mx-auto grid h-14 w-14 place-items-center rounded-full bg-[#faede0] text-[#B95509]">
             <Utensils className="h-6 w-6" />
           </div>
           <h2 className="font-display mt-4 text-2xl">
@@ -1867,7 +1867,7 @@ const MenuStream = memo(function MenuStream({
   if (!searching && categories.length === 0) {
     return (
       <div className="ticket-edge mt-5 bg-[#fffdf8] p-9 text-center shadow-sm">
-        <div className="mx-auto grid h-14 w-14 place-items-center rounded-full bg-[#faede0] text-[#c84630]">
+        <div className="mx-auto grid h-14 w-14 place-items-center rounded-full bg-[#faede0] text-[#B95509]">
           <Utensils className="h-6 w-6" />
         </div>
         <h2 className="font-display mt-4 text-2xl">
@@ -1958,7 +1958,7 @@ const MenuCard = memo(function MenuCard({
           )}
           {item.spiceLevel != null && item.spiceLevel > 0 && (
             <span
-              className="inline-flex items-center gap-0.5 text-[#c84630]"
+              className="inline-flex items-center gap-0.5 text-[#B95509]"
               role="img"
               aria-label={`Spice level ${Math.min(item.spiceLevel, 5)} of 5`}
               title={`Spice level: ${Math.min(item.spiceLevel, 5)}/5`}
@@ -2012,7 +2012,7 @@ const MenuCard = memo(function MenuCard({
         </div>
         <div className="relative z-10 -mt-5 flex justify-center px-2">
           {showStepper ? (
-            <div className="flex h-11 min-h-[44px] items-center rounded-xl border border-[#f0d9cd] bg-white text-[#c84630] shadow-[0_8px_20px_rgba(200,70,48,0.28)]">
+            <div className="flex h-11 min-h-[44px] items-center rounded-xl border border-[#f0d9cd] bg-white text-[#B95509] shadow-[0_8px_20px_rgba(185,85,9,0.28)]">
               <button
                 type="button"
                 aria-label={`Remove one ${item.name} from your order`}
@@ -2041,7 +2041,7 @@ const MenuCard = memo(function MenuCard({
               aria-label={
                 unavailable ? `${item.name} unavailable` : `Add ${item.name} to your order`
               }
-              className="h-11 min-h-[44px] min-w-[104px] rounded-xl border border-[#e8c9b8] bg-white px-6 text-[13px] font-extrabold tracking-wide text-[#c84630] shadow-[0_8px_20px_rgba(200,70,48,0.28)] hover:bg-[#c84630] hover:text-white disabled:cursor-not-allowed disabled:border-[#bfae9f] disabled:text-[#9d8d80] disabled:shadow-none"
+              className="h-11 min-h-[44px] min-w-[104px] rounded-xl border border-[#e8c9b8] bg-white px-6 text-[13px] font-extrabold tracking-wide text-[#B95509] shadow-[0_8px_20px_rgba(185,85,9,0.28)] hover:bg-[#B95509] hover:text-white disabled:cursor-not-allowed disabled:border-[#bfae9f] disabled:text-[#9d8d80] disabled:shadow-none"
             >
               {item.availability !== "AVAILABLE"
                 ? "Sold out"
@@ -2128,7 +2128,7 @@ function CartTicket({
               {cart.length ? `${cart.length} tasty picks` : "Your cart is empty"}
             </h2>
           </div>
-          <ShoppingBag className="h-5 w-5 text-[#c84630]" />
+          <ShoppingBag className="h-5 w-5 text-[#B95509]" />
         </div>
       </div>
       <div className="space-y-4 p-5">
@@ -2150,7 +2150,7 @@ function CartTicket({
                     type="button"
                     onClick={() => onQuantity(line.id, 0)}
                     aria-label={`Remove ${line.item.name} from cart`}
-                    className="mt-1 min-h-[44px] text-xs font-bold text-[#a26d50] hover:text-[#c84630]"
+                    className="mt-1 min-h-[44px] text-xs font-bold text-[#a26d50] hover:text-[#B95509]"
                   >
                     Remove
                   </button>
@@ -2191,19 +2191,19 @@ function CartTicket({
               )}
             </div>
             {belowMinimum && (
-              <p role="alert" className="text-xs font-bold text-[#c84630]">
+              <p role="alert" className="text-xs font-bold text-[#B95509]">
                 Add {formatINR(restaurant.minOrder - total)} more for minimum order
               </p>
             )}
             {checkoutHint && (
-              <p role="alert" className="text-xs font-bold text-[#c84630]">
+              <p role="alert" className="text-xs font-bold text-[#B95509]">
                 {checkoutHint}
               </p>
             )}
             <Button
               onClick={onCheckout}
               disabled={checkoutDisabled}
-              className="h-12 min-h-[44px] w-full rounded-xl bg-[#c84630] text-sm font-extrabold hover:bg-[#ae3426]"
+              className="h-12 min-h-[44px] w-full rounded-xl bg-[#B95509] text-sm font-extrabold hover:bg-[#9C4A07]"
             >
               {processing ? "Processing..." : "Checkout"}
               {!processing && <ArrowRight className="ml-2 h-4 w-4" />}
@@ -2326,7 +2326,7 @@ function CustomizationDrawer({
               onChange={(event) => onNote(event.target.value)}
               placeholder="Less spicy, no onions..."
               maxLength={300}
-              className="mt-2 min-h-20 w-full resize-none rounded-xl border border-[#e5d0bd] bg-white p-3 text-sm outline-none ring-[#c84630] focus:ring-2"
+              className="mt-2 min-h-20 w-full resize-none rounded-xl border border-[#e5d0bd] bg-white p-3 text-sm outline-none ring-[#B95509] focus:ring-2"
             />
           </div>
 
@@ -2337,7 +2337,7 @@ function CustomizationDrawer({
         <DrawerFooter className="border-t border-[#ead8c6] bg-[#fffdf9] px-5 pb-5 pt-4">
           <Button
             onClick={onAdd}
-            className="h-13 min-h-[44px] w-full rounded-xl bg-[#c84630] text-sm font-extrabold hover:bg-[#ad3627]"
+            className="h-13 min-h-[44px] w-full rounded-xl bg-[#B95509] text-sm font-extrabold hover:bg-[#9C4A07]"
           >
             Add item{" "}
             <span className="ml-auto">{formatINR(displayTotal)}</span>
@@ -2376,18 +2376,18 @@ function VariantGroup({
               onClick={() => onSelect(variant.id)}
               className={`flex min-h-[44px] items-center justify-between rounded-xl border px-3.5 py-3 text-left text-sm font-bold disabled:cursor-not-allowed disabled:opacity-50 ${
                 active
-                  ? "border-[#c84630] bg-[#fff0e9] text-[#9f392a]"
+                  ? "border-[#B95509] bg-[#fff0e9] text-[#9C4A07]"
                   : "border-[#ead7c5] bg-white text-[#5f4534]"
               }`}
             >
               <span className="flex items-center gap-3">
                 <span
                   className={`grid h-5 w-5 place-items-center rounded-full border ${
-                    active ? "border-[#c84630]" : "border-[#d8c3b1]"
+                    active ? "border-[#B95509]" : "border-[#d8c3b1]"
                   }`}
                 >
                   {active && (
-                    <span className="h-2.5 w-2.5 rounded-full bg-[#c84630]" />
+                    <span className="h-2.5 w-2.5 rounded-full bg-[#B95509]" />
                   )}
                 </span>
                 {variant.name}
@@ -2421,7 +2421,7 @@ function AddonGroupBlock({
       <p className="text-sm font-extrabold text-[#382719]">
         {group.name}{" "}
         {group.isRequired ? (
-          <span className="font-medium text-[#c84630]">Required</span>
+          <span className="font-medium text-[#B95509]">Required</span>
         ) : (
           <span className="font-medium text-[#967762]">(optional)</span>
         )}
@@ -2442,7 +2442,7 @@ function AddonGroupBlock({
               onClick={() => onToggle(option.id)}
               className={`flex min-h-[44px] items-center justify-between rounded-xl border px-3.5 py-3 text-left text-sm font-bold disabled:cursor-not-allowed disabled:opacity-50 ${
                 active
-                  ? "border-[#c84630] bg-[#fff0e9] text-[#9f392a]"
+                  ? "border-[#B95509] bg-[#fff0e9] text-[#9C4A07]"
                   : "border-[#ead7c5] bg-white text-[#5f4534]"
               }`}
             >
@@ -2452,7 +2452,7 @@ function AddonGroupBlock({
                     single ? "rounded-full" : "rounded-md"
                   } ${
                     active
-                      ? "border-[#c84630] bg-[#c84630] text-white"
+                      ? "border-[#B95509] bg-[#B95509] text-white"
                       : "border-[#d8c3b1]"
                   }`}
                 >
@@ -2583,7 +2583,7 @@ function ServiceSetupScreen({
               </p>
               <button
                 onClick={onMenu}
-                className="min-h-[44px] text-xs font-extrabold text-[#c84630]"
+                className="min-h-[44px] text-xs font-extrabold text-[#B95509]"
               >
                 + Add more items
               </button>
@@ -2595,7 +2595,7 @@ function ServiceSetupScreen({
                 </p>
                 <Button
                   onClick={onMenu}
-                  className="mt-4 h-12 min-h-[44px] rounded-xl bg-[#c84630] px-6 font-extrabold hover:bg-[#ad3627]"
+                  className="mt-4 h-12 min-h-[44px] rounded-xl bg-[#B95509] px-6 font-extrabold hover:bg-[#9C4A07]"
                 >
                   Browse the menu
                 </Button>
@@ -2622,7 +2622,7 @@ function ServiceSetupScreen({
                       <button
                         onClick={() => onQuantity(line.id, 0)}
                         aria-label={`Remove ${line.item.name} from cart`}
-                        className="mt-2 min-h-[44px] text-xs font-bold text-[#a26d50] hover:text-[#c84630]"
+                        className="mt-2 min-h-[44px] text-xs font-bold text-[#a26d50] hover:text-[#B95509]"
                       >
                         Remove
                       </button>
@@ -2799,7 +2799,7 @@ function ServiceSetupScreen({
         </p>
         <Button
           onClick={onMenu}
-          className="mt-6 h-12 min-h-[44px] rounded-xl bg-[#c84630] px-6 font-extrabold hover:bg-[#ad3627]"
+          className="mt-6 h-12 min-h-[44px] rounded-xl bg-[#B95509] px-6 font-extrabold hover:bg-[#9C4A07]"
         >
           Back to menu
         </Button>
@@ -2855,7 +2855,7 @@ function CheckoutDetailsForm({
               type="button"
               onClick={onEditLocation}
               disabled={disabled}
-              className="min-h-[44px] shrink-0 text-xs font-extrabold text-[#c84630] disabled:opacity-50"
+              className="min-h-[44px] shrink-0 text-xs font-extrabold text-[#B95509] disabled:opacity-50"
             >
               Change
             </button>
@@ -2866,7 +2866,7 @@ function CheckoutDetailsForm({
             onClick={onEditLocation}
             disabled={disabled}
             variant="outline"
-            className="mt-2 h-11 min-h-[44px] w-full rounded-xl border-[#ddc6b5] font-extrabold text-[#c84630]"
+            className="mt-2 h-11 min-h-[44px] w-full rounded-xl border-[#ddc6b5] font-extrabold text-[#B95509]"
           >
             <MapPin className="mr-2 h-4 w-4" />
             Set delivery location
@@ -2878,7 +2878,7 @@ function CheckoutDetailsForm({
           </p>
         )}
         {serviceBlocked && (
-          <p role="alert" className="mt-2 text-xs font-bold text-[#c84630]">
+          <p role="alert" className="mt-2 text-xs font-bold text-[#B95509]">
             {serviceReason === "OUTSIDE_DELIVERY_RADIUS"
               ? "This address is outside our delivery area — try a closer address."
               : "We can't deliver to this address right now."}
@@ -2935,7 +2935,7 @@ function CheckoutDetailsForm({
           placeholder="Gate code, floor, ring the bell twice…"
           disabled={disabled}
           maxLength={1000}
-          className="mt-2 min-h-20 w-full resize-none rounded-xl border border-[#ddc6b5] bg-white p-3 text-sm outline-none ring-[#c84630] focus:ring-2 disabled:opacity-50"
+          className="mt-2 min-h-20 w-full resize-none rounded-xl border border-[#ddc6b5] bg-white p-3 text-sm outline-none ring-[#B95509] focus:ring-2 disabled:opacity-50"
         />
       </div>
 
@@ -2946,7 +2946,7 @@ function CheckoutDetailsForm({
           checked={cutlery}
           onChange={(event) => onCutlery(event.target.checked)}
           disabled={disabled}
-          className="h-5 w-5 accent-[#c84630]"
+          className="h-5 w-5 accent-[#B95509]"
         />
         Include cutlery with my order
       </label>
@@ -2989,7 +2989,7 @@ function OrderStatusView({
       <section aria-live="polite" className="ticket-edge w-full max-w-lg bg-[#fffdf9] p-8 text-center shadow-sm">
         {!hasCredentials ? (
           <>
-            <div className="mx-auto grid h-16 w-16 place-items-center rounded-full bg-[#faede0] text-[#c84630]">
+            <div className="mx-auto grid h-16 w-16 place-items-center rounded-full bg-[#faede0] text-[#B95509]">
               <PackageCheck className="h-7 w-7" />
             </div>
             <h1 className="font-display mt-5 text-4xl text-[#382719]">
@@ -3002,7 +3002,7 @@ function OrderStatusView({
             {onMenu && (
               <Button
                 onClick={onMenu}
-                className="mt-6 h-12 min-h-[44px] rounded-xl bg-[#c84630] px-6 font-extrabold hover:bg-[#ad3627]"
+                className="mt-6 h-12 min-h-[44px] rounded-xl bg-[#B95509] px-6 font-extrabold hover:bg-[#9C4A07]"
               >
                 Back to menu
               </Button>
@@ -3010,7 +3010,7 @@ function OrderStatusView({
           </>
         ) : tracking.isLoading ? (
           <>
-            <div className="mx-auto grid h-16 w-16 place-items-center rounded-full bg-[#faede0] text-[#c84630]">
+            <div className="mx-auto grid h-16 w-16 place-items-center rounded-full bg-[#faede0] text-[#B95509]">
               <Clock3 className="h-7 w-7 animate-pulse" />
             </div>
             <h1 className="font-display mt-5 text-4xl text-[#382719]">Fetching your order…</h1>
@@ -3018,7 +3018,7 @@ function OrderStatusView({
           </>
         ) : tracking.isError || !tracking.data ? (
           <>
-            <div className="mx-auto grid h-16 w-16 place-items-center rounded-full bg-[#fbe3dc] text-[#c84630]">
+            <div className="mx-auto grid h-16 w-16 place-items-center rounded-full bg-[#fbe3dc] text-[#B95509]">
               <X className="h-7 w-7" />
             </div>
             <h1 className="font-display mt-5 text-4xl text-[#382719]">Couldn't load your order</h1>
@@ -3038,7 +3038,7 @@ function OrderStatusView({
               {onMenu && (
                 <Button
                   onClick={onMenu}
-                  className="h-12 min-h-[44px] rounded-xl bg-[#c84630] px-6 font-extrabold hover:bg-[#ad3627]"
+                  className="h-12 min-h-[44px] rounded-xl bg-[#B95509] px-6 font-extrabold hover:bg-[#9C4A07]"
                 >
                   Back to menu
                 </Button>
@@ -3112,7 +3112,7 @@ function OrderStatusView({
             {onMenu && (
               <Button
                 onClick={onMenu}
-                className="mt-6 h-12 min-h-[44px] rounded-xl bg-[#c84630] px-6 font-extrabold hover:bg-[#ad3627]"
+                className="mt-6 h-12 min-h-[44px] rounded-xl bg-[#B95509] px-6 font-extrabold hover:bg-[#9C4A07]"
               >
                 Back to menu
               </Button>
@@ -3142,7 +3142,7 @@ function NoSlugScreen() {
   return (
     <main className="grid min-h-screen place-items-center bg-[#fffaf3] px-4">
       <section className="w-full max-w-md rounded-2xl bg-[#fffdf9] p-8 text-center shadow-sm">
-        <div className="mx-auto grid h-14 w-14 place-items-center rounded-full bg-[#faede0] text-[#c84630]">
+        <div className="mx-auto grid h-14 w-14 place-items-center rounded-full bg-[#faede0] text-[#B95509]">
           <Store className="h-6 w-6" />
         </div>
         <h1 className="font-display mt-4 text-3xl text-[#382719]">Pick a kitchen to start</h1>
@@ -3159,7 +3159,7 @@ function StorefrontUnavailable({ onRetry }: { onRetry: () => void }) {
   return (
     <main className="grid min-h-screen place-items-center bg-[#fffaf3] px-4">
       <section className="w-full max-w-md rounded-2xl bg-[#fffdf9] p-8 text-center shadow-sm">
-        <div className="mx-auto grid h-14 w-14 place-items-center rounded-full bg-[#faede0] text-[#c84630]">
+        <div className="mx-auto grid h-14 w-14 place-items-center rounded-full bg-[#faede0] text-[#B95509]">
           <Utensils className="h-6 w-6" />
         </div>
         <h1 className="font-display mt-4 text-3xl text-[#382719]">This kitchen isn't available</h1>
@@ -3168,7 +3168,7 @@ function StorefrontUnavailable({ onRetry }: { onRetry: () => void }) {
         </p>
         <Button
           onClick={onRetry}
-          className="mt-6 h-12 min-h-[44px] rounded-xl bg-[#c84630] px-6 font-extrabold hover:bg-[#ad3627]"
+          className="mt-6 h-12 min-h-[44px] rounded-xl bg-[#B95509] px-6 font-extrabold hover:bg-[#9C4A07]"
         >
           Try again
         </Button>

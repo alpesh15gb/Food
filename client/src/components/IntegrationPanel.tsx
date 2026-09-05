@@ -99,7 +99,7 @@ export default function IntegrationPanel({ restaurantId }: { restaurantId?: stri
     <div className="space-y-5">
       {/* Header */}
       <section className="relative overflow-hidden rounded-2xl bg-[#38271f] p-6 text-white shadow-sm">
-        <div className="absolute -right-6 -top-10 h-36 w-36 rounded-full border-[18px] border-[#c84630]/30" />
+        <div className="absolute -right-6 -top-10 h-36 w-36 rounded-full border-[18px] border-[#B95509]/30" />
         <div className="relative grid gap-4 md:grid-cols-[1fr_auto]">
           <div>
             <p className="text-[10px] font-extrabold uppercase tracking-[0.16em] text-[#e7b99d]">Owner configuration</p>
@@ -121,7 +121,7 @@ export default function IntegrationPanel({ restaurantId }: { restaurantId?: stri
           return (
             <article key={service.provider} className="rounded-2xl bg-[#fffdf9] p-5 shadow-sm">
               <div className="flex items-start justify-between gap-3">
-                <span className={`grid h-10 w-10 place-items-center rounded-xl ${service.ready ? "bg-[#e5f1e5] text-[#42774b]" : "bg-[#f7e4d3] text-[#c84630]"}`}>
+                <span className={`grid h-10 w-10 place-items-center rounded-xl ${service.ready ? "bg-[#e5f1e5] text-[#42774b]" : "bg-[#f7e4d3] text-[#B95509]"}`}>
                   {service.ready ? <CheckCircle2 className="h-5 w-5" /> : <CircleAlert className="h-5 w-5" />}
                 </span>
                 <span className={`rounded-full px-2.5 py-1 text-[10px] font-extrabold uppercase tracking-[0.08em] ${service.ready ? "bg-[#e5f1e5] text-[#42774b]" : "bg-[#f8e9dd] text-[#a54c34]"}`}>
@@ -142,7 +142,7 @@ export default function IntegrationPanel({ restaurantId }: { restaurantId?: stri
                       <label className="text-xs font-extrabold text-[#5a4130]">{keyName}</label>
                       <div className="mt-1.5 flex gap-2">
                         <Input value={drafts[keyName] ?? ""} onChange={event => setDrafts(current => ({ ...current, [keyName]: event.target.value }))} type="password" autoComplete="off" placeholder="Paste secure value" className="h-10 rounded-xl border-[#ddc6b5] text-xs" />
-                        <Button aria-label={`Save ${keyName}`} disabled={!rid || !drafts[keyName]?.trim() || saveSecret.isPending} onClick={() => saveSecret.mutate({ restaurantId: rid, provider: toMutationProvider(service.provider), keyName, value: drafts[keyName] })} className="h-10 shrink-0 rounded-xl bg-[#c84630] px-3 font-extrabold hover:bg-[#ad3627]">
+                        <Button aria-label={`Save ${keyName}`} disabled={!rid || !drafts[keyName]?.trim() || saveSecret.isPending} onClick={() => saveSecret.mutate({ restaurantId: rid, provider: toMutationProvider(service.provider), keyName, value: drafts[keyName] })} className="h-10 shrink-0 rounded-xl bg-[#B95509] px-3 font-extrabold hover:bg-[#9C4A07]">
                           {saveSecret.isPending ? <LoaderCircle className="h-4 w-4 animate-spin" /> : "Save"}
                         </Button>
                         <Button aria-label={`Verify ${keyName}`} variant="outline" disabled={!rid || verifySecret.isPending} onClick={() => verifySecret.mutate({ restaurantId: rid, provider: toMutationProvider(service.provider), keyName })} className="h-10 shrink-0 rounded-xl border-[#ddc6b5] px-3 text-xs font-extrabold text-[#704d37]">Check</Button>
@@ -160,7 +160,7 @@ export default function IntegrationPanel({ restaurantId }: { restaurantId?: stri
       <section className="rounded-2xl bg-[#fffdf9] p-6 shadow-sm">
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-center gap-3">
-            <span className={`grid h-10 w-10 place-items-center rounded-xl ${isRouteActive ? "bg-[#e5f1e5] text-[#42774b]" : "bg-[#f7e4d3] text-[#c84630]"}`}>
+            <span className={`grid h-10 w-10 place-items-center rounded-xl ${isRouteActive ? "bg-[#e5f1e5] text-[#42774b]" : "bg-[#f7e4d3] text-[#B95509]"}`}>
               <Split className="h-5 w-5" />
             </span>
             <div>
@@ -205,7 +205,7 @@ export default function IntegrationPanel({ restaurantId }: { restaurantId?: stri
             <Button
               disabled={!rid || !routeForm.contactEmail || !routeForm.contactPhone || setupRoute.isPending}
               onClick={() => setupRoute.mutate({ restaurantId: rid, ...routeForm })}
-              className="mt-2 h-10 rounded-xl bg-[#c84630] px-5 font-extrabold hover:bg-[#ad3627]"
+              className="mt-2 h-10 rounded-xl bg-[#B95509] px-5 font-extrabold hover:bg-[#9C4A07]"
             >
               {setupRoute.isPending ? <LoaderCircle className="mr-2 h-4 w-4 animate-spin" /> : null}
               Link Razorpay Route Account
@@ -239,7 +239,7 @@ export default function IntegrationPanel({ restaurantId }: { restaurantId?: stri
                     toast.error("Enter a valid percentage (0–100)");
                   }
                 }}
-                className="h-10 rounded-xl bg-[#c84630] px-5 font-extrabold hover:bg-[#ad3627]"
+                className="h-10 rounded-xl bg-[#B95509] px-5 font-extrabold hover:bg-[#9C4A07]"
               >
                 {updateFee.isPending ? <LoaderCircle className="h-4 w-4 animate-spin" /> : "Update fee"}
               </Button>

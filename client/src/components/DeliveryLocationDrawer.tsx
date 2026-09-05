@@ -460,7 +460,7 @@ export default function DeliveryLocationDrawer({
 
               <Button
                 onClick={useCurrentLocation}
-                className="h-12 w-full rounded-xl bg-[#C84630] font-bold text-white hover:bg-[#b03d28]"
+                className="h-12 w-full rounded-xl bg-[#B95509] font-bold text-white hover:bg-[#9C4A07]"
               >
                 <Navigation className="mr-2 h-4 w-4" />
                 Use My Current Location
@@ -510,7 +510,7 @@ export default function DeliveryLocationDrawer({
                         onClick={() => handlePlaceSelect(result.placeId, result.description)}
                         className="w-full px-4 py-3 text-left text-sm text-[#382719] hover:bg-[#fff4e9]"
                       >
-                        <MapPin className="mr-2 inline h-3 w-3 text-[#C84630]" />
+                        <MapPin className="mr-2 inline h-3 w-3 text-[#B95509]" />
                         {result.description}
                       </button>
                     ))}
@@ -551,7 +551,7 @@ export default function DeliveryLocationDrawer({
           {/* Step: Loading */}
           {step === "loading" && (
             <div className="flex flex-col items-center gap-4 py-8">
-              <Loader2 className="h-8 w-8 animate-spin text-[#C84630]" />
+              <Loader2 className="h-8 w-8 animate-spin text-[#B95509]" />
               <p className="text-sm text-[#856653]">Getting your location...</p>
             </div>
           )}
@@ -561,7 +561,7 @@ export default function DeliveryLocationDrawer({
             <>
               <div className="rounded-xl border border-[#d9b89e] bg-[#fff4e9] p-4">
                 <p className="text-sm font-semibold text-[#5c4332]">
-                  <Crosshair className="mr-1 inline h-4 w-4 text-[#C84630]" />
+                  <Crosshair className="mr-1 inline h-4 w-4 text-[#B95509]" />
                   Confirm your delivery pin
                 </p>
                 <p className="mt-1 text-xs text-[#885e43]">
@@ -589,7 +589,7 @@ export default function DeliveryLocationDrawer({
                   fallback={
                     <div className="grid h-[300px] place-items-center bg-[#f6ecdf] text-sm font-bold text-[#856653]">
                       <span className="inline-flex items-center gap-2">
-                        <Loader2 className="h-5 w-5 animate-spin text-[#C84630]" aria-hidden="true" />
+                        <Loader2 className="h-5 w-5 animate-spin text-[#B95509]" aria-hidden="true" />
                         Loading the map…
                       </span>
                     </div>
@@ -605,7 +605,7 @@ export default function DeliveryLocationDrawer({
                 {/* Fixed center pin overlay */}
                 <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
                   <div className="relative">
-                    <MapPin className="h-8 w-8 -translate-y-1/2 text-[#C84630] drop-shadow-md" fill="#C84630" />
+                    <MapPin className="h-8 w-8 -translate-y-1/2 text-[#B95509] drop-shadow-md" fill="#B95509" />
                     <div className="absolute -bottom-1 left-1/2 h-2 w-2 -translate-x-1/2 rounded-full bg-black/20 blur-sm" />
                   </div>
                 </div>
@@ -638,7 +638,7 @@ export default function DeliveryLocationDrawer({
                     }
                   }}
                   disabled={!geoState}
-                  className="h-11 flex-1 rounded-xl bg-[#C84630] font-bold text-white hover:bg-[#b03d28] disabled:opacity-50"
+                  className="h-11 flex-1 rounded-xl bg-[#B95509] font-bold text-white hover:bg-[#9C4A07] disabled:opacity-50"
                 >
                   <Check className="mr-1 h-4 w-4" />
                   Confirm delivery pin
@@ -732,7 +732,7 @@ export default function DeliveryLocationDrawer({
                 <Button
                   onClick={confirmAddress}
                   disabled={!formValid}
-                  className="h-11 flex-1 rounded-xl bg-[#C84630] font-bold text-white hover:bg-[#b03d28] disabled:opacity-50"
+                  className="h-11 flex-1 rounded-xl bg-[#B95509] font-bold text-white hover:bg-[#9C4A07] disabled:opacity-50"
                 >
                   <Check className="mr-1 h-4 w-4" />
                   Confirm Location

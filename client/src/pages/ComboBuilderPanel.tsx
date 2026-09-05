@@ -155,7 +155,7 @@ export default function ComboBuilderPanel({
             onClick={() => setShowForm(true)}
             disabled={categoryList.length === 0}
             title={categoryList.length === 0 ? "Create a category first" : undefined}
-            className="flex items-center gap-2 rounded-lg bg-[#9d3727] px-4 py-2 text-sm font-bold text-white hover:bg-[#7c2b1e] disabled:opacity-50"
+            className="flex items-center gap-2 rounded-lg bg-[#B95509] px-4 py-2 text-sm font-bold text-white hover:bg-[#7E3C05] disabled:opacity-50"
           >
             <Plus className="h-4 w-4" />
             New Combo
@@ -173,7 +173,7 @@ export default function ComboBuilderPanel({
       {showForm && (
         <form onSubmit={handleSubmit} className="rounded-xl border bg-card p-6 space-y-6">
           <div className="flex items-center gap-3">
-            <UtensilsCrossed className="h-5 w-5 text-[#9d3727]" />
+            <UtensilsCrossed className="h-5 w-5 text-[#B95509]" />
             <h2 className="font-semibold">Create Combo Meal</h2>
           </div>
 
@@ -203,7 +203,7 @@ export default function ComboBuilderPanel({
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-semibold">Included Sections</h3>
-              <button type="button" onClick={addGroup} className="flex items-center gap-1 text-xs font-medium text-[#9d3727] hover:underline">
+              <button type="button" onClick={addGroup} className="flex items-center gap-1 text-xs font-medium text-[#B95509] hover:underline">
                 <Plus className="h-3 w-3" /> Add Section
               </button>
             </div>
@@ -273,7 +273,7 @@ export default function ComboBuilderPanel({
           </div>
 
           <div className="flex gap-3 pt-2">
-            <button type="submit" disabled={createItemMutation.isPending} className="rounded-lg bg-[#9d3727] px-4 py-2 text-sm font-bold text-white hover:bg-[#7c2b1e] disabled:opacity-50">
+            <button type="submit" disabled={createItemMutation.isPending} className="rounded-lg bg-[#B95509] px-4 py-2 text-sm font-bold text-white hover:bg-[#7E3C05] disabled:opacity-50">
               {createItemMutation.isPending ? (
                 <span className="inline-flex items-center gap-2"><Loader2 className="h-4 w-4 animate-spin" /> Creating...</span>
               ) : "Create Combo"}

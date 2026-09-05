@@ -139,7 +139,7 @@ export default function OutletsPanel({ restaurantId }: { restaurantId: string })
         {!showForm && (
           <button
             onClick={() => { resetForm(); setShowForm(true); }}
-            className="flex items-center gap-2 rounded-lg bg-[#9d3727] px-4 py-2 text-sm font-bold text-white hover:bg-[#7c2b1e]"
+            className="flex items-center gap-2 rounded-lg bg-[#B95509] px-4 py-2 text-sm font-bold text-white hover:bg-[#7E3C05]"
           >
             <Plus className="h-4 w-4" />
             Add Outlet
@@ -177,7 +177,7 @@ export default function OutletsPanel({ restaurantId }: { restaurantId: string })
             </div>
           </div>
           <div className="flex gap-3 pt-2">
-            <button type="submit" disabled={createMutation.isPending || updateMutation.isPending} className="rounded-lg bg-[#9d3727] px-4 py-2 text-sm font-bold text-white hover:bg-[#7c2b1e] disabled:opacity-50">
+            <button type="submit" disabled={createMutation.isPending || updateMutation.isPending} className="rounded-lg bg-[#B95509] px-4 py-2 text-sm font-bold text-white hover:bg-[#7E3C05] disabled:opacity-50">
               {editingId ? "Update" : "Create"} Outlet
             </button>
             <button type="button" onClick={() => setShowForm(false)} className="rounded-lg border px-4 py-2 text-sm font-medium text-muted-foreground hover:bg-muted">Cancel</button>
@@ -227,7 +227,7 @@ export default function OutletsPanel({ restaurantId }: { restaurantId: string })
             <div className="mt-4 flex items-center gap-4 border-t pt-3 text-xs text-muted-foreground">
               <span>Prep: {outlet.preparationMinutes}min</span>
               <span>Radius: {outlet.deliveryRadiusKm}km</span>
-              <button onClick={() => handleEdit(outlet)} className="ml-auto font-medium text-[#9d3727] hover:underline">Edit</button>
+              <button onClick={() => handleEdit(outlet)} className="ml-auto font-medium text-[#B95509] hover:underline">Edit</button>
             </div>
           </div>
         ))}

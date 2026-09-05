@@ -7,7 +7,7 @@ import {
   Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
 
-const COLORS = ["#9d3727", "#c97a4e", "#e9bda2", "#6d5140", "#a06e53", "#d4956b", "#8b5e3c", "#f0d4be"];
+const COLORS = ["#B95509", "#c97a4e", "#e9bda2", "#6d5140", "#a06e53", "#d4956b", "#8b5e3c", "#f0d4be"];
 const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 function formatCurrency(paise: number) {
@@ -204,8 +204,8 @@ export default function AnalyticsPanel({ restaurantId }: { restaurantId: string 
             <AreaChart data={revenueData ?? []}>
               <defs>
                 <linearGradient id="revGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#9d3727" stopOpacity={0.3} />
-                  <stop offset="95%" stopColor="#9d3727" stopOpacity={0} />
+                  <stop offset="5%" stopColor="#B95509" stopOpacity={0.3} />
+                  <stop offset="95%" stopColor="#B95509" stopOpacity={0} />
                 </linearGradient>
               </defs>
               <CartesianGrid strokeDasharray="3 3" stroke="#eee" />
@@ -219,7 +219,7 @@ export default function AnalyticsPanel({ restaurantId }: { restaurantId: string 
                 formatter={(value: number) => [formatCurrency(value), "Revenue"]}
                 labelFormatter={(label: string) => formatFullDate(label)}
               />
-              <Area type="monotone" dataKey="totalRevenuePaise" stroke="#9d3727" fill="url(#revGrad)" strokeWidth={2} />
+              <Area type="monotone" dataKey="totalRevenuePaise" stroke="#B95509" fill="url(#revGrad)" strokeWidth={2} />
             </AreaChart>
           </ResponsiveContainer>
         </div>

@@ -192,7 +192,7 @@ function SlugRedirect({ section }: { section: string }) {
   return (
     <main className="grid min-h-screen place-items-center bg-[#f7f2eb] p-5">
       <section className="max-w-md rounded-[2rem] bg-white p-8 text-center shadow-xl shadow-[#5f3b24]/10">
-        <span className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-[#f9e6d9] text-[#c84630]">
+        <span className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-[#f9e6d9] text-[#B95509]">
           <Store className="h-6 w-6" />
         </span>
         <h1 className="font-display mt-5 text-3xl text-[#35251b]">
@@ -215,7 +215,7 @@ function SlugRedirect({ section }: { section: string }) {
           )}
           <Button
             onClick={() => setLocation("/signup")}
-            className="h-11 flex-1 rounded-xl bg-[#c84630] font-extrabold hover:bg-[#ad3627]"
+            className="h-11 flex-1 rounded-xl bg-[#B95509] font-extrabold hover:bg-[#9C4A07]"
           >
             <Plus className="mr-2 h-4 w-4" /> Create restaurant
           </Button>
@@ -254,7 +254,7 @@ function AdminAccess() {
   return (
     <main className="grid min-h-screen place-items-center bg-[#f7f2eb] p-5">
       <section className="max-w-md rounded-[2rem] bg-white p-8 text-center shadow-xl shadow-[#5f3b24]/10">
-        <span className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-[#f9e6d9] text-[#c84630]">
+        <span className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-[#f9e6d9] text-[#B95509]">
           <LockKeyhole className="h-6 w-6" />
         </span>
         <h1 className="font-display mt-5 text-3xl text-[#35251b]">
@@ -301,7 +301,7 @@ function AdminAccess() {
             <Button
               type="submit"
               disabled={localLogin.isPending || token.trim().length < 16}
-              className="mt-3 h-11 w-full rounded-xl bg-[#c84630] font-extrabold hover:bg-[#ad3627]"
+              className="mt-3 h-11 w-full rounded-xl bg-[#B95509] font-extrabold hover:bg-[#9C4A07]"
             >
               {localLogin.isPending ? "Checking access..." : "Open operations"}
             </Button>
@@ -351,7 +351,7 @@ function AdminAccess() {
             <Button
               type="submit"
               disabled={emailLogin.isPending || !email.trim() || !password}
-              className="mt-3 h-11 w-full rounded-xl bg-[#c84630] font-extrabold hover:bg-[#ad3627]"
+              className="mt-3 h-11 w-full rounded-xl bg-[#B95509] font-extrabold hover:bg-[#9C4A07]"
             >
               {emailLogin.isPending ? "Signing in..." : "Sign in"}
             </Button>
@@ -359,7 +359,7 @@ function AdminAccess() {
               <button
                 type="button"
                 onClick={() => setLocation("/signup")}
-                className="text-[#c84630] hover:underline"
+                className="text-[#B95509] hover:underline"
               >
                 Create a restaurant
               </button>
@@ -409,7 +409,7 @@ function MenuImportWorkspace({ slug }: { slug: string }) {
     <div className="min-h-screen bg-[#f7f2eb] p-5 text-[#34251d] lg:p-8">
       <div className="mx-auto max-w-7xl">
         <div className="mb-6 flex flex-wrap items-center gap-3">
-          <span className="grid h-10 w-10 place-items-center rounded-xl bg-[#f7e4d3] text-[#c84630]">
+          <span className="grid h-10 w-10 place-items-center rounded-xl bg-[#f7e4d3] text-[#B95509]">
             <FileUp className="h-5 w-5" />
           </span>
           <div className="min-w-0 flex-1">
@@ -647,7 +647,7 @@ function AdminWorkspace({ section, slug }: { section: string; slug: string }) {
               <li aria-hidden>/</li>
               <li className="max-w-40 truncate">{data.restaurant.name}</li>
               <li aria-hidden>/</li>
-              <li aria-current="page" className="text-[#c84630]">{sectionTitle(section)}</li>
+              <li aria-current="page" className="text-[#B95509]">{sectionTitle(section)}</li>
             </ol>
           </nav>
           <div className="flex flex-wrap items-center justify-between gap-4">
@@ -886,7 +886,7 @@ function OverviewPanel({ data, slug }: { data: any; slug: string }) {
       value: m.todayOrders,
       detail: "All orders started today",
       icon: ClipboardList,
-      tone: "bg-[#f7e4d3] text-[#c84630]",
+      tone: "bg-[#f7e4d3] text-[#B95509]",
     },
     {
       label: "Today's sales",
@@ -1081,7 +1081,7 @@ function OverviewPanel({ data, slug }: { data: any; slug: string }) {
               onClick={() => go("orders")}
               className="flex w-full items-center gap-3 rounded-xl border border-[#eadccf] bg-[#fffaf5] p-3 text-left hover:bg-[#f8ecdf]"
             >
-              <ClipboardList className="h-5 w-5 text-[#c84630]" />
+              <ClipboardList className="h-5 w-5 text-[#B95509]" />
               <div>
                 <p className="text-sm font-bold">Manage orders</p>
                 <p className="text-xs text-[#8e6d59]">
@@ -1093,7 +1093,7 @@ function OverviewPanel({ data, slug }: { data: any; slug: string }) {
               onClick={() => go("menu")}
               className="flex w-full items-center gap-3 rounded-xl border border-[#eadccf] bg-[#fffaf5] p-3 text-left hover:bg-[#f8ecdf]"
             >
-              <UtensilsCrossed className="h-5 w-5 text-[#c84630]" />
+              <UtensilsCrossed className="h-5 w-5 text-[#B95509]" />
               <div>
                 <p className="text-sm font-bold">Menu studio</p>
                 <p className="text-xs text-[#8e6d59]">
@@ -1105,7 +1105,7 @@ function OverviewPanel({ data, slug }: { data: any; slug: string }) {
               onClick={() => go("integrations")}
               className="flex w-full items-center gap-3 rounded-xl border border-[#eadccf] bg-[#fffaf5] p-3 text-left hover:bg-[#f8ecdf]"
             >
-              <AlertCircle className="h-5 w-5 text-[#c84630]" />
+              <AlertCircle className="h-5 w-5 text-[#B95509]" />
               <div>
                 <p className="text-sm font-bold">Integrations</p>
                 <p className="text-xs text-[#8e6d59]">
@@ -1238,7 +1238,7 @@ const OrderDesktopRow = memo(function OrderDesktopRow({
           onClick={() => onToggleExpand(order.id)}
           aria-expanded={expanded}
           aria-label={`${expanded ? "Hide" : "Show"} details for order ${order.orderNumber}`}
-          className="text-left font-extrabold text-[#382719] underline decoration-dotted decoration-[#c9a88f] underline-offset-4 hover:text-[#c84630]"
+          className="text-left font-extrabold text-[#382719] underline decoration-dotted decoration-[#c9a88f] underline-offset-4 hover:text-[#B95509]"
         >
           {order.orderNumber}
         </button>
@@ -1706,7 +1706,7 @@ const MenuItemRow = memo(function MenuItemRow({
 }) {
   return (
     <div className="flex items-center gap-4">
-      <input type="checkbox" aria-label={`Select ${item.name}`} checked={selected} onChange={() => onToggleSelect(item.id)} className="shrink-0 accent-[#c84630]" />
+      <input type="checkbox" aria-label={`Select ${item.name}`} checked={selected} onChange={() => onToggleSelect(item.id)} className="shrink-0 accent-[#B95509]" />
       {item.imageUrl ? (
         <img src={item.imageUrl} alt="" className="h-10 w-10 shrink-0 rounded-lg object-cover border border-[#eadccf]" />
       ) : (
@@ -1737,7 +1737,7 @@ const MenuItemRow = memo(function MenuItemRow({
             if (!e.target.checked && !window.confirm(`Hide "${item.name}" from the storefront?`)) return;
             onToggle(item.id, e.target.checked);
           }} disabled={listPending} className="peer sr-only" />
-          <div className="h-6 w-11 rounded-full bg-gray-200 after:absolute after:left-[2px] after:top-[2px] after:h-5 after:w-5 after:rounded-full after:bg-white after:transition-all peer-checked:bg-[#c84630] after:peer-checked:translate-x-full" />
+          <div className="h-6 w-11 rounded-full bg-gray-200 after:absolute after:left-[2px] after:top-[2px] after:h-5 after:w-5 after:rounded-full after:bg-white after:transition-all peer-checked:bg-[#B95509] after:peer-checked:translate-x-full" />
         </label>
         <label className="sr-only" htmlFor={`avail-${item.id}`}>Availability for {item.name}</label>
         <select
@@ -2042,7 +2042,7 @@ function MenuPanel({
             </div>
             {items.length > 0 && (
               <label className="flex min-h-11 cursor-pointer items-center gap-2 rounded-xl border border-[#e8d6c5] bg-white px-3 text-xs font-bold text-[#856652]">
-                <input type="checkbox" aria-label="Select all dishes" checked={selectedIds.size === items.length && items.length > 0} onChange={toggleAll} className="accent-[#c84630]" />
+                <input type="checkbox" aria-label="Select all dishes" checked={selectedIds.size === items.length && items.length > 0} onChange={toggleAll} className="accent-[#B95509]" />
                 All
               </label>
             )}
@@ -2062,7 +2062,7 @@ function MenuPanel({
         <div className="divide-y divide-[#f0e4d9]">
           {(data.items ?? []).length === 0 ? (
             <div className="p-10 text-center">
-              <UtensilsCrossed className="mx-auto h-8 w-8 text-[#c84630]" />
+              <UtensilsCrossed className="mx-auto h-8 w-8 text-[#B95509]" />
               <p className="mt-3 text-sm font-extrabold text-[#593f2d]">No dishes yet</p>
               <p className="mt-1 text-xs text-[#91725e]">Add your first dish from the panel, or import the whole menu as CSV.</p>
             </div>
@@ -2090,7 +2090,7 @@ function MenuPanel({
                         <button type="button" aria-label="Remove dish photo" onClick={() => setEditForm({ ...editForm, imageUrl: null })} className="absolute right-0.5 top-0.5 grid h-5 w-5 place-items-center rounded-full bg-red-500 text-white"><X className="h-3 w-3" /></button>
                       </div>
                     ) : (
-                      <label className="flex h-14 w-14 shrink-0 cursor-pointer items-center justify-center rounded-lg border-2 border-dashed border-[#d9b89e] hover:border-[#c84630]">
+                      <label className="flex h-14 w-14 shrink-0 cursor-pointer items-center justify-center rounded-lg border-2 border-dashed border-[#d9b89e] hover:border-[#B95509]">
                         <Plus className="h-4 w-4 text-[#a37d64]" />
                         <input type="file" accept="image/jpeg,image/png,image/webp" aria-label="Upload dish photo" className="hidden" onChange={(e) => { const file = e.target.files?.[0]; e.target.value = ""; if (file) void handleImageUpload(file, "edit", restaurantId); }} />
                       </label>
@@ -2112,12 +2112,12 @@ function MenuPanel({
                   </div>
                   <div className="flex items-center gap-3">
                     <label className="flex items-center gap-1.5 text-xs font-bold text-[#5c4332]">
-                      <input type="checkbox" checked={editForm.isBestseller ?? false} onChange={(e) => setEditForm({ ...editForm, isBestseller: e.target.checked })} className="accent-[#c84630]" />
+                      <input type="checkbox" checked={editForm.isBestseller ?? false} onChange={(e) => setEditForm({ ...editForm, isBestseller: e.target.checked })} className="accent-[#B95509]" />
                       Bestseller
                     </label>
                     <div className="ml-auto flex gap-2">
                       <Button onClick={() => setEditingId(null)} variant="outline" className="h-8 rounded-lg border-[#dfcbb9] text-xs font-bold">Cancel</Button>
-                      <Button onClick={saveEdit} disabled={listPending} className="h-8 rounded-lg bg-[#C84630] text-xs font-bold text-white">Save</Button>
+                      <Button onClick={saveEdit} disabled={listPending} className="h-8 rounded-lg bg-[#B95509] text-xs font-bold text-white">Save</Button>
                     </div>
                   </div>
                 </div>
@@ -2491,7 +2491,7 @@ function CouponsPanel({
           <Button
             onClick={onSave}
             disabled={savePending}
-            className="h-11 w-full rounded-xl bg-[#c84630] font-extrabold hover:bg-[#ad3627]"
+            className="h-11 w-full rounded-xl bg-[#B95509] font-extrabold hover:bg-[#9C4A07]"
           >
             <TicketPercent className="mr-2 h-4 w-4" />
             {savePending ? "Saving..." : "Save offer"}
@@ -2515,7 +2515,7 @@ function CouponsPanel({
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div>
-                      <p className="font-extrabold tracking-wide text-[#c84630]">
+                      <p className="font-extrabold tracking-wide text-[#B95509]">
                         {coupon.code}
                       </p>
                       <p className="mt-1 text-sm text-[#71513e]">
@@ -2572,7 +2572,7 @@ function CouponsPanel({
             })
           ) : (
             <div className="rounded-2xl border border-dashed border-[#dbc3b0] bg-[#fff9f3] p-10 text-center">
-              <TicketPercent className="mx-auto h-8 w-8 text-[#c84630]" />
+              <TicketPercent className="mx-auto h-8 w-8 text-[#B95509]" />
               <p className="font-display mt-3 text-xl text-[#593f2d]">No offers yet</p>
               <p className="mt-1 text-sm text-[#91725e]">Create your first coupon from the panel — it goes live immediately.</p>
             </div>
@@ -2675,7 +2675,7 @@ function CustomersPanel({ restaurantId }: { restaurantId: string }) {
       <div className="space-y-5">
         <button
           onClick={() => { setSelectedId(null); setNotes(""); }}
-          className="flex items-center gap-2 text-sm font-extrabold text-[#c84630] hover:underline"
+          className="flex items-center gap-2 text-sm font-extrabold text-[#B95509] hover:underline"
         >
           ← Back to customers
         </button>
@@ -2719,12 +2719,12 @@ function CustomersPanel({ restaurantId }: { restaurantId: string }) {
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
             placeholder="Add private notes about this customer..."
-            className="mt-3 min-h-20 w-full rounded-xl border border-[#ddc6b5] bg-[#fff9f3] p-3 text-sm outline-none focus:ring-2 focus:ring-[#c84630]"
+            className="mt-3 min-h-20 w-full rounded-xl border border-[#ddc6b5] bg-[#fff9f3] p-3 text-sm outline-none focus:ring-2 focus:ring-[#B95509]"
           />
           <Button
             onClick={() => updateNotes.mutate({ customerId: selectedId, notes })}
             disabled={updateNotes.isPending}
-            className="mt-3 h-10 rounded-xl bg-[#c84630] px-4 text-xs font-extrabold hover:bg-[#ad3627]"
+            className="mt-3 h-10 rounded-xl bg-[#B95509] px-4 text-xs font-extrabold hover:bg-[#9C4A07]"
           >
             <Save className="mr-1.5 h-3.5 w-3.5" /> {updateNotes.isPending ? "Saving..." : "Save notes"}
           </Button>
@@ -2777,7 +2777,7 @@ function CustomersPanel({ restaurantId }: { restaurantId: string }) {
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
             placeholder="Search by name, phone, or email..."
-            className="h-11 min-h-11 w-full rounded-xl border border-[#ddc6b5] bg-white pl-10 pr-4 text-sm outline-none focus:ring-2 focus:ring-[#c84630]"
+            className="h-11 min-h-11 w-full rounded-xl border border-[#ddc6b5] bg-white pl-10 pr-4 text-sm outline-none focus:ring-2 focus:ring-[#B95509]"
           />
         </div>
       </div>
@@ -2795,7 +2795,7 @@ function CustomersPanel({ restaurantId }: { restaurantId: string }) {
         />
       ) : list.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-[#dbc3b0] bg-[#fff9f3] p-10 text-center">
-          <Users className="mx-auto h-8 w-8 text-[#c84630]" />
+          <Users className="mx-auto h-8 w-8 text-[#B95509]" />
           <p className="mt-3 font-display text-xl text-[#593f2d]">No customers yet</p>
           <p className="mt-1 text-sm text-[#91725e]">Customers will appear here once they place their first order.</p>
         </div>
@@ -2834,7 +2834,7 @@ function initRestaurantForm(restaurant: any) {
     cuisineSummary: restaurant.cuisineSummary ?? "",
     description: restaurant.description ?? "",
     logoUrl: restaurant.logoUrl ?? "",
-    primaryColor: restaurant.primaryColor ?? "#c84630",
+    primaryColor: restaurant.primaryColor ?? "#B95509",
     deliveryFee: String((restaurant.deliveryFeePaise ?? 0) / 100),
     packagingFee: String((restaurant.packagingFeePaise ?? 0) / 100),
     minOrder: String((restaurant.minOrderPaise ?? 0) / 100),
@@ -2981,7 +2981,7 @@ function RestaurantPanel({
                 <Store className="h-5 w-5" />
               </span>
             )}
-            <label className="inline-flex min-h-[44px] cursor-pointer items-center rounded-xl border border-[#ddc6b5] bg-white px-4 text-sm font-extrabold text-[#704d37] hover:border-[#c84630] hover:text-[#c84630]">
+            <label className="inline-flex min-h-[44px] cursor-pointer items-center rounded-xl border border-[#ddc6b5] bg-white px-4 text-sm font-extrabold text-[#704d37] hover:border-[#B95509] hover:text-[#B95509]">
               {logoUploading ? "Uploading…" : "Upload image"}
               <input
                 type="file"
@@ -3011,7 +3011,7 @@ function RestaurantPanel({
           <div className="flex items-center gap-2">
             <input
               type="color"
-              value={/^#[0-9A-Fa-f]{6}$/.test(form.primaryColor) ? form.primaryColor : "#c84630"}
+              value={/^#[0-9A-Fa-f]{6}$/.test(form.primaryColor) ? form.primaryColor : "#B95509"}
               onChange={(e) => setForm({ ...form, primaryColor: e.target.value })}
               aria-label="Primary color picker"
               className="h-10 w-12 shrink-0 cursor-pointer rounded-lg border border-[#ddc6b5] bg-white p-1"
@@ -3100,7 +3100,7 @@ function RestaurantPanel({
           onChange={(e) =>
             setForm({ ...form, description: e.target.value })
           }
-          className="mt-2 min-h-24 w-full rounded-xl border border-[#ddc6b5] bg-white p-3 text-sm outline-none focus:ring-2 focus:ring-[#c84630]"
+          className="mt-2 min-h-24 w-full rounded-xl border border-[#ddc6b5] bg-white p-3 text-sm outline-none focus:ring-2 focus:ring-[#B95509]"
         />
       </label>
       <div className="mt-4 grid gap-4 sm:grid-cols-3">
@@ -3146,7 +3146,7 @@ function RestaurantPanel({
       <Button
         onClick={save}
         disabled={savePending}
-        className="mt-6 h-11 rounded-xl bg-[#c84630] px-5 font-extrabold hover:bg-[#ad3627]"
+        className="mt-6 h-11 rounded-xl bg-[#B95509] px-5 font-extrabold hover:bg-[#9C4A07]"
       >
         <Save className="mr-2 h-4 w-4" />
         {savePending ? "Saving..." : "Save restaurant"}
@@ -3193,7 +3193,7 @@ function Toggle({
         role="switch"
         aria-checked={checked}
         aria-label={label}
-        className="h-4 w-4 accent-[#c84630]"
+        className="h-4 w-4 accent-[#B95509]"
       />
     </label>
   );
@@ -3234,7 +3234,7 @@ function InvoiceButton({ orderId }: { orderId: string }) {
       onClick={handlePrint}
       disabled={isLoading}
       aria-label="Print invoice"
-      className="rounded-lg border border-[#ddc6b5] bg-white px-2 py-1.5 text-[10px] font-bold text-[#9d3727] hover:bg-[#fdf5ef] disabled:opacity-50"
+      className="rounded-lg border border-[#ddc6b5] bg-white px-2 py-1.5 text-[10px] font-bold text-[#B95509] hover:bg-[#fdf5ef] disabled:opacity-50"
     >
       {isLoading ? "Loading..." : "Invoice"}
     </button>
@@ -3244,7 +3244,7 @@ function InvoiceButton({ orderId }: { orderId: string }) {
 function EmptyKitchen() {
   return (
     <div className="rounded-xl border border-dashed border-[#dbc3b0] bg-[#fff9f3] p-5 text-center">
-      <CookingPot className="mx-auto h-6 w-6 text-[#c84630]" />
+      <CookingPot className="mx-auto h-6 w-6 text-[#B95509]" />
       <p className="mt-3 text-sm font-extrabold text-[#593f2d]">
         The counter is clear for now
       </p>

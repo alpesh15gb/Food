@@ -156,7 +156,7 @@ export default function LoyaltyPanel({ restaurantId }: { restaurantId: string })
       {/* Program Config */}
       <form onSubmit={handleSave} className="rounded-xl border bg-card p-6 space-y-6">
         <div className="flex items-center gap-3">
-          <Award className="h-5 w-5 text-[#9d3727]" />
+          <Award className="h-5 w-5 text-[#B95509]" />
           <h2 className="font-semibold">Program Configuration</h2>
         </div>
 
@@ -191,7 +191,7 @@ export default function LoyaltyPanel({ restaurantId }: { restaurantId: string })
           </div>
         </div>
 
-        <button type="submit" disabled={upsertMutation.isPending} className="flex items-center gap-2 rounded-lg bg-[#9d3727] px-4 py-2 text-sm font-bold text-white hover:bg-[#7c2b1e] disabled:opacity-50">
+        <button type="submit" disabled={upsertMutation.isPending} className="flex items-center gap-2 rounded-lg bg-[#B95509] px-4 py-2 text-sm font-bold text-white hover:bg-[#7E3C05] disabled:opacity-50">
           <Save className="h-4 w-4" />
           {upsertMutation.isPending ? "Saving..." : "Save Configuration"}
         </button>

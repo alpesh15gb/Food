@@ -375,7 +375,7 @@ function DashboardLayoutContent({
                       isActive={isActive}
                       onClick={() => setLocation(pathFor(item.section))}
                       tooltip={item.label}
-                      className={`h-11 rounded-xl transition-all font-semibold ${isActive ? "bg-[#f9e4d5] text-[#9d3727] hover:bg-[#f9e4d5]" : "text-[#6d5140] hover:bg-[#f8eee6]"}`}
+                      className={`h-11 rounded-xl transition-all font-semibold ${isActive ? "bg-[#f9e4d5] text-[#B95509] hover:bg-[#f9e4d5]" : "text-[#6d5140] hover:bg-[#f8eee6]"}`}
                     >
                       <item.icon
                         className={`h-4 w-4 ${isActive ? "text-primary" : ""}`}
@@ -433,7 +433,7 @@ function DashboardLayoutContent({
         {isMobile && (
           <div className="sticky top-0 z-40 flex h-16 items-center justify-between border-b border-[#eadccf] bg-[#fffdf9]/95 px-4 backdrop-blur">
             <div className="min-w-0"><p className="text-[9px] font-extrabold uppercase tracking-[0.16em] text-[#a06e53]">Kitchen Admin</p><span className="font-display block truncate text-xl text-[#3f2c20]">{sectionTitle(section)}</span></div>
-            <SidebarTrigger className="h-10 w-10 rounded-xl border border-[#e4cdbb] bg-[#fff8f0] text-[#9d3727]" aria-label="Open operations navigation"><Menu className="h-5 w-5" /></SidebarTrigger>
+            <SidebarTrigger className="h-10 w-10 rounded-xl border border-[#e4cdbb] bg-[#fff8f0] text-[#B95509]" aria-label="Open operations navigation"><Menu className="h-5 w-5" /></SidebarTrigger>
           </div>
         )}
         <main className="flex-1 p-0 pb-24 md:p-0 md:pb-0">{children}</main>
@@ -448,7 +448,7 @@ function DashboardLayoutContent({
                     onClick={() => setLocation(pathFor(item.section))}
                     aria-label={`Go to ${item.label}`}
                     aria-current={active ? "page" : undefined}
-                    className={`flex min-h-14 flex-col items-center justify-center gap-1 rounded-xl text-[10px] font-extrabold transition-colors ${active ? "bg-[#f8e3d4] text-[#aa3e2c]" : "text-[#856552]"}`}
+                    className={`flex min-h-14 flex-col items-center justify-center gap-1 rounded-xl text-[10px] font-extrabold transition-colors ${active ? "bg-[#f8e3d4] text-[#9C4A07]" : "text-[#856552]"}`}
                   >
                     <item.icon className="h-4 w-4" aria-hidden />
                     {item.label}
@@ -491,7 +491,7 @@ function DashboardLayoutContent({
                                     setMoreOpen(false);
                                   }}
                                   aria-current={active ? "page" : undefined}
-                                  className={`flex min-h-14 items-center gap-3 rounded-xl border px-3 text-left text-xs font-extrabold ${active ? "border-[#c84630] bg-[#f8e3d4] text-[#aa3e2c]" : "border-[#eadccf] bg-white text-[#6d5140]"}`}
+                                  className={`flex min-h-14 items-center gap-3 rounded-xl border px-3 text-left text-xs font-extrabold ${active ? "border-[#B95509] bg-[#f8e3d4] text-[#9C4A07]" : "border-[#eadccf] bg-white text-[#6d5140]"}`}
                                 >
                                   <item.icon className="h-4 w-4 shrink-0" aria-hidden />
                                   {item.label}

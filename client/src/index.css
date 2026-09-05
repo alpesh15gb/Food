@@ -1,4 +1,4 @@
-/* Market Table design: rice-paper surfaces, tamarind-red actions, and subtle ticket textures. */
+/* Market Table design: rice-paper surfaces, burnt-orange actions, and subtle ticket textures. */
 @import "tailwindcss";
 @import "tw-animate-css";
 
@@ -36,10 +36,10 @@
 }
 
 :root {
-  --primary: oklch(0.53 0.16 31);
+  --primary: oklch(0.55 0.14 58);
   --primary-foreground: oklch(0.99 0.01 75);
   --chart-1: oklch(0.72 0.12 55);
-  --chart-2: oklch(0.53 0.16 31);
+  --chart-2: oklch(0.55 0.14 58);
   --chart-3: oklch(0.42 0.1 120);
   --chart-4: oklch(0.76 0.08 80);
   --chart-5: oklch(0.32 0.03 55);
@@ -60,7 +60,7 @@
   --destructive-foreground: oklch(0.99 0.01 75);
   --border: oklch(0.89 0.018 75);
   --input: oklch(0.89 0.018 75);
-  --ring: oklch(0.53 0.16 31);
+  --ring: oklch(0.55 0.14 58);
 }
 
 .dark {
@@ -86,7 +86,7 @@
   body { @apply bg-background text-foreground; font-family: "Manrope", sans-serif; font-size: 0.875rem; line-height: 1.5; }
   button:not(:disabled), [role="button"]:not([aria-disabled="true"]), [type="button"]:not(:disabled), [type="submit"]:not(:disabled), [type="reset"]:not(:disabled), a[href], select:not(:disabled), input[type="checkbox"]:not(:disabled), input[type="radio"]:not(:disabled) { @apply cursor-pointer; }
   /* Global keyboard-focus indicator (never remove outlines without a replacement). */
-  :focus-visible { outline: 2px solid var(--color-primary, #c84630); outline-offset: 2px; }
+  :focus-visible { outline: 2px solid var(--color-primary, #B95509); outline-offset: 2px; }
 }
 
 /* Dynamic storefront theming: the ordering app sets --theme-primary /
