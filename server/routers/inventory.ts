@@ -13,14 +13,15 @@ export const inventoryRouter = router({
       const { eq, asc } = await import("drizzle-orm");
       return db.select().from(rawMaterials)
         .where(eq(rawMaterials.restaurantId, input.restaurantId))
-        .orderBy(asc(rawMaterials.name));
+        .orderBy(asc(rawMaterials.name))
+        .limit(500);
     }),
 
   createMaterial: requirePermission("menu:write").input(z.object({
     restaurantId: z.string().min(4),
-    name: z.string().min(1).max(180),
+    name: z.string().trim().min(1).max(180),
     unit: z.string().min(1).max(16),
-    minStock: z.number().min(0).optional(),
+    minStock: z.number().finite().min(0).optional(),
     costPerUnitPaise: z.number().int().min(0).optional(),
     supplierId: z.string().optional(),
     category: z.string().max(64).optional(),
@@ -28,7 +29,14 @@ export const inventoryRouter = router({
     .mutation(async ({ input }) => {
       const db = await import("../db").then(m => m.getDb());
       if (!db) throw new Error("Database unavailable");
-      const { rawMaterials } = await import("../../drizzle/schema");
+      const { rawMaterials, suppliers } = await import("../../drizzle/schema");
+      const { eq } = await import("drizzle-orm");
+      if (input.supplierId) {
+        const [sup] = await db.select().from(suppliers).where(eq(suppliers.id, input.supplierId)).limit(1);
+        if (!sup || sup.restaurantId !== input.restaurantId) {
+          throw new Error("Supplier does not belong to this restaurant.");
+        }
+      }
       const { nanoid } = await import("nanoid");
       const id = nanoid(18);
       await db.insert(rawMaterials).values({
@@ -46,6 +54,7 @@ export const inventoryRouter = router({
 
   updateMaterial: requirePermission("menu:write").input(z.object({
     id: z.string().min(4),
+    restaurantId: z.string().min(4).optional(),
     name: z.string().min(1).max(180).optional(),
     unit: z.string().min(1).max(16).optional(),
     minStock: z.number().min(0).optional(),
@@ -53,11 +62,23 @@ export const inventoryRouter = router({
     supplierId: z.string().nullish(),
     category: z.string().max(64).nullish(),
   }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
       const db = await import("../db").then(m => m.getDb());
       if (!db) throw new Error("Database unavailable");
-      const { rawMaterials } = await import("../../drizzle/schema");
-      const { eq } = await import("drizzle-orm");
+      const { rawMaterials, suppliers } = await import("../../drizzle/schema");
+      const { eq, and } = await import("drizzle-orm");
+      const scopeId = input.restaurantId ?? ctx.restaurantId;
+      const [existing] = await db.select().from(rawMaterials).where(eq(rawMaterials.id, input.id)).limit(1);
+      if (!existing) throw new Error("Material not found.");
+      if (scopeId && existing.restaurantId !== scopeId) {
+        throw new Error("Material does not belong to this restaurant.");
+      }
+      if (input.supplierId) {
+        const [sup] = await db.select().from(suppliers).where(eq(suppliers.id, input.supplierId)).limit(1);
+        if (!sup || sup.restaurantId !== existing.restaurantId) {
+          throw new Error("Supplier does not belong to this restaurant.");
+        }
+      }
       const updates: Record<string, unknown> = {};
       if (input.name !== undefined) updates.name = input.name;
       if (input.unit !== undefined) updates.unit = input.unit;
@@ -65,7 +86,7 @@ export const inventoryRouter = router({
       if (input.costPerUnitPaise !== undefined) updates.costPerUnitPaise = input.costPerUnitPaise;
       if (input.supplierId !== undefined) updates.supplierId = input.supplierId;
       if (input.category !== undefined) updates.category = input.category;
-      await db.update(rawMaterials).set(updates).where(eq(rawMaterials.id, input.id));
+      await db.update(rawMaterials).set(updates).where(and(eq(rawMaterials.id, input.id), eq(rawMaterials.restaurantId, existing.restaurantId)));
       return { success: true };
     }),
 
@@ -73,7 +94,7 @@ export const inventoryRouter = router({
   recordWastage: requirePermission("menu:write").input(z.object({
     materialId: z.string().min(4),
     restaurantId: z.string().min(4),
-    quantity: z.number().positive(),
+    quantity: z.number().finite().positive(),
     reason: z.string().max(500).optional(),
   }))
     .mutation(async ({ input }) => {
@@ -83,10 +104,13 @@ export const inventoryRouter = router({
       const { eq, and, sql } = await import("drizzle-orm");
       const { nanoid } = await import("nanoid");
 
-      // Validate sufficient stock before deducting
-      const [material] = await db.select({ currentStock: rawMaterials.currentStock })
+      // Validate sufficient stock before deducting + tenant ownership.
+      const [material] = await db.select({ currentStock: rawMaterials.currentStock, restaurantId: rawMaterials.restaurantId })
         .from(rawMaterials).where(eq(rawMaterials.id, input.materialId)).limit(1);
       if (!material) throw new Error("Material not found.");
+      if (material.restaurantId !== input.restaurantId) {
+        throw new Error("Material does not belong to this restaurant.");
+      }
       if (parseFloat(String(material.currentStock)) < input.quantity) {
         throw new Error(`Insufficient stock. Available: ${material.currentStock}, requested: ${input.quantity}`);
       }
@@ -119,7 +143,7 @@ export const inventoryRouter = router({
   adjustStock: requirePermission("menu:write").input(z.object({
     materialId: z.string().min(4),
     restaurantId: z.string().min(4),
-    quantity: z.number(),
+    quantity: z.number().finite(),
     notes: z.string().max(500).optional(),
   }))
     .mutation(async ({ input }) => {
@@ -129,6 +153,15 @@ export const inventoryRouter = router({
       const { eq, and, sql } = await import("drizzle-orm");
       const { nanoid } = await import("nanoid");
 
+      if (!Number.isFinite(input.quantity) || input.quantity === 0) {
+        throw new Error("Quantity must be a non-zero number.");
+      }
+      const [owner] = await db.select({ restaurantId: rawMaterials.restaurantId })
+        .from(rawMaterials).where(eq(rawMaterials.id, input.materialId)).limit(1);
+      if (!owner) throw new Error("Material not found.");
+      if (owner.restaurantId !== input.restaurantId) {
+        throw new Error("Material does not belong to this restaurant.");
+      }
       const absQty = Math.abs(input.quantity);
       // H-11: Atomic stock adjustment — deductions guarded by WHERE stock >= qty.
       if (input.quantity < 0) {
@@ -189,14 +222,15 @@ export const inventoryRouter = router({
       const { eq, asc } = await import("drizzle-orm");
       return db.select().from(suppliers)
         .where(eq(suppliers.restaurantId, input.restaurantId))
-        .orderBy(asc(suppliers.name));
+        .orderBy(asc(suppliers.name))
+        .limit(500);
     }),
 
   createSupplier: requirePermission("menu:write").input(z.object({
     restaurantId: z.string().min(4),
-    name: z.string().min(1).max(180),
-    phone: z.string().max(24).optional(),
-    email: z.string().email().max(320).optional(),
+    name: z.string().trim().min(1).max(180),
+    phone: z.string().trim().max(24).optional(),
+    email: z.string().trim().email().max(320).optional(),
     address: z.string().max(500).optional(),
   }))
     .mutation(async ({ input }) => {
@@ -212,13 +246,19 @@ export const inventoryRouter = router({
   // ===========================================================================
   // Recipes
   // ===========================================================================
-  getRecipe: requirePermission("menu:read").input(z.object({ menuItemId: z.string().min(4) }))
-    .query(async ({ input }) => {
+  getRecipe: requirePermission("menu:read").input(z.object({ menuItemId: z.string().min(4), restaurantId: z.string().min(4).optional() }))
+    .query(async ({ ctx, input }) => {
       const db = await import("../db").then(m => m.getDb());
       if (!db) return null;
-      const { recipes, recipeIngredients, rawMaterials } = await import("../../drizzle/schema");
+      const { recipes, recipeIngredients, rawMaterials, menuItems } = await import("../../drizzle/schema");
       const { eq } = await import("drizzle-orm");
 
+      const scopeId = input.restaurantId ?? ctx.restaurantId;
+      if (scopeId) {
+        const [menuItem] = await db.select().from(menuItems).where(eq(menuItems.id, input.menuItemId)).limit(1);
+        if (!menuItem) return null;
+        if (menuItem.restaurantId !== scopeId) throw new Error("Menu item does not belong to this restaurant.");
+      }
       const [recipe] = await db.select().from(recipes)
         .where(eq(recipes.menuItemId, input.menuItemId)).limit(1);
       if (!recipe) return null;
@@ -239,20 +279,34 @@ export const inventoryRouter = router({
 
   saveRecipe: requirePermission("menu:write").input(z.object({
     menuItemId: z.string().min(4),
-    notes: z.string().optional(),
+    restaurantId: z.string().min(4).optional(),
+    notes: z.string().max(2000).optional(),
     ingredients: z.array(z.object({
       rawMaterialId: z.string().min(4),
-      quantityPerServing: z.number().positive(),
+      quantityPerServing: z.number().finite().positive(),
       unit: z.string().min(1).max(16),
-    })),
+    })).max(100),
   }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
       const db = await import("../db").then(m => m.getDb());
       if (!db) throw new Error("Database unavailable");
-      const { recipes, recipeIngredients } = await import("../../drizzle/schema");
-      const { eq } = await import("drizzle-orm");
+      const { recipes, recipeIngredients, menuItems, rawMaterials } = await import("../../drizzle/schema");
+      const { eq, inArray } = await import("drizzle-orm");
       const { nanoid } = await import("nanoid");
 
+      const scopeId = input.restaurantId ?? ctx.restaurantId;
+      const [menuItem] = await db.select().from(menuItems).where(eq(menuItems.id, input.menuItemId)).limit(1);
+      if (!menuItem) throw new Error("Menu item not found.");
+      if (scopeId && menuItem.restaurantId !== scopeId) {
+        throw new Error("Menu item does not belong to this restaurant.");
+      }
+      if (input.ingredients.length > 0) {
+        const ids = Array.from(new Set(input.ingredients.map(i => i.rawMaterialId)));
+        const mats = await db.select().from(rawMaterials).where(inArray(rawMaterials.id, ids));
+        if (mats.length !== ids.length || mats.some(m => m.restaurantId !== menuItem.restaurantId)) {
+          throw new Error("All ingredients must belong to the same restaurant as the menu item.");
+        }
+      }
       const [existing] = await db.select().from(recipes)
         .where(eq(recipes.menuItemId, input.menuItemId)).limit(1);
 
@@ -301,7 +355,8 @@ export const inventoryRouter = router({
         .from(purchaseOrders)
         .leftJoin(suppliers, eq(purchaseOrders.supplierId, suppliers.id))
         .where(eq(purchaseOrders.restaurantId, input.restaurantId))
-        .orderBy(desc(purchaseOrders.createdAt));
+        .orderBy(desc(purchaseOrders.createdAt))
+        .limit(200);
     }),
 
   receivePurchaseOrder: requirePermission("menu:write").input(z.object({ poId: z.string().min(4), restaurantId: z.string().min(4) }))

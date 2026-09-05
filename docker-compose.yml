@@ -12,7 +12,8 @@ services:
       # P0: never hardcode the password — must come from the environment.
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in your .env file or environment}
     ports:
-      - "5432:5432"
+      # Loopback-only: the dev database must never listen on the LAN.
+      - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:

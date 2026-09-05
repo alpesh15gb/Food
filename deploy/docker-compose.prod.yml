@@ -11,9 +11,12 @@ services:
       NODE_ENV: production
       PORT: 4300
       DATABASE_URL: postgresql://cloudkitchen:${POSTGRES_PASSWORD}@db:5432/cloudkitchen
-      ASSET_BASE_URL: /assets
+      ASSET_BASE_URL: ${ASSET_BASE_URL:-/assets}
       APP_ID: ${APP_ID:-cloudkitchen-direct}
       OWNER_OPEN_ID: ${OWNER_OPEN_ID:-}
+      OAUTH_SERVER_URL: ${OAUTH_SERVER_URL:-}
+      BUILT_IN_FORGE_API_URL: ${BUILT_IN_FORGE_API_URL:-}
+      BUILT_IN_FORGE_API_KEY: ${BUILT_IN_FORGE_API_KEY:-}
       PUBLIC_URL: ${PUBLIC_URL:-}
       PLATFORM_DOMAIN: ${PLATFORM_DOMAIN:-}
       FEATURED_STOREFRONT_NAME: ${FEATURED_STOREFRONT_NAME:-}
@@ -63,6 +66,7 @@ services:
 
   certbot:
     image: certbot/certbot
+    restart: unless-stopped
     volumes:
       - /var/www/certbot:/var/www/certbot
       - /etc/letsencrypt:/etc/letsencrypt

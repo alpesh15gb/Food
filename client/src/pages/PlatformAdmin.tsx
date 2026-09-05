@@ -1,6 +1,6 @@
 /** MunchPro platform operations — restaurant registry (platform host only). */
 import { useEffect } from "react";
-import { useLocation } from "wouter";
+import { Link, useLocation } from "wouter";
 import { ExternalLink, Globe, Plus, Store, Wrench } from "lucide-react";
 import { AdminError, adminPath } from "@/components/DashboardLayout";
 import { Button } from "@/components/ui/button";
@@ -72,10 +72,10 @@ function RestaurantCard({ r }: { r: RegistryRow }) {
             variant="outline"
             className="min-h-[44px] flex-1 border-[#e7d2bf] bg-white font-bold"
           >
-            <a href={adminPath(r.slug, "domains")}>
+            <Link href={adminPath(r.slug, "domains")}>
               <ExternalLink className="mr-2 h-4 w-4" aria-hidden="true" />
               Domains
-            </a>
+            </Link>
           </Button>
         </div>
       </div>

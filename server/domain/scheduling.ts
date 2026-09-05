@@ -30,10 +30,13 @@ function getISTTimeMinutes(date: Date): number {
 
 /**
  * Parse a time string like "09:00" or "23:30" into minutes since midnight.
+ * Returns NaN for malformed input (callers fail closed).
  */
 function parseTimeToMinutes(time: string): number {
-  const [hours, minutes] = time.split(":").map(Number);
-  return (hours ?? 0) * 60 + (minutes ?? 0);
+  if (typeof time !== "string" || !/^\d{1,2}:\d{2}$/.test(time.trim())) return NaN;
+  const [h, m] = time.trim().split(":").map(Number);
+  if (!Number.isInteger(h) || !Number.isInteger(m) || h < 0 || h > 23 || m < 0 || m > 59) return NaN;
+  return h * 60 + m;
 }
 
 export type ScheduleRule = {
@@ -100,16 +103,21 @@ function doesScheduleRuleMatch(rule: ScheduleRule, now: Date): boolean {
   if (rule.openTime && rule.closeTime) {
     const openMin = parseTimeToMinutes(rule.openTime);
     const closeMin = parseTimeToMinutes(rule.closeTime);
+    if (!Number.isFinite(openMin) || !Number.isFinite(closeMin)) return false;
 
     if (closeMin > openMin) {
       // Normal schedule: 09:00 – 23:00
       return currentTimeMin >= openMin && currentTimeMin < closeMin;
     } else {
       // Cross-midnight: 22:00 – 02:00
+      if (rule.dayOfWeek == null) {
+        // Applies every day: open late evening OR early morning.
+        return currentTimeMin >= openMin || currentTimeMin < closeMin;
+      }
       // Check if current time is either:
       // 1. On the open day, after openTime, OR
       // 2. On the next day, before closeTime
-      const effectiveDay = rule.dayOfWeek ?? currentDay;
+      const effectiveDay = rule.dayOfWeek;
       if (currentDay === effectiveDay) {
         return currentTimeMin >= openMin;
       }
@@ -123,12 +131,16 @@ function doesScheduleRuleMatch(rule: ScheduleRule, now: Date): boolean {
 
   // Only openTime set: open from that time onwards
   if (rule.openTime) {
-    return currentTimeMin >= parseTimeToMinutes(rule.openTime);
+    const openMin = parseTimeToMinutes(rule.openTime);
+    if (!Number.isFinite(openMin)) return false;
+    return currentTimeMin >= openMin;
   }
 
   // Only closeTime set: open until that time
   if (rule.closeTime) {
-    return currentTimeMin < parseTimeToMinutes(rule.closeTime);
+    const closeMin = parseTimeToMinutes(rule.closeTime);
+    if (!Number.isFinite(closeMin)) return false;
+    return currentTimeMin < closeMin;
   }
 
   return true;
@@ -149,9 +161,13 @@ export function isScheduledOpen(schedules: ScheduleRule[], now: Date = new Date(
 export function isRestaurantOpen(config: RestaurantScheduleConfig, now: Date = new Date()): boolean {
   if (!config.isOpen) return false;
 
-  // Check temporary closure
-  if (config.tempClosureStart && config.tempClosureEnd) {
-    if (now >= config.tempClosureStart && now <= config.tempClosureEnd) return false;
+  // Temporary closure: closed from start onwards, until end when set.
+  // Handles open-ended closures (start set, no end) — fail closed.
+  if (config.tempClosureStart && now >= config.tempClosureStart) {
+    if (!config.tempClosureEnd || now <= config.tempClosureEnd) return false;
+  } else if (!config.tempClosureStart && config.tempClosureEnd && now <= config.tempClosureEnd) {
+    // End-only window (unusual): treat as closed until end.
+    return false;
   }
 
   return isScheduledOpen(config.schedules, now);
@@ -184,8 +200,8 @@ export function isItemScheduledAvailable(config: ItemScheduleConfig, now: Date =
 export function getNextOpenTime(schedules: ScheduleRule[], now: Date = new Date()): Date | null {
   if (!schedules.length) return null;
 
-  // Check each day for the next available time slot
-  for (let daysAhead = 0; daysAhead < 7; daysAhead++) {
+  // Check each day for the next available time slot (0..7 covers same weekday next week).
+  for (let daysAhead = 0; daysAhead <= 7; daysAhead++) {
     const checkDate = new Date(now.getTime() + daysAhead * 24 * 60 * 60 * 1000);
     const checkDay = getISTDayOfWeek(checkDate);
 
@@ -198,15 +214,25 @@ export function getNextOpenTime(schedules: ScheduleRule[], now: Date = new Date(
       if (!rule.openTime) continue;
 
       const openMin = parseTimeToMinutes(rule.openTime);
+      if (!Number.isFinite(openMin)) continue;
       const currentTimeMin = daysAhead === 0 ? getISTTimeMinutes(now) : 0;
 
       if (openMin > currentTimeMin || daysAhead > 0) {
-        const result = new Date(checkDate);
-        const istAdjusted = new Date(result.getTime() - IST_OFFSET_MS);
+        // Convert IST wall-clock (date of checkDate in IST + openMin) to a UTC instant.
+        const istDay = toIST(checkDate);
         const hours = Math.floor(openMin / 60);
         const mins = openMin % 60;
-        istAdjusted.setUTCHours(hours, mins, 0, 0);
-        return istAdjusted;
+        const utcMillis = Date.UTC(
+          istDay.getUTCFullYear(),
+          istDay.getUTCMonth(),
+          istDay.getUTCDate(),
+          hours,
+          mins,
+          0,
+          0
+        ) - IST_OFFSET_MS;
+        const candidate = new Date(utcMillis);
+        if (candidate.getTime() > now.getTime()) return candidate;
       }
     }
   }

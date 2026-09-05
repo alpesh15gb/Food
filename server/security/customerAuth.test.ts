@@ -8,9 +8,21 @@
 import { describe, expect, it, beforeEach } from "vitest";
 import { hashOtp, verifyOtpHash, isOtpSecretConfigured } from "./otpHash";
 import { normalizePhone, isValidIndianPhone, maskPhone } from "./phoneValidation";
-import { checkRateLimit, checkPhoneSendLimit, checkPhoneVerifyLimit } from "./rateLimit";
+import { checkRateLimit, checkPhoneSendLimit, checkPhoneVerifyLimit, clearAllRateLimitStores } from "./rateLimit";
 import { getOrCreateGuestUser } from "../db";
 import { nanoid } from "nanoid";
+
+// Rate-limit stores are process-global in-memory Maps. Clear before each test
+// so hardcoded phones cannot leak counts across tests / re-runs (previously
+// flaky when the suite ran twice in one process).
+beforeEach(() => clearAllRateLimitStores());
+
+/** Unique 10-digit Indian mobile per test to keep rate-limit buckets isolated. */
+function uniquePhone(prefix = "98"): string {
+  const rand = String(Math.floor(1_000_000 + Math.random() * 9_000_000));
+  const p = `${prefix}${rand}`;
+  return /^[6-9]\d{9}$/.test(p) ? p : `9${rand}`;
+}
 
 // =============================================================================
 // Issue 1: HMAC-SHA256 OTP Hashing
@@ -131,7 +143,7 @@ describe("Resend Cooldown", () => {
   });
 
   it("rate limiter enforces phone-specific send limit: 3 per 10 minutes", () => {
-    const phone = "9876543210";
+    const phone = uniquePhone();
     // First 3 requests should be allowed
     const r1 = checkPhoneSendLimit(phone);
     const r2 = checkPhoneSendLimit(phone);
@@ -146,8 +158,8 @@ describe("Resend Cooldown", () => {
   });
 
   it("different phones have independent rate limits", () => {
-    const phone1 = "9876543210";
-    const phone2 = "8765432109";
+    const phone1 = uniquePhone("96");
+    const phone2 = uniquePhone("97");
     // Use up phone1's limit
     for (let i = 0; i < 3; i++) checkPhoneSendLimit(phone1);
     // phone2 should still be allowed
@@ -161,7 +173,7 @@ describe("Resend Cooldown", () => {
 // =============================================================================
 describe("Rate Limiting", () => {
   it("verify rate limit: 10 per 10 minutes per phone", () => {
-    const phone = "9876543210";
+    const phone = uniquePhone();
     for (let i = 0; i < 10; i++) {
       const r = checkPhoneVerifyLimit(phone);
       expect(r.allowed).toBe(true);
@@ -270,15 +282,18 @@ describe("OTP Concurrency Safety", () => {
 // Issue 1 & 2: Server-Side Session Auth
 // =============================================================================
 describe("Server-Side Session Auth", () => {
-  it("verifyOtp sets HttpOnly session cookie", () => {
-    const cookieOptions = {
-      httpOnly: true,
-      secure: true,
-      sameSite: "none" as const,
-      maxAge: 1000 * 60 * 60 * 24 * 30, // 30 days
-    };
-    expect(cookieOptions.httpOnly).toBe(true);
-    expect(cookieOptions.secure).toBe(true);
+  it("verifyOtp sets HttpOnly SameSite=Strict session cookie (corrected: was 'none' pre-fix)", () => {
+    // STALE-EXPECTATION FIX (EAGLE-EYE): the old test hardcoded
+    // sameSite:"none" while server/_core/cookies.ts ships Strict for both
+    // admin (12h) and customer (30d) sessions. Assert the real helpers.
+    const customerOpts = getCustomerCookieOptions({} as any);
+    const adminOpts = getSessionCookieOptions({} as any);
+    expect(customerOpts.httpOnly).toBe(true);
+    expect(customerOpts.sameSite).toBe("strict");
+    expect(customerOpts.maxAge).toBe(1000 * 60 * 60 * 24 * 30);
+    expect(adminOpts.httpOnly).toBe(true);
+    expect(adminOpts.sameSite).toBe("strict");
+    expect(adminOpts.maxAge).toBe(1000 * 60 * 60 * 12);
   });
 
   it("customerMe reads session from cookie, not client input", () => {
@@ -538,8 +553,7 @@ describe("Guest Identity — Random, not phone-derived", () => {
 // =============================================================================
 describe("Rate Limiting — OTP endpoints", () => {
   it("phone send limit: 3 per 10 minutes", () => {
-    // Clear any prior state
-    const phone = `98${Date.now().toString().slice(-8)}`;
+    const phone = uniquePhone("98");
     // Allow first 3
     for (let i = 0; i < 3; i++) {
       const result = checkPhoneSendLimit(phone);
@@ -554,7 +568,7 @@ describe("Rate Limiting — OTP endpoints", () => {
   });
 
   it("phone verify limit: 10 per 10 minutes", () => {
-    const phone = `97${Date.now().toString().slice(-8)}`;
+    const phone = uniquePhone("97");
     for (let i = 0; i < 10; i++) {
       const result = checkPhoneVerifyLimit(phone);
       expect(result.allowed).toBe(true);
@@ -564,8 +578,9 @@ describe("Rate Limiting — OTP endpoints", () => {
   });
 
   it("different phones have independent limits", () => {
-    const phone1 = `96${Date.now().toString().slice(-7)}1`;
-    const phone2 = `96${Date.now().toString().slice(-7)}2`;
+    const phone1 = uniquePhone("96");
+    let phone2 = uniquePhone("96");
+    if (phone2 === phone1) phone2 = uniquePhone("95");
     // Exhaust phone1's limit
     for (let i = 0; i < 3; i++) checkPhoneSendLimit(phone1);
     const blocked1 = checkPhoneSendLimit(phone1);
@@ -680,5 +695,49 @@ describe("OTP Hashing Isolation", () => {
     // A completely different valid hash (wrong phone) does NOT verify
     const wrongHash = hashOtp('9999999999', 'login', '123456');
     expect(verifyOtpHash('9876543210', 'login', '123456', wrongHash)).toBe(false);
+  });
+});
+
+// =============================================================================
+// EAGLE-EYE regression locks (owned-file fixes)
+// =============================================================================
+describe("EAGLE-EYE Auth Hardening", () => {
+  it("normalizePhone strips trunk-0 prefix consistently with db.ts", () => {
+    expect(normalizePhone("09876543210")).toBe("9876543210");
+    expect(normalizePhone("+91 98765 43210")).toBe("9876543210");
+  });
+
+  it("dummy password hash is a valid v3 hash for timing-uniform login", async () => {
+    const { DUMMY_PASSWORD_HASH_FOR_TIMING, verifyPassword } = await import("./passwordHash");
+    expect(DUMMY_PASSWORD_HASH_FOR_TIMING.startsWith("v3:")).toBe(true);
+    // Wrong password fails, but burns real scrypt work (no throw).
+    await expect(verifyPassword("some-wrong-password", DUMMY_PASSWORD_HASH_FOR_TIMING)).resolves.toBe(false);
+  });
+
+  it("Secure cookie flag ignores spoofed X-Forwarded-Proto without trusted proxy", async () => {
+    const prevProxy = process.env.TRUSTED_PROXY;
+    const prevEnv = process.env.NODE_ENV;
+    try {
+      delete process.env.TRUSTED_PROXY;
+      process.env.NODE_ENV = "development";
+      const { getSessionCookieOptions } = await import("../_core/cookies");
+      const spoofed = getSessionCookieOptions({ headers: { "x-forwarded-proto": "https" } } as any);
+      expect(spoofed.secure).toBe(false);
+      process.env.TRUSTED_PROXY = "1";
+      const trusted = getSessionCookieOptions({ headers: { "x-forwarded-proto": "https" } } as any);
+      expect(trusted.secure).toBe(true);
+    } finally {
+      if (prevProxy === undefined) delete process.env.TRUSTED_PROXY;
+      else process.env.TRUSTED_PROXY = prevProxy;
+      process.env.NODE_ENV = prevEnv;
+    }
+  });
+
+  it("session verify tolerates empty name and clock skew (sdk)", async () => {
+    const { sdk } = await import("../_core/sdk");
+    const token = await sdk.signSession({ openId: "test_open", appId: "email-login", name: "" }, { expiresInMs: 60_000 });
+    const session = await sdk.verifySession(token);
+    expect(session?.openId).toBe("test_open");
+    expect(session?.name).toBe("");
   });
 });

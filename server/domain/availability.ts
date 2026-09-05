@@ -19,6 +19,7 @@ import {
   isRestaurantOpen,
   isCategoryActive,
   isItemScheduledAvailable,
+  isScheduledOpen,
   type RestaurantScheduleConfig,
   type CategoryScheduleConfig,
   type ItemScheduleConfig,
@@ -34,6 +35,7 @@ export type FullAvailabilityContext = {
   restaurant: RestaurantRow;
   restaurantSchedules: any[];
   outletActive: boolean;
+  outletSchedules?: any[];
   categoryActive: boolean;
   categorySchedules: any[];
   item: MenuItemRow;
@@ -141,21 +143,32 @@ export function checkItemAvailability(
 export function evaluateItemFullAvailability(
   context: FullAvailabilityContext
 ): AvailabilityResult {
-  const { restaurant, restaurantSchedules, outletActive, categoryActive,
-    categorySchedules, item, itemSchedules, now } = context;
+  const { restaurant, restaurantSchedules, outletActive, outletSchedules,
+    categoryActive, categorySchedules, item, itemSchedules, now } = context;
 
   // 1. Restaurant level
   const restCheck = checkRestaurantAvailability(restaurant, restaurantSchedules, now);
   if (!restCheck.isAvailable) return restCheck;
 
-  // 2. Outlet level
+  // 2. Outlet level (flag + optional schedule window; fail closed on bad schedules)
   if (!outletActive) {
     return { isAvailable: false, reason: "This outlet is not currently available", nextAvailableAt: null };
   }
+  if (outletSchedules && outletSchedules.length > 0) {
+    if (!isScheduledOpen(outletSchedules, now)) {
+      return { isAvailable: false, reason: "This outlet is not currently available", nextAvailableAt: null };
+    }
+  }
 
-  // 3. Category level
+  // 3. Category level (flag + schedule window — schedules are authoritative
+  // even when the caller precomputed categoryActive without them).
   if (!categoryActive) {
     return { isAvailable: false, reason: "Category not available at this time", nextAvailableAt: null };
+  }
+  if (categorySchedules && categorySchedules.length > 0) {
+    if (!isScheduledOpen(categorySchedules, now)) {
+      return { isAvailable: false, reason: "Category not available at this time", nextAvailableAt: null };
+    }
   }
 
   // 4. Item level
@@ -176,11 +189,13 @@ export function batchComputeAvailability(
   outletActive: boolean,
   categoryMap: Map<string, { isVisible: boolean; isOpen: boolean; schedules: any[] }>,
   itemScheduleMap: Map<string, any[]>,
-  now: Date = new Date()
+  now: Date = new Date(),
+  outletSchedules: any[] = []
 ): Map<string, AvailabilityResult> {
   const results = new Map<string, AvailabilityResult>();
 
   const restCheck = checkRestaurantAvailability(restaurant, restaurantSchedules, now);
+  const outletScheduleOpen = outletSchedules.length === 0 || isScheduledOpen(outletSchedules, now);
 
   for (const item of items) {
     if (!restCheck.isAvailable) {
@@ -188,7 +203,7 @@ export function batchComputeAvailability(
       continue;
     }
 
-    if (!outletActive) {
+    if (!outletActive || !outletScheduleOpen) {
       results.set(item.id, { isAvailable: false, reason: "Outlet not available", nextAvailableAt: null });
       continue;
     }

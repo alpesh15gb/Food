@@ -8,7 +8,7 @@
  */
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import { adminProcedure, requirePermission, router } from "../_core/trpc";
+import { adminProcedure, protectedProcedure, requirePermission, router, tenantAccessProcedure, checkTenantAccess } from "../_core/trpc";
 import {
   createMenuItem,
   getAdminDashboard,
@@ -109,7 +109,7 @@ export const adminRouter = router({
   // =========================================================================
   // Dashboard & Analytics
   // =========================================================================
-  dashboard: adminProcedure
+  dashboard: tenantAccessProcedure
     .input(z.object({ slug: z.string().min(2) }))
     .query(async ({ input }) => {
       const restaurant = await getRestaurantBySlug(input.slug);
@@ -117,12 +117,26 @@ export const adminRouter = router({
       return getAdminDashboard(restaurant.id);
     }),
 
-  restaurants: adminProcedure.query(() => getAllRestaurants()),
+  restaurants: protectedProcedure.query(async ({ ctx }) => {
+    // Platform operators see every restaurant; members see only their own.
+    if (ctx.user.role === "admin") return getAllRestaurants();
+    const db = await getDb();
+    if (!db) return [];
+    const { restaurantMembers } = await import("../../drizzle/schema");
+    const { eq, and } = await import("drizzle-orm");
+    const mine = await db.select({ restaurantId: restaurantMembers.restaurantId })
+      .from(restaurantMembers)
+      .where(and(eq(restaurantMembers.userId, ctx.user.id), eq(restaurantMembers.isActive, true)));
+    if (mine.length === 0) return [];
+    const all = await getAllRestaurants();
+    const allowed = new Set(mine.map(m => m.restaurantId));
+    return all.filter(r => allowed.has(r.id));
+  }),
 
   // =========================================================================
   // Order Management — Issue 8: basic order ops for all admins
   // =========================================================================
-  orders: adminProcedure
+  orders: tenantAccessProcedure
     .input(z.object({
       restaurantId: z.string().min(4),
       status: orderStatus.optional(),
@@ -144,33 +158,30 @@ export const adminRouter = router({
       );
     }),
 
-  // H-13: Verify order belongs to caller's tenant
-  orderDetail: adminProcedure
+  // H-13: Verify order belongs to caller's tenant (entity-scoped, so
+  // member-owners work on any host, not just custom domains).
+  orderDetail: protectedProcedure
     .input(z.object({ orderId: z.string().min(4) }))
     .query(async ({ ctx, input }) => {
       const result = await getOrderWithItems(input.orderId);
       if (!result) return null;
-      // Verify tenant ownership if restaurantId is in context (result is spread order)
-      if (ctx.restaurantId && result.restaurantId !== ctx.restaurantId) {
-        throw new TRPCError({ code: "FORBIDDEN", message: "Order not found for this restaurant." });
-      }
+      await checkTenantAccess(ctx.user, result.restaurantId);
       return result;
     }),
 
-  // H-14: Verify order belongs to caller's tenant before status change
-  updateOrderStatus: adminProcedure
+  // H-14: Verify order belongs to caller's tenant before status change.
+  updateOrderStatus: protectedProcedure
     .input(z.object({
       orderId: z.string().min(4),
       status: orderStatus,
       note: z.string().max(500).optional(),
     }))
     .mutation(async ({ ctx, input }) => {
-      if (ctx.restaurantId) {
-        const orderData = await getOrderWithItems(input.orderId);
-        if (!orderData || orderData.restaurantId !== ctx.restaurantId) {
-          throw new TRPCError({ code: "FORBIDDEN", message: "Order not found for this restaurant." });
-        }
+      const orderData = await getOrderWithItems(input.orderId);
+      if (!orderData) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Order not found." });
       }
+      await checkTenantAccess(ctx.user, orderData.restaurantId);
       await updateOrderStatus(input.orderId, input.status, ctx.user.id, input.note);
       await logAudit({
         actorId: ctx.user.id,
@@ -179,7 +190,7 @@ export const adminRouter = router({
         targetType: "order",
         targetId: input.orderId,
         afterData: { status: input.status, note: input.note },
-        restaurantId: ctx.restaurantId ?? undefined,
+        restaurantId: orderData.restaurantId ?? ctx.restaurantId ?? undefined,
       });
       return { success: true } as const;
     }),
@@ -190,8 +201,8 @@ export const adminRouter = router({
   updateSettings: requirePermission("restaurant:write").input(z.object({
     id: z.string().min(4),
     restaurantId: z.string().min(4),
-    name: z.string().min(2).max(180),
-    cuisineSummary: z.string().min(2).max(255),
+    name: z.string().trim().min(2).max(180),
+    cuisineSummary: z.string().trim().min(2).max(255),
     description: z.string().max(2000).optional(),
     logoUrl: z.string().max(500).optional(),
     primaryColor: z.string().regex(/^#[0-9A-Fa-f]{6}$/),
@@ -200,10 +211,10 @@ export const adminRouter = router({
     minOrderPaise: z.number().int().nonnegative(),
     isOpen: z.boolean(),
     allowScheduledOrders: z.boolean(),
-    preparationMinutes: z.number().int().positive().optional(),
-    deliveryRadiusKm: z.number().positive().optional(),
-    gstNumber: z.string().optional(),
-    gstPercentage: z.string().optional(),
+    preparationMinutes: z.number().int().positive().max(480).optional(),
+    deliveryRadiusKm: z.number().positive().max(100).optional(),
+    gstNumber: z.string().trim().max(15).optional(),
+    gstPercentage: z.string().trim().max(5).optional(),
     tempClosureStart: z.coerce.date().nullish(),
     tempClosureEnd: z.coerce.date().nullish(),
     tempClosureMessage: z.string().max(500).nullish(),
@@ -212,6 +223,21 @@ export const adminRouter = router({
       // Scope guard: the updated row must be the scoped restaurant itself.
       if (input.id !== input.restaurantId) {
         throw new TRPCError({ code: "FORBIDDEN", message: "Restaurant scope mismatch." });
+      }
+      if (ctx.restaurantId && input.restaurantId !== ctx.restaurantId) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Restaurant scope mismatch." });
+      }
+      if (input.gstNumber && !/^\d{2}[A-Z]{5}\d{4}[A-Z][A-Z\d]Z[A-Z\d]$/i.test(input.gstNumber)) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Invalid GSTIN format." });
+      }
+      if (input.gstPercentage !== undefined) {
+        const pct = parseFloat(input.gstPercentage);
+        if (!Number.isFinite(pct) || pct < 0 || pct > 28) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "GST percentage must be between 0 and 28." });
+        }
+      }
+      if (input.tempClosureStart && input.tempClosureEnd && input.tempClosureStart > input.tempClosureEnd) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Closure start must be before closure end." });
       }
       await updateRestaurant(input);
       await logAudit({
@@ -257,6 +283,9 @@ export const adminRouter = router({
 
   updateMenuItem: requirePermission("menu:write").input(z.object({
     itemId: z.string().min(4),
+    // Optional scope for platform-host callers (resolved into ctx.restaurantId by
+    // requirePermission; row ownership is re-verified below before writing).
+    restaurantId: z.string().min(4).optional(),
     name: z.string().min(2).max(180).optional(),
     description: z.string().max(1000).optional(),
     pricePaise: z.number().int().positive().optional(),
@@ -271,10 +300,18 @@ export const adminRouter = router({
     imageUrl: z.string().nullish(),
   }))
     .mutation(async ({ ctx, input }) => {
-      const { itemId, imageUrl, ...rest } = input;
+      const { itemId, imageUrl, restaurantId: _scope, ...rest } = input;
       const updates: Record<string, unknown> = { ...rest };
-      if (imageUrl !== null && imageUrl !== undefined) updates.imageUrl = imageUrl;
+      // null clears the photo (empty string is never a valid URL); undefined
+      // leaves the existing photo untouched.
+      if (imageUrl !== undefined) updates.imageUrl = imageUrl || null;
       const before = await getItemById(itemId);
+      if (!before) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Menu item not found." });
+      }
+      if (ctx.restaurantId && before.restaurantId !== ctx.restaurantId) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Menu item not found for this restaurant." });
+      }
       await updateMenuItem(itemId, updates as any);
       await logAudit({
         actorId: ctx.user.id,
@@ -284,17 +321,25 @@ export const adminRouter = router({
         targetId: itemId,
         beforeData: before ? { name: before.name, pricePaise: before.pricePaise, isOpen: before.isOpen } : undefined,
         afterData: updates,
-        restaurantId: ctx.restaurantId ?? undefined,
+        restaurantId: before.restaurantId ?? ctx.restaurantId ?? undefined,
       });
       return { success: true } as const;
     }),
 
   updateMenuAvailability: requirePermission("menu:write").input(z.object({
     itemId: z.string().min(4),
+    restaurantId: z.string().min(4).optional(),
     availability,
     availableNote: z.string().max(160).optional(),
   }))
     .mutation(async ({ ctx, input }) => {
+      const before = await getItemById(input.itemId);
+      if (!before) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Menu item not found." });
+      }
+      if (ctx.restaurantId && before.restaurantId !== ctx.restaurantId) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Menu item not found for this restaurant." });
+      }
       await updateMenuItemAvailability(input.itemId, input.availability, input.availableNote);
       await logAudit({
         actorId: ctx.user.id,
@@ -302,13 +347,20 @@ export const adminRouter = router({
         action: `Item availability changed to ${input.availability}`,
         targetType: "menuItem",
         targetId: input.itemId,
-        restaurantId: ctx.restaurantId ?? undefined,
+        restaurantId: before.restaurantId ?? ctx.restaurantId ?? undefined,
       });
       return { success: true } as const;
     }),
 
-  toggleItemOpen: requirePermission("menu:write").input(z.object({ itemId: z.string().min(4), isOpen: z.boolean() }))
+  toggleItemOpen: requirePermission("menu:write").input(z.object({ itemId: z.string().min(4), restaurantId: z.string().min(4).optional(), isOpen: z.boolean() }))
     .mutation(async ({ ctx, input }) => {
+      const before = await getItemById(input.itemId);
+      if (!before) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Menu item not found." });
+      }
+      if (ctx.restaurantId && before.restaurantId !== ctx.restaurantId) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Menu item not found for this restaurant." });
+      }
       await updateMenuItem(input.itemId, { isOpen: input.isOpen });
       await logAudit({
         actorId: ctx.user.id,
@@ -316,7 +368,7 @@ export const adminRouter = router({
         action: `Item ${input.isOpen ? "enabled" : "disabled"}`,
         targetType: "menuItem",
         targetId: input.itemId,
-        restaurantId: ctx.restaurantId ?? undefined,
+        restaurantId: before.restaurantId ?? ctx.restaurantId ?? undefined,
       });
       return { success: true } as const;
     }),
@@ -355,8 +407,16 @@ export const adminRouter = router({
 
   deleteMenuItem: requirePermission("menu:write").input(z.object({
     itemId: z.string().min(4),
+    restaurantId: z.string().min(4).optional(),
   }))
     .mutation(async ({ ctx, input }) => {
+      const before = await getItemById(input.itemId);
+      if (!before) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Menu item not found." });
+      }
+      if (ctx.restaurantId && before.restaurantId !== ctx.restaurantId) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Menu item not found for this restaurant." });
+      }
       await updateMenuItem(input.itemId, { isOpen: false });
       await updateMenuItemAvailability(input.itemId, "DISABLED");
       await logAudit({
@@ -365,17 +425,30 @@ export const adminRouter = router({
         action: "Menu item deleted (soft)",
         targetType: "menuItem",
         targetId: input.itemId,
-        restaurantId: ctx.restaurantId ?? undefined,
+        restaurantId: before.restaurantId ?? ctx.restaurantId ?? undefined,
       });
       return { success: true } as const;
     }),
 
   bulkUpdateMenuItems: requirePermission("menu:write").input(z.object({
     itemIds: z.array(z.string().min(4)).min(1).max(100),
+    restaurantId: z.string().min(4).optional(),
     isOpen: z.boolean().optional(),
     availability: z.enum(["AVAILABLE", "SOLD_OUT", "SCHEDULED_UNAVAILABLE", "OUT_OF_STOCK", "DISABLED"]).optional(),
   }))
     .mutation(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database not available." });
+      const { menuItems } = await import("../../drizzle/schema");
+      const { inArray } = await import("drizzle-orm");
+      const rows = await db.select({ id: menuItems.id, restaurantId: menuItems.restaurantId })
+        .from(menuItems).where(inArray(menuItems.id, input.itemIds));
+      if (rows.length !== input.itemIds.length) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "One or more menu items were not found." });
+      }
+      if (ctx.restaurantId && rows.some((r) => r.restaurantId !== ctx.restaurantId)) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "One or more menu items do not belong to this restaurant." });
+      }
       for (const itemId of input.itemIds) {
         if (input.isOpen !== undefined) {
           await updateMenuItem(itemId, { isOpen: input.isOpen });
@@ -404,18 +477,51 @@ export const adminRouter = router({
     description: z.string().max(500).optional(),
     sortOrder: z.number().int().optional(),
   }))
-    .mutation(({ input }) => createCategory(input)),
+    .mutation(async ({ ctx, input }) => {
+      const categoryId = await createCategory(input);
+      await logAudit({
+        actorId: ctx.user.id,
+        actorName: ctx.user.name ?? undefined,
+        action: "Menu category created",
+        targetType: "menuCategory",
+        targetId: categoryId,
+        afterData: { name: input.name },
+        restaurantId: input.restaurantId,
+      });
+      return categoryId;
+    }),
 
   updateCategory: requirePermission("menu:write").input(z.object({
     categoryId: z.string().min(4),
+    restaurantId: z.string().min(4).optional(),
     name: z.string().min(2).max(120).optional(),
     sortOrder: z.number().int().optional(),
     isVisible: z.boolean().optional(),
     isOpen: z.boolean().optional(),
   }))
-    .mutation(async ({ input }) => {
-      const { categoryId, ...updates } = input;
+    .mutation(async ({ ctx, input }) => {
+      const { categoryId, restaurantId: _scope, ...updates } = input;
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database not available." });
+      const { menuCategories } = await import("../../drizzle/schema");
+      const before = (await db.select().from(menuCategories).where(eq(menuCategories.id, categoryId)).limit(1))[0];
+      if (!before) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Category not found." });
+      }
+      if (ctx.restaurantId && before.restaurantId !== ctx.restaurantId) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Category not found for this restaurant." });
+      }
       await updateCategory(categoryId, updates);
+      await logAudit({
+        actorId: ctx.user.id,
+        actorName: ctx.user.name ?? undefined,
+        action: "Menu category updated",
+        targetType: "menuCategory",
+        targetId: categoryId,
+        beforeData: { name: before.name, isVisible: before.isVisible, isOpen: before.isOpen },
+        afterData: updates,
+        restaurantId: before.restaurantId ?? ctx.restaurantId ?? undefined,
+      });
       return { success: true } as const;
     }),
 
@@ -436,7 +542,24 @@ export const adminRouter = router({
     startsAt: z.coerce.date().optional(),
     endsAt: z.coerce.date().optional(),
   }))
-    .mutation(({ input }) => upsertRestaurantCoupon(input)),
+    .mutation(async ({ ctx, input }) => {
+      const couponId = await upsertRestaurantCoupon(input);
+      await logAudit({
+        actorId: ctx.user.id,
+        actorName: ctx.user.name ?? undefined,
+        action: `Coupon upserted: ${input.code.toUpperCase()}`,
+        targetType: "coupon",
+        targetId: String(couponId),
+        afterData: {
+          code: input.code.toUpperCase(),
+          discountType: input.discountType,
+          discountValue: input.discountValue,
+          minOrderPaise: input.minOrderPaise,
+        },
+        restaurantId: input.restaurantId,
+      });
+      return couponId;
+    }),
 
   // =========================================================================
   // Customer Management — Issue 8: requires customers:read
@@ -492,6 +615,15 @@ export const adminRouter = router({
       // Tenant scope: callers bound to a restaurant cannot query other tenants.
       if (ctx.restaurantId && input.restaurantId !== ctx.restaurantId) {
         throw new TRPCError({ code: "FORBIDDEN", message: "Report not found for this restaurant." });
+      }
+      if (Number.isNaN(input.startDate.getTime()) || Number.isNaN(input.endDate.getTime())) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Invalid startDate or endDate." });
+      }
+      if (input.startDate > input.endDate) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "startDate must be before or equal to endDate." });
+      }
+      if ((input.endDate.getTime() - input.startDate.getTime()) / 86400000 > 366) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Date range must not exceed 366 days." });
       }
       return getSalesReport(input.restaurantId, input.startDate, input.endDate);
     }),
@@ -633,7 +765,12 @@ export const adminRouter = router({
   // =========================================================================
   // Menu Import / Export
   // =========================================================================
-  previewMenuImport: requirePermission("menu:write").input(z.object({ csv: z.string().min(10).max(1_500_000) }))
+  previewMenuImport: requirePermission("menu:write").input(z.object({
+    csv: z.string().min(10).max(1_500_000),
+    // Optional scope for platform-host callers; the preview itself is
+    // tenant-agnostic validation, but the permission gate needs a tenant.
+    restaurantId: z.string().min(4).optional(),
+  }))
     .mutation(({ input }) => previewMenuImport(input.csv)),
 
   applyMenuImport: requirePermission("menu:write").input(z.object({ restaurantId: z.string().min(4), csv: z.string().min(10).max(1_500_000) }))
@@ -663,16 +800,18 @@ export const adminRouter = router({
   // H-15: Verify tenant ownership before dispatch
   manualDeliveryDispatch: requirePermission("orders:write").input(z.object({
     orderId: z.string().min(4),
+    restaurantId: z.string().min(4).optional(),
     riderName: z.string().min(1).max(120),
     riderPhone: z.string().min(8).max(24),
     notes: z.string().max(500).optional(),
   }))
     .mutation(async ({ ctx, input }) => {
-      if (ctx.restaurantId) {
-        const orderData = await getOrderWithItems(input.orderId);
-        if (!orderData || orderData.restaurantId !== ctx.restaurantId) {
-          throw new TRPCError({ code: "FORBIDDEN", message: "Order not found for this restaurant." });
-        }
+      const orderData = await getOrderWithItems(input.orderId);
+      if (!orderData) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Order not found." });
+      }
+      if (ctx.restaurantId && orderData.restaurantId !== ctx.restaurantId) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Order not found for this restaurant." });
       }
       const result = await createManualDelivery(input.orderId, {
         riderName: input.riderName,
@@ -686,7 +825,7 @@ export const adminRouter = router({
         targetType: "delivery",
         targetId: input.orderId,
         afterData: { riderName: input.riderName, riderPhone: input.riderPhone },
-        restaurantId: ctx.restaurantId ?? undefined,
+        restaurantId: orderData.restaurantId ?? ctx.restaurantId ?? undefined,
       });
       return result;
     }),
@@ -694,6 +833,7 @@ export const adminRouter = router({
   // --- Shadowfax dispatch: wire createDelivery with idempotency ---
   shadowfaxDispatch: requirePermission("orders:write").input(z.object({
     orderId: z.string().min(4),
+    restaurantId: z.string().min(4).optional(),
   }))
     .mutation(async ({ ctx, input }) => {
       const db = await getDb();
@@ -704,7 +844,7 @@ export const adminRouter = router({
       if (!order) throw new Error("Order not found.");
       // H-15: Verify tenant ownership
       if (ctx.restaurantId && order.restaurantId !== ctx.restaurantId) {
-        throw new Error("Order does not belong to this restaurant.");
+        throw new TRPCError({ code: "FORBIDDEN", message: "Order not found for this restaurant." });
       }
       if (order.status !== "READY_FOR_PICKUP") {
         throw new Error(`Order must be READY_FOR_PICKUP to dispatch. Current status: ${order.status}`);
@@ -864,7 +1004,7 @@ export const adminRouter = router({
         targetType: "delivery",
         targetId: order.id,
         afterData: { providerDeliveryId: result.deliveryId, trackingId: result.trackingId },
-        restaurantId: ctx.restaurantId ?? undefined,
+        restaurantId: order.restaurantId ?? ctx.restaurantId ?? undefined,
       });
 
       return {
@@ -879,6 +1019,7 @@ export const adminRouter = router({
 
   getDeliveryStatus: requirePermission("orders:read").input(z.object({
     orderId: z.string().min(4),
+    restaurantId: z.string().min(4).optional(),
   }))
     .query(async ({ ctx, input }) => {
       const db = await getDb();
@@ -908,6 +1049,7 @@ export const adminRouter = router({
 
   cancelDelivery: requirePermission("orders:write").input(z.object({
     orderId: z.string().min(4),
+    restaurantId: z.string().min(4).optional(),
     reason: z.string().max(500).optional(),
   }))
     .mutation(async ({ ctx, input }) => {
@@ -1008,15 +1150,16 @@ export const adminRouter = router({
   // =========================================================================
   // Settings — Issue 8: requires settings:write for mutations
   // =========================================================================
-  getSetting: adminProcedure.input(z.object({ key: z.string().min(1) }))
+  getSetting: adminProcedure.input(z.object({ key: z.string().trim().min(1).max(120) }))
     .query(({ input }) => getSetting(input.key)),
 
   setSetting: requirePermission("settings:write").input(z.object({
-    key: z.string().min(1),
-    value: z.string(),
-    category: z.string().default("general"),
+    key: z.string().trim().min(1).max(120),
+    value: z.string().max(5000),
+    category: z.string().trim().max(64).default("general"),
+    restaurantId: z.string().min(4).optional(),
   }))
-    .mutation(({ ctx, input }) => setSetting(input.key, input.value, input.category, ctx.user.id)),
+    .mutation(({ ctx, input }) => setSetting(input.key, input.value, input.category, ctx.user.id, input.restaurantId ?? ctx.restaurantId ?? null)),
 
   // =========================================================================
   // Custom Domain Management
@@ -1029,23 +1172,27 @@ export const adminRouter = router({
       const { eq, desc } = await import("drizzle-orm");
       return db.select().from(customDomains)
         .where(eq(customDomains.restaurantId, input.restaurantId))
-        .orderBy(desc(customDomains.createdAt));
+        .orderBy(desc(customDomains.createdAt))
+        .limit(50);
     }),
 
   addDomain: requirePermission("settings:write").input(z.object({
     restaurantId: z.string().min(4),
-    domain: z.string().min(4).max(253).regex(/^[a-z0-9][a-z0-9.-]*[a-z0-9]$/),
+    domain: z.string().trim().toLowerCase().min(4).max(253).regex(/^[a-z0-9][a-z0-9.-]*[a-z0-9]$/),
   }))
     .mutation(async ({ input }) => {
       const db = await import("../db").then(m => m.getDb());
       if (!db) throw new Error("Database unavailable");
       const { customDomains } = await import("../../drizzle/schema");
-      const { eq } = await import("drizzle-orm");
+      const { eq, and } = await import("drizzle-orm");
       const { nanoid } = await import("nanoid");
 
       const existing = await db.select({ id: customDomains.id }).from(customDomains)
         .where(eq(customDomains.domain, input.domain)).limit(1);
       if (existing[0]) throw new Error("This domain is already registered.");
+      const count = await db.select({ id: customDomains.id }).from(customDomains)
+        .where(eq(customDomains.restaurantId, input.restaurantId)).limit(11);
+      if (count.length >= 10) throw new Error("Domain limit reached (max 10 per restaurant).");
 
       await db.insert(customDomains).values({
         id: nanoid(18),
@@ -1058,8 +1205,8 @@ export const adminRouter = router({
       return { cnameTarget: process.env.DOMAIN_CNAME_TARGET || "cname.yourdomain.com" };
     }),
 
-  verifyDomain: requirePermission("settings:write").input(z.object({ domainId: z.string().min(4) }))
-    .mutation(async ({ input }) => {
+  verifyDomain: requirePermission("settings:write").input(z.object({ domainId: z.string().min(4), restaurantId: z.string().min(4).optional() }))
+    .mutation(async ({ ctx, input }) => {
       const db = await import("../db").then(m => m.getDb());
       if (!db) throw new Error("Database unavailable");
       const { customDomains } = await import("../../drizzle/schema");
@@ -1071,11 +1218,15 @@ export const adminRouter = router({
       const [domain] = await db.select().from(customDomains)
         .where(eq(customDomains.id, input.domainId)).limit(1);
       if (!domain) throw new Error("Domain not found.");
+      const scopeId = input.restaurantId ?? ctx.restaurantId;
+      if (scopeId && domain.restaurantId !== scopeId) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Domain not found for this restaurant." });
+      }
 
       try {
         const records = await resolveCname(domain.domain);
         const cnameTarget = process.env.DOMAIN_CNAME_TARGET || "cname.yourdomain.com";
-        const verified = records.some(r => r.includes(cnameTarget));
+        const verified = records.some(r => r.toLowerCase().includes(cnameTarget.toLowerCase()));
         if (verified) {
           await db.update(customDomains)
             .set({ isVerified: true, verifiedAt: new Date(), sslStatus: "active" })
@@ -1088,13 +1239,23 @@ export const adminRouter = router({
       }
     }),
 
-  removeDomain: requirePermission("settings:write").input(z.object({ domainId: z.string().min(4) }))
-    .mutation(async ({ input }) => {
+  removeDomain: requirePermission("settings:write").input(z.object({ domainId: z.string().min(4), restaurantId: z.string().min(4).optional() }))
+    .mutation(async ({ ctx, input }) => {
       const db = await import("../db").then(m => m.getDb());
       if (!db) throw new Error("Database unavailable");
       const { customDomains } = await import("../../drizzle/schema");
-      const { eq } = await import("drizzle-orm");
-      await db.delete(customDomains).where(eq(customDomains.id, input.domainId));
+      const { eq, and } = await import("drizzle-orm");
+      const scopeId = input.restaurantId ?? ctx.restaurantId;
+      if (scopeId) {
+        const [domain] = await db.select().from(customDomains).where(eq(customDomains.id, input.domainId)).limit(1);
+        if (!domain) throw new Error("Domain not found.");
+        if (domain.restaurantId !== scopeId) {
+          throw new TRPCError({ code: "FORBIDDEN", message: "Domain not found for this restaurant." });
+        }
+        await db.delete(customDomains).where(and(eq(customDomains.id, input.domainId), eq(customDomains.restaurantId, scopeId)));
+      } else {
+        await db.delete(customDomains).where(eq(customDomains.id, input.domainId));
+      }
       return { success: true };
     }),
 
@@ -1103,14 +1264,22 @@ export const adminRouter = router({
       const db = await import("../db").then(m => m.getDb());
       if (!db) throw new Error("Database unavailable");
       const { customDomains } = await import("../../drizzle/schema");
-      const { eq } = await import("drizzle-orm");
+      const { eq, and } = await import("drizzle-orm");
 
+      const [domain] = await db.select().from(customDomains).where(eq(customDomains.id, input.domainId)).limit(1);
+      if (!domain) throw new Error("Domain not found.");
+      if (domain.restaurantId !== input.restaurantId) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Domain not found for this restaurant." });
+      }
+      if (!domain.isVerified) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Only verified domains can be set as primary." });
+      }
       await db.update(customDomains)
         .set({ isPrimary: false })
         .where(eq(customDomains.restaurantId, input.restaurantId));
       await db.update(customDomains)
         .set({ isPrimary: true })
-        .where(eq(customDomains.id, input.domainId));
+        .where(and(eq(customDomains.id, input.domainId), eq(customDomains.restaurantId, input.restaurantId)));
 
       return { success: true };
     }),
@@ -1123,7 +1292,7 @@ export const adminRouter = router({
       const db = await import("../db").then(m => m.getDb());
       if (!db) return [];
       const { restaurantMembers, users } = await import("../../drizzle/schema");
-      const { eq } = await import("drizzle-orm");
+      const { eq, asc } = await import("drizzle-orm");
       return db.select({
         id: restaurantMembers.id,
         userId: restaurantMembers.userId,
@@ -1135,12 +1304,14 @@ export const adminRouter = router({
       })
         .from(restaurantMembers)
         .innerJoin(users, eq(restaurantMembers.userId, users.id))
-        .where(eq(restaurantMembers.restaurantId, input.restaurantId));
+        .where(eq(restaurantMembers.restaurantId, input.restaurantId))
+        .orderBy(asc(restaurantMembers.joinedAt))
+        .limit(200);
     }),
 
   inviteMember: requirePermission("settings:write").input(z.object({
     restaurantId: z.string().min(4),
-    email: z.string().email(),
+    email: z.string().trim().toLowerCase().email().max(320),
     role: z.enum(["owner", "admin", "manager", "staff", "kitchen"]),
   }))
     .mutation(async ({ ctx, input }) => {
@@ -1150,17 +1321,32 @@ export const adminRouter = router({
       const { eq, and } = await import("drizzle-orm");
       const { nanoid } = await import("nanoid");
 
-      let [user] = await db.select().from(users).where(eq(users.email, input.email)).limit(1);
+      // Only owners may grant the owner role (prevents privilege escalation).
+      if (input.role === "owner") {
+        const scopeId = input.restaurantId ?? ctx.restaurantId;
+        if (scopeId) {
+          const [caller] = await db.select().from(restaurantMembers)
+            .where(and(eq(restaurantMembers.userId, ctx.user.id), eq(restaurantMembers.restaurantId, scopeId)))
+            .limit(1);
+          if (caller?.role !== "owner" && ctx.user.role !== "admin") {
+            throw new TRPCError({ code: "FORBIDDEN", message: "Only owners can invite another owner." });
+          }
+          // Platform-host global admins bypass membership but must not mint owners silently;
+          // they remain allowed (operator), explicit here to avoid accidental lockout changes.
+        }
+      }
+      const email = input.email.trim().toLowerCase();
+      let [user] = await db.select().from(users).where(eq(users.email, email)).limit(1);
       if (!user) {
         const openId = `self_${nanoid(16)}`;
         await db.insert(users).values({
           openId,
-          email: input.email,
+          email,
           loginMethod: "email",
           role: "admin",
           lastSignedIn: new Date(),
         });
-        [user] = await db.select().from(users).where(eq(users.email, input.email)).limit(1);
+        [user] = await db.select().from(users).where(eq(users.email, email)).limit(1);
       }
 
       const [existing] = await db.select().from(restaurantMembers)
@@ -1170,6 +1356,7 @@ export const adminRouter = router({
         )).limit(1);
 
       if (existing) {
+        // Do not silently re-elevate to owner without the owner check above.
         await db.update(restaurantMembers)
           .set({ role: input.role, isActive: true })
           .where(eq(restaurantMembers.id, existing.id));
@@ -1190,23 +1377,66 @@ export const adminRouter = router({
   updateMemberRole: requirePermission("settings:write").input(z.object({
     memberId: z.string().min(4),
     role: z.enum(["owner", "admin", "manager", "staff", "kitchen"]),
+    restaurantId: z.string().min(4).optional(),
   }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
       const db = await import("../db").then(m => m.getDb());
       if (!db) throw new Error("Database unavailable");
       const { restaurantMembers } = await import("../../drizzle/schema");
-      const { eq } = await import("drizzle-orm");
-      await db.update(restaurantMembers).set({ role: input.role }).where(eq(restaurantMembers.id, input.memberId));
+      const { eq, and } = await import("drizzle-orm");
+      const [target] = await db.select().from(restaurantMembers).where(eq(restaurantMembers.id, input.memberId)).limit(1);
+      if (!target) throw new TRPCError({ code: "NOT_FOUND", message: "Member not found." });
+      const scopeId = input.restaurantId ?? ctx.restaurantId ?? target.restaurantId;
+      if (target.restaurantId !== scopeId) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Member not found for this restaurant." });
+      }
+      if (input.role === "owner") {
+        const [caller] = await db.select().from(restaurantMembers)
+          .where(and(eq(restaurantMembers.userId, ctx.user.id), eq(restaurantMembers.restaurantId, scopeId)))
+          .limit(1);
+        if (caller?.role !== "owner" && ctx.user.role !== "admin") {
+          throw new TRPCError({ code: "FORBIDDEN", message: "Only owners can grant the owner role." });
+        }
+      }
+      // Prevent demoting the last active owner (lockout guard).
+      if (target.role === "owner" && input.role !== "owner") {
+        const owners = await db.select({ id: restaurantMembers.id }).from(restaurantMembers)
+          .where(and(eq(restaurantMembers.restaurantId, scopeId), eq(restaurantMembers.role, "owner"), eq(restaurantMembers.isActive, true)))
+          .limit(2);
+        if (owners.length <= 1 && owners[0]?.id === target.id) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Cannot demote the last active owner." });
+        }
+      }
+      await db.update(restaurantMembers).set({ role: input.role })
+        .where(and(eq(restaurantMembers.id, input.memberId), eq(restaurantMembers.restaurantId, scopeId)));
       return { success: true };
     }),
 
-  deactivateMember: requirePermission("settings:write").input(z.object({ memberId: z.string().min(4) }))
-    .mutation(async ({ input }) => {
+  deactivateMember: requirePermission("settings:write").input(z.object({ memberId: z.string().min(4), restaurantId: z.string().min(4).optional() }))
+    .mutation(async ({ ctx, input }) => {
       const db = await import("../db").then(m => m.getDb());
       if (!db) throw new Error("Database unavailable");
       const { restaurantMembers } = await import("../../drizzle/schema");
-      const { eq } = await import("drizzle-orm");
-      await db.update(restaurantMembers).set({ isActive: false }).where(eq(restaurantMembers.id, input.memberId));
+      const { eq, and } = await import("drizzle-orm");
+      const [target] = await db.select().from(restaurantMembers).where(eq(restaurantMembers.id, input.memberId)).limit(1);
+      if (!target) throw new TRPCError({ code: "NOT_FOUND", message: "Member not found." });
+      const scopeId = input.restaurantId ?? ctx.restaurantId ?? target.restaurantId;
+      if (target.restaurantId !== scopeId) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Member not found for this restaurant." });
+      }
+      if (target.role === "owner") {
+        const owners = await db.select({ id: restaurantMembers.id }).from(restaurantMembers)
+          .where(and(eq(restaurantMembers.restaurantId, scopeId), eq(restaurantMembers.role, "owner"), eq(restaurantMembers.isActive, true)))
+          .limit(2);
+        if (owners.length <= 1 && owners[0]?.id === target.id) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Cannot deactivate the last active owner." });
+        }
+      }
+      if (target.userId === ctx.user.id) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "You cannot deactivate your own access." });
+      }
+      await db.update(restaurantMembers).set({ isActive: false })
+        .where(and(eq(restaurantMembers.id, input.memberId), eq(restaurantMembers.restaurantId, scopeId)));
       return { success: true };
     }),
 
@@ -1225,8 +1455,14 @@ export const adminRouter = router({
 
   updateNotificationSetting: requirePermission("settings:write").input(z.object({
     restaurantId: z.string().min(4),
-    key: z.string().min(1),
-    value: z.string(),
+    key: z.enum([
+      "notifications_order_confirmed",
+      "notifications_preparing",
+      "notifications_out_for_delivery",
+      "notifications_delivered",
+      "notifications_cancelled",
+    ]),
+    value: z.enum(["true", "false"]),
   }))
     .mutation(async ({ input }) => {
       const db = await import("../db").then(m => m.getDb());
@@ -1277,13 +1513,14 @@ export const adminRouter = router({
       if (!restaurant) throw new TRPCError({ code: "NOT_FOUND", message: "Restaurant not found" });
       const payment = (await db.select().from(payments).where(eq(payments.orderId, input.orderId)).limit(1))[0];
 
+      const safeNum = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : 0);
       const subtotalPaise = items.reduce((sum, it) => {
         const mods = (it.selectedModifiers as Array<{ pricePaise?: number }> | null) ?? [];
-        const modTotal = mods.reduce((s, m) => s + (m.pricePaise ?? 0), 0) * it.quantity;
-        return sum + it.unitPricePaise * it.quantity + modTotal;
+        const modTotal = mods.reduce((s, m) => s + safeNum(m.pricePaise), 0) * safeNum(it.quantity);
+        return sum + safeNum(it.unitPricePaise) * safeNum(it.quantity) + modTotal;
       }, 0);
       // Use authoritative order.taxPaise split evenly into CGST/SGST.
-      const taxPaise = order.taxPaise ?? 0;
+      const taxPaise = safeNum(order.taxPaise);
       const cgstPaise = Math.floor(taxPaise / 2);
       const sgstPaise = taxPaise - cgstPaise;
 
@@ -1292,16 +1529,17 @@ export const adminRouter = router({
         addrSnap?.flatHouse, addrSnap?.building, addrSnap?.street, addrSnap?.area,
         addrSnap?.city, addrSnap?.postalCode,
       ].filter(v => typeof v === "string" && (v as string).trim()).join(", ") || "";
+      const createdAt = order.createdAt instanceof Date ? order.createdAt : new Date(order.createdAt);
 
       const html = generateInvoiceHtml({
         restaurantName: restaurant.name,
-        restaurantAddress: restaurant.address || "",
+        restaurantAddress: (restaurant as { address?: string | null }).address || "",
         restaurantPhone: restaurant.contactPhone || "",
         restaurantGst: (restaurant as unknown as { gstNumber?: string }).gstNumber || "",
         logoUrl: restaurant.logoUrl || undefined,
         invoiceNumber: `INV-${order.orderNumber}`,
         orderNumber: order.orderNumber,
-        orderDate: order.createdAt.toLocaleDateString("en-IN", { year: "numeric", month: "long", day: "numeric" }),
+        orderDate: createdAt.toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", year: "numeric", month: "long", day: "numeric" }),
         customerName: order.customerName || "",
         customerPhone: order.customerPhone || "",
         deliveryAddress,
@@ -1309,21 +1547,21 @@ export const adminRouter = router({
           const mods = (it.selectedModifiers as Array<{ optionName?: string; pricePaise?: number }> | null) ?? [];
           const modSuffix = mods.length ? ` (${mods.map(m => m.optionName ?? "").filter(Boolean).join(", ")})` : "";
           const variantSuffix = it.variantNameSnapshot ? ` [${it.variantNameSnapshot}]` : "";
-          const modTotal = mods.reduce((s, m) => s + (m.pricePaise ?? 0), 0) * it.quantity;
+          const modTotal = mods.reduce((s, m) => s + safeNum(m.pricePaise), 0) * safeNum(it.quantity);
           return {
             name: `${it.itemNameSnapshot}${variantSuffix}${modSuffix}`,
-            quantity: it.quantity,
-            unitPricePaise: it.unitPricePaise,
-            totalPricePaise: it.unitPricePaise * it.quantity + modTotal,
+            quantity: safeNum(it.quantity),
+            unitPricePaise: safeNum(it.unitPricePaise),
+            totalPricePaise: safeNum(it.unitPricePaise) * safeNum(it.quantity) + modTotal,
           };
         }),
         subtotalPaise,
-        discountPaise: (order.couponDiscountPaise ?? 0) + (order.discountPaise ?? 0),
-        packagingFeePaise: order.packagingFeePaise ?? 0,
-        deliveryFeePaise: order.deliveryFeePaise ?? 0,
+        discountPaise: safeNum(order.couponDiscountPaise) + safeNum(order.discountPaise),
+        packagingFeePaise: safeNum(order.packagingFeePaise),
+        deliveryFeePaise: safeNum(order.deliveryFeePaise),
         cgstPaise,
         sgstPaise,
-        totalPaise: order.totalPaise,
+        totalPaise: safeNum(order.totalPaise),
         paymentMethod: payment?.method ?? payment?.provider ?? order.fulfillmentType ?? "-",
         paymentStatus: order.paymentStatus || "PENDING",
       });
@@ -1333,14 +1571,17 @@ export const adminRouter = router({
 
   listInvoices: requirePermission("reports:read").input(z.object({
     restaurantId: z.string().min(4),
-    startDate: z.string().optional(),
-    endDate: z.string().optional(),
-    limit: z.number().min(1).max(100).default(50),
-    offset: z.number().min(0).default(0),
+    startDate: z.string().max(32).optional(),
+    endDate: z.string().max(32).optional(),
+    limit: z.number().int().min(1).max(100).default(50),
+    offset: z.number().int().min(0).max(10000).default(0),
   }))
-    .query(async ({ input }) => {
+    .query(async ({ ctx, input }) => {
       const db = await import("../db").then(m => m.getDb());
       if (!db) return [];
+      if (ctx.restaurantId && input.restaurantId !== ctx.restaurantId) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Invoices not found for this restaurant." });
+      }
       const { orders } = await import("../../drizzle/schema");
       const { eq, and, gte, lte, desc, inArray } = await import("drizzle-orm");
 
@@ -1348,8 +1589,18 @@ export const adminRouter = router({
         eq(orders.restaurantId, input.restaurantId),
         inArray(orders.status, ["DELIVERED", "READY_FOR_PICKUP"]),
       ];
-      if (input.startDate) conditions.push(gte(orders.createdAt, new Date(input.startDate)));
-      if (input.endDate) conditions.push(lte(orders.createdAt, new Date(input.endDate)));
+      if (input.startDate) {
+        const s = new Date(input.startDate);
+        if (Number.isNaN(s.getTime())) throw new TRPCError({ code: "BAD_REQUEST", message: "Invalid startDate." });
+        s.setUTCHours(0, 0, 0, 0);
+        conditions.push(gte(orders.createdAt, s));
+      }
+      if (input.endDate) {
+        const e = new Date(input.endDate);
+        if (Number.isNaN(e.getTime())) throw new TRPCError({ code: "BAD_REQUEST", message: "Invalid endDate." });
+        e.setUTCHours(23, 59, 59, 999);
+        conditions.push(lte(orders.createdAt, e));
+      }
 
       return db.select({
         id: orders.id,
@@ -1514,21 +1765,29 @@ export const adminRouter = router({
       const { eq, desc } = await import("drizzle-orm");
       return db.select().from(outlets)
         .where(eq(outlets.restaurantId, input.restaurantId))
-        .orderBy(desc(outlets.createdAt));
+        .orderBy(desc(outlets.createdAt))
+        .limit(100);
     }),
 
   createOutlet: requirePermission("restaurant:write").input(z.object({
     restaurantId: z.string().min(4),
-    name: z.string().min(1).max(180),
-    address: z.string().min(1),
-    city: z.string().min(1).max(120),
-    phone: z.string().optional(),
-    preparationMinutes: z.number().int().min(1).default(25),
-    deliveryRadiusKm: z.string().default("5"),
+    name: z.string().trim().min(1).max(180),
+    address: z.string().trim().min(1).max(1000),
+    city: z.string().trim().min(1).max(120),
+    phone: z.string().trim().max(24).optional(),
+    preparationMinutes: z.number().int().min(1).max(480).default(25),
+    deliveryRadiusKm: z.string().trim().max(10).default("5"),
   }))
     .mutation(async ({ input }) => {
       const db = await import("../db").then(m => m.getDb());
       if (!db) throw new Error("Database unavailable");
+      const radius = parseFloat(input.deliveryRadiusKm);
+      if (!Number.isFinite(radius) || radius <= 0 || radius > 100) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Delivery radius must be a number between 0 and 100 km." });
+      }
+      if (input.phone && !/^\+?[0-9\s-]{8,24}$/.test(input.phone)) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Invalid phone number." });
+      }
       const { outlets } = await import("../../drizzle/schema");
       const { nanoid } = await import("nanoid");
 
@@ -1539,9 +1798,9 @@ export const adminRouter = router({
         name: input.name,
         address: input.address,
         city: input.city,
-        phone: input.phone || null,
+        phone: input.phone?.trim() || null,
         preparationMinutes: input.preparationMinutes,
-        deliveryRadiusKm: input.deliveryRadiusKm,
+        deliveryRadiusKm: String(radius),
       });
       return { id };
     }),
@@ -1549,41 +1808,61 @@ export const adminRouter = router({
   updateOutlet: requirePermission("restaurant:write").input(z.object({
     outletId: z.string().min(4),
     restaurantId: z.string().min(4),
-    name: z.string().min(1).max(180),
-    address: z.string().min(1),
-    city: z.string().min(1).max(120),
-    phone: z.string().optional(),
-    preparationMinutes: z.number().int().min(1),
-    deliveryRadiusKm: z.string(),
+    name: z.string().trim().min(1).max(180),
+    address: z.string().trim().min(1).max(1000),
+    city: z.string().trim().min(1).max(120),
+    phone: z.string().trim().max(24).optional(),
+    preparationMinutes: z.number().int().min(1).max(480),
+    deliveryRadiusKm: z.string().trim().max(10),
   }))
     .mutation(async ({ input }) => {
       const db = await import("../db").then(m => m.getDb());
       if (!db) throw new Error("Database unavailable");
+      const radius = parseFloat(input.deliveryRadiusKm);
+      if (!Number.isFinite(radius) || radius <= 0 || radius > 100) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Delivery radius must be a number between 0 and 100 km." });
+      }
+      if (input.phone && !/^\+?[0-9\s-]{8,24}$/.test(input.phone)) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Invalid phone number." });
+      }
       const { outlets } = await import("../../drizzle/schema");
-      const { eq } = await import("drizzle-orm");
+      const { eq, and } = await import("drizzle-orm");
 
+      const [existing] = await db.select().from(outlets).where(eq(outlets.id, input.outletId)).limit(1);
+      if (!existing) throw new TRPCError({ code: "NOT_FOUND", message: "Outlet not found." });
+      if (existing.restaurantId !== input.restaurantId) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Outlet not found for this restaurant." });
+      }
       await db.update(outlets).set({
         name: input.name,
         address: input.address,
         city: input.city,
-        phone: input.phone || null,
+        phone: input.phone?.trim() || null,
         preparationMinutes: input.preparationMinutes,
-        deliveryRadiusKm: input.deliveryRadiusKm,
-      }).where(eq(outlets.id, input.outletId));
+        deliveryRadiusKm: String(radius),
+      }).where(and(eq(outlets.id, input.outletId), eq(outlets.restaurantId, input.restaurantId)));
       return { success: true };
     }),
 
   toggleOutletActive: requirePermission("restaurant:write").input(z.object({
     outletId: z.string().min(4),
     isActive: z.boolean(),
+    restaurantId: z.string().min(4).optional(),
   }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
       const db = await import("../db").then(m => m.getDb());
       if (!db) throw new Error("Database unavailable");
       const { outlets } = await import("../../drizzle/schema");
-      const { eq } = await import("drizzle-orm");
+      const { eq, and } = await import("drizzle-orm");
 
-      await db.update(outlets).set({ isActive: input.isActive }).where(eq(outlets.id, input.outletId));
+      const [existing] = await db.select().from(outlets).where(eq(outlets.id, input.outletId)).limit(1);
+      if (!existing) throw new TRPCError({ code: "NOT_FOUND", message: "Outlet not found." });
+      const scopeId = input.restaurantId ?? ctx.restaurantId ?? existing.restaurantId;
+      if (existing.restaurantId !== scopeId) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Outlet not found for this restaurant." });
+      }
+      await db.update(outlets).set({ isActive: input.isActive })
+        .where(and(eq(outlets.id, input.outletId), eq(outlets.restaurantId, scopeId)));
       return { success: true };
     }),
 });

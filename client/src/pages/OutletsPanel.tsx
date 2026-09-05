@@ -2,6 +2,16 @@ import { trpc } from "@/lib/trpc";
 import { MapPin, Plus, Store, ToggleLeft, ToggleRight } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { AdminError } from "@/components/DashboardLayout";
 
 export default function OutletsPanel({ restaurantId }: { restaurantId: string }) {
@@ -36,6 +46,7 @@ export default function OutletsPanel({ restaurantId }: { restaurantId: string })
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState({ name: "", address: "", city: "", phone: "", preparationMinutes: "25", deliveryRadiusKm: "5" });
+  const [pendingToggle, setPendingToggle] = useState<{ id: string; name: string; next: boolean } | null>(null);
 
   const resetForm = () => {
     setForm({ name: "", address: "", city: "", phone: "", preparationMinutes: "25", deliveryRadiusKm: "5" });
@@ -57,19 +68,45 @@ export default function OutletsPanel({ restaurantId }: { restaurantId: string })
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    const name = form.name.trim();
+    const address = form.address.trim();
+    const city = form.city.trim();
+    const phone = form.phone.trim();
+    if (!name || !address || !city) {
+      toast.error("Name, address, and city are required.");
+      return;
+    }
+    const prep = parseInt(form.preparationMinutes, 10);
+    if (!Number.isFinite(prep) || prep < 1 || prep > 480) {
+      toast.error("Prep time must be between 1 and 480 minutes.");
+      return;
+    }
+    const radius = parseFloat(form.deliveryRadiusKm);
+    if (!Number.isFinite(radius) || radius <= 0 || radius > 100) {
+      toast.error("Delivery radius must be a number between 0 and 100 km.");
+      return;
+    }
+    if (phone && !/^\+?[0-9\s-]{8,24}$/.test(phone)) {
+      toast.error("Enter a valid phone number.");
+      return;
+    }
     const payload = {
       restaurantId,
-      name: form.name,
-      address: form.address,
-      city: form.city,
-      phone: form.phone || undefined,
-      preparationMinutes: parseInt(form.preparationMinutes) || 25,
-      deliveryRadiusKm: form.deliveryRadiusKm,
+      name,
+      address,
+      city,
+      phone: phone || undefined,
+      preparationMinutes: prep,
+      deliveryRadiusKm: String(radius),
     };
-    if (editingId) {
-      await updateMutation.mutateAsync({ outletId: editingId, ...payload });
-    } else {
-      await createMutation.mutateAsync(payload);
+    try {
+      if (editingId) {
+        await updateMutation.mutateAsync({ outletId: editingId, ...payload });
+      } else {
+        await createMutation.mutateAsync(payload);
+      }
+    } catch {
+      // Error toast is handled by the mutation's onError.
     }
   };
 
@@ -136,7 +173,7 @@ export default function OutletsPanel({ restaurantId }: { restaurantId: string })
             </div>
             <div>
               <label className="block text-xs font-medium text-muted-foreground mb-1">Delivery Radius (km)</label>
-              <input value={form.deliveryRadiusKm} onChange={e => setForm(f => ({ ...f, deliveryRadiusKm: e.target.value }))} className="w-full rounded-md border px-3 py-2 text-sm" />
+              <input type="number" min="0.5" max="100" step="0.5" value={form.deliveryRadiusKm} onChange={e => setForm(f => ({ ...f, deliveryRadiusKm: e.target.value }))} className="w-full rounded-md border px-3 py-2 text-sm" />
             </div>
           </div>
           <div className="flex gap-3 pt-2">
@@ -162,7 +199,14 @@ export default function OutletsPanel({ restaurantId }: { restaurantId: string })
                 </div>
               </div>
               <button
-                onClick={() => toggleActiveMutation.mutate({ outletId: outlet.id, isActive: !outlet.isActive })}
+                onClick={() => {
+                  const next = !outlet.isActive;
+                  if (!next) {
+                    setPendingToggle({ id: outlet.id, name: outlet.name, next });
+                  } else {
+                    toggleActiveMutation.mutate({ outletId: outlet.id, isActive: next, restaurantId });
+                  }
+                }}
                 disabled={toggleActiveMutation.isPending}
                 className="text-muted-foreground hover:text-foreground disabled:opacity-50"
                 title={outlet.isActive ? "Deactivate" : "Activate"}
@@ -196,6 +240,26 @@ export default function OutletsPanel({ restaurantId }: { restaurantId: string })
           <p className="text-sm text-muted-foreground">Add your first outlet to start accepting orders.</p>
         </div>
       )}
+
+      <AlertDialog open={!!pendingToggle} onOpenChange={(open) => { if (!open) setPendingToggle(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Deactivate {pendingToggle?.name ?? "this outlet"}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              New orders will stop routing to this outlet until you reactivate it.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep active</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => { if (pendingToggle) toggleActiveMutation.mutate({ outletId: pendingToggle.id, isActive: false, restaurantId }); setPendingToggle(null); }}
+              className="bg-red-600 hover:bg-red-700"
+            >
+              Deactivate
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

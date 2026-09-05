@@ -17,8 +17,11 @@ export const loyaltyRouter = router({
   upsertProgram: requirePermission("settings:write")
     .input(z.object({
       restaurantId: z.string().min(4),
-      name: z.string().min(1).max(120).default("Rewards"),
-      pointsPerRupee: z.string().default("1"),
+      name: z.string().trim().min(1).max(120).default("Rewards"),
+      pointsPerRupee: z.string().default("1").refine(v => {
+        const n = parseFloat(v);
+        return Number.isFinite(n) && n > 0 && n <= 100;
+      }, { message: "pointsPerRupee must be a number between 0 and 100." }),
       redemptionRatePaise: z.number().int().min(1).default(100),
       maxRedemptionPercent: z.number().int().min(1).max(100).default(50),
       pointsExpiryDays: z.number().int().min(1).default(365),
@@ -110,10 +113,11 @@ export const loyaltyRouter = router({
         return { earned: existingEarn.points, alreadyExists: true as const };
       }
 
-      const pointsPerRupee = parseFloat(program.pointsPerRupee);
+      const pointsPerRupee = parseFloat(String(program.pointsPerRupee));
+      if (!Number.isFinite(pointsPerRupee) || pointsPerRupee <= 0) return { earned: 0 };
       const rupees = order.totalPaise / 100;
       const earned = Math.floor(rupees * pointsPerRupee);
-      if (earned <= 0) return { earned: 0 };
+      if (!Number.isFinite(earned) || earned <= 0) return { earned: 0 };
 
       let balance = (await db.select().from(loyaltyBalances)
         .where(and(eq(loyaltyBalances.customerId, input.customerId), eq(loyaltyBalances.restaurantId, input.restaurantId)))

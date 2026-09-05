@@ -45,7 +45,8 @@ export default function KDSPage({ slug, restaurantId }: { slug?: string; restaur
   const [soundEnabled, setSoundEnabled] = useState(false);
   const [pausedOnError, setPausedOnError] = useState(false);
   const audioCtxRef = useRef<AudioContext | null>(null);
-  const prevCountRef = useRef(0);
+  // -1 = feed not loaded yet: the first load must not chime for old orders.
+  const prevCountRef = useRef(-1);
 
   if (!slug) {
     return (
@@ -135,7 +136,7 @@ function KDSBoard({
 
   useEffect(() => {
     const count = ordersQuery.data?.length ?? 0;
-    if (count > prevCountRef.current && prevCountRef.current >= 0) {
+    if (prevCountRef.current >= 0 && count > prevCountRef.current) {
       playAlert();
     }
     prevCountRef.current = count;
@@ -159,24 +160,24 @@ function KDSBoard({
   return (
     <div className="min-h-screen bg-[#1a1a1a] text-white flex flex-col">
       {/* Top Bar */}
-      <header className="flex items-center justify-between px-6 py-3 bg-[#222] border-b border-[#333]">
+      <header className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 py-3 sm:px-6 bg-[#222] border-b border-[#333]">
         <div className="flex items-center gap-3">
           <ChefHat className="w-6 h-6 text-orange-400" />
           <h1 className="text-lg font-bold tracking-tight">Kitchen Display</h1>
         </div>
 
-        <div className="flex items-center gap-6 text-sm">
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-1 text-sm">
           <div className="flex items-center gap-2">
             <div className="w-2 h-2 rounded-full bg-blue-400 animate-pulse" />
             <span className="text-gray-400">Active:</span>
             <span className="font-bold">{stats.active}</span>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="hidden items-center gap-2 min-[420px]:flex">
             <Flame className="w-4 h-4 text-orange-400" />
             <span className="text-gray-400">Preparing:</span>
             <span className="font-bold">{stats.preparing}</span>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="hidden items-center gap-2 min-[420px]:flex">
             <CheckCircle2 className="w-4 h-4 text-green-400" />
             <span className="text-gray-400">Ready:</span>
             <span className="font-bold">{stats.ready}</span>
@@ -283,42 +284,53 @@ function KDSBoard({
                   ))}
                 </div>
 
-                {/* Actions */}
+                {/* Actions — one legal step at a time, mirroring the server
+                    state machine (PLACED → ACCEPTED → PREPARING → READY).
+                    Skipping a step fails server-side with
+                    InvalidTransitionError, so it is never offered. */}
                 <div className="flex gap-2 pt-2 border-t border-white/10">
-                  {order.status === "PLACED" && (
-                    <Button
-                      size="sm"
-                      className="flex-1 bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold"
-                      onClick={() => acceptOrder.mutate({ orderId: order.id, slug })}
-                      disabled={acceptOrder.isPending}
-                    >
-                      Accept
-                    </Button>
-                  )}
-                  {(order.status === "PLACED" || order.status === "RESTAURANT_ACCEPTED") && (
-                    <Button
-                      size="sm"
-                      className="flex-1 bg-orange-600 hover:bg-orange-700 text-white text-xs font-bold"
-                      onClick={() => setPreparing.mutate({ orderId: order.id, slug })}
-                      disabled={setPreparing.isPending}
-                    >
-                      <Flame className="w-3 h-3 mr-1" /> Start
-                    </Button>
-                  )}
-                  {order.status !== "READY_FOR_PICKUP" && (
-                    <Button
-                      size="sm"
-                      className="flex-1 bg-green-600 hover:bg-green-700 text-white text-xs font-bold"
-                      onClick={() => bumpOrder.mutate({ orderId: order.id, slug })}
-                      disabled={bumpOrder.isPending}
-                    >
-                      <CheckCircle2 className="w-3 h-3 mr-1" /> Ready
-                    </Button>
-                  )}
-                  {order.status === "READY_FOR_PICKUP" && (
-                    <div className="flex-1 text-center text-xs font-bold text-green-400 py-1.5">
-                      READY FOR PICKUP
+                  {(order as any).paymentStatus !== "PAID" ? (
+                    <div className="flex-1 text-center text-xs font-bold text-amber-400 py-2.5">
+                      AWAITING PAYMENT
                     </div>
+                  ) : (
+                    <>
+                      {order.status === "PLACED" && (
+                        <Button
+                          size="sm"
+                          className="flex-1 min-h-11 bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold"
+                          onClick={() => acceptOrder.mutate({ orderId: order.id, slug })}
+                          disabled={acceptOrder.isPending}
+                        >
+                          Accept
+                        </Button>
+                      )}
+                      {order.status === "RESTAURANT_ACCEPTED" && (
+                        <Button
+                          size="sm"
+                          className="flex-1 min-h-11 bg-orange-600 hover:bg-orange-700 text-white text-xs font-bold"
+                          onClick={() => setPreparing.mutate({ orderId: order.id, slug })}
+                          disabled={setPreparing.isPending}
+                        >
+                          <Flame className="w-3 h-3 mr-1" /> Start
+                        </Button>
+                      )}
+                      {order.status === "PREPARING" && (
+                        <Button
+                          size="sm"
+                          className="flex-1 min-h-11 bg-green-600 hover:bg-green-700 text-white text-xs font-bold"
+                          onClick={() => bumpOrder.mutate({ orderId: order.id, slug })}
+                          disabled={bumpOrder.isPending}
+                        >
+                          <CheckCircle2 className="w-3 h-3 mr-1" /> Ready
+                        </Button>
+                      )}
+                      {order.status === "READY_FOR_PICKUP" && (
+                        <div className="flex-1 text-center text-xs font-bold text-green-400 py-2.5">
+                          READY FOR PICKUP
+                        </div>
+                      )}
+                    </>
                   )}
                 </div>
               </div>

@@ -18,6 +18,25 @@ function requireSecret(name: string, validate?: (v: string) => boolean, hint?: s
 const HEX64 = (v: string) => /^[a-f0-9]{64}$/i.test(v);
 const MIN16 = (v: string) => v.length >= 16;
 
+function parsePort(): number {
+  const n = parseInt(process.env.PORT || "3000", 10);
+  return Number.isFinite(n) && n > 0 && n < 65536 ? n : 3000;
+}
+
+function parseDeliveryRadius(): number {
+  const n = parseFloat(process.env.DEFAULT_DELIVERY_RADIUS_KM || "5");
+  return Number.isFinite(n) && n > 0 ? n : 5;
+}
+
+/** Express "trust proxy": number of hops (behind Nginx: 1), true/false also accepted. */
+function parseTrustedProxy(): number | boolean {
+  const raw = (process.env.TRUSTED_PROXY ?? "1").trim().toLowerCase();
+  if (raw === "true") return true;
+  if (raw === "false" || raw === "0") return false;
+  const n = parseInt(raw, 10);
+  return Number.isFinite(n) && n >= 0 ? n : 1;
+}
+
 // Fail-fast in production for all load-bearing secrets (no silent "" fallbacks).
 const jwtSecret = requireSecret("JWT_SECRET");
 const cookieSecret = requireSecret("COOKIE_SECRET");
@@ -39,7 +58,8 @@ const localAdminToken = requireSecret(
 
 export const ENV = {
   nodeEnv: process.env.NODE_ENV ?? "development",
-  port: parseInt(process.env.PORT || "3000"),
+  port: parsePort(),
+  trustedProxy: parseTrustedProxy(),
   databaseUrl: process.env.DATABASE_URL ?? "",
   jwtSecret,
   cookieSecret,
@@ -60,7 +80,7 @@ export const ENV = {
   shadowfaxWebhookSecret: process.env.SHADOWFAX_WEBHOOK_SECRET ?? "",
   assetBaseUrl: process.env.ASSET_BASE_URL ?? "/assets",
   businessTimezone: process.env.BUSINESS_TIMEZONE ?? "Asia/Kolkata",
-  defaultDeliveryRadiusKm: parseFloat(process.env.DEFAULT_DELIVERY_RADIUS_KM || "5"),
+  defaultDeliveryRadiusKm: parseDeliveryRadius(),
   // Customer OTP dev logging — explicit opt-in, never logs in production (see storefront router).
   otpDevLogEnabled: process.env.OTP_DEV_LOG_ENABLED === "true",
   publicUrl: process.env.PUBLIC_URL ?? "",

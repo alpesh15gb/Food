@@ -28,8 +28,10 @@ export interface InvoiceData {
   paymentStatus: string;
 }
 
-const money = (paise: number) =>
-  `₹${(paise / 100).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const money = (paise: number) => {
+  const safe = Number.isFinite(paise) ? paise : 0;
+  return `₹${(safe / 100).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+};
 
 /** H-09: HTML-escape all user-supplied values to prevent XSS in invoice HTML. */
 function esc(str: string): string {
@@ -50,20 +52,23 @@ function isSafeLogoUrl(url: string | undefined): boolean {
 }
 
 export function generateInvoiceHtml(data: InvoiceData): string {
-  const rows = data.items.map(item => `
+  const rows = data.items.map(item => {
+    const qty = Number.isFinite(item.quantity) ? item.quantity : 0;
+    return `
     <tr>
       <td style="padding:8px 12px;border-bottom:1px solid #eee">${esc(item.name)}${item.hsnCode ? `<br><small style="color:#999">HSN: ${esc(item.hsnCode)}</small>` : ""}</td>
-      <td style="padding:8px 12px;border-bottom:1px solid #eee;text-align:center">${item.quantity}</td>
+      <td style="padding:8px 12px;border-bottom:1px solid #eee;text-align:center">${qty}</td>
       <td style="padding:8px 12px;border-bottom:1px solid #eee;text-align:right">${money(item.unitPricePaise)}</td>
       <td style="padding:8px 12px;border-bottom:1px solid #eee;text-align:right">${money(item.totalPricePaise)}</td>
     </tr>
-  `).join("");
+  `;
+  }).join("");
 
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Invoice ${data.invoiceNumber}</title>
+<title>Invoice ${esc(data.invoiceNumber)}</title>
 <style>
   @media print { @page { size: A4; margin: 15mm; } body { -webkit-print-color-adjust: exact; } }
   * { margin: 0; padding: 0; box-sizing: border-box; }

@@ -121,6 +121,29 @@ export function checkLocalAdminIpLimit(ip: string) {
   return checkRateLimit(`local-admin:${ip}`, 5, 15 * 60 * 1000, localAdminLimits);
 }
 
+/**
+ * Shared client-IP resolver for rate limiting. X-Forwarded-For is attacker
+ * controlled, so it is trusted ONLY behind a configured trusted proxy
+ * (TRUSTED_PROXY=1, e.g. nginx/Caddy on the VPS). Otherwise the socket's
+ * remote address is authoritative. All OTP/auth endpoints must use this
+ * helper — reading XFF unconditionally lets attackers rotate the header to
+ * bypass per-IP limits.
+ */
+export function getRateLimitClientIp(req: Pick<{ headers: Record<string, unknown>; socket: { remoteAddress?: string | null } }, "headers" | "socket">): string {
+  if (process.env.TRUSTED_PROXY === "1") {
+    const xff = (req.headers as Record<string, unknown>)["x-forwarded-for"];
+    const raw = Array.isArray(xff) ? xff[0] : xff;
+    const first = typeof raw === "string" ? raw.split(",")[0]?.trim() : undefined;
+    if (first) return first;
+  }
+  return req.socket.remoteAddress ?? "unknown";
+}
+
+/** Test-only: clear all in-memory rate-limit state for test isolation. */
+export function clearAllRateLimitStores(): void {
+  for (const store of ALL_STORES) store.clear();
+}
+
 /** Purpose-aware OTP send limit: 3 per 10 minutes per phone+purpose */
 export function checkOtpSendLimit(phone: string, purpose = "login") {
   return checkRateLimit(`send:${purpose}:${phone}`, 3, 10 * 60 * 1000, otpPurposeSendLimits);

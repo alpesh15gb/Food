@@ -167,6 +167,12 @@ export function adaptStorefront(data: StorefrontPayload) {
     return Number.isFinite(parsed) ? parsed : null;
   };
 
+  /** Paise → ₹ with a safe fallback so one bad row can never render ₹NaN. */
+  const rupees = (paise: number | null | undefined, fallback = 0): number => {
+    const parsed = typeof paise === "number" ? paise : parseFloat(String(paise));
+    return Number.isFinite(parsed) ? (parsed as number) / 100 : fallback;
+  };
+
   const normalizeGroup = (
     group: {
       id: string;
@@ -194,14 +200,15 @@ export function adaptStorefront(data: StorefrontPayload) {
     list.push({
       id: opt.id,
       name: opt.name,
-      pricePaise: opt.pricePaise,
+      pricePaise: Number.isFinite(opt.pricePaise) ? opt.pricePaise : 0,
       isAvailable: opt.isAvailable ?? true,
     });
     topLevelOptionsByGroup.set(opt.addonGroupId, list);
   }
   const topLevelGroupsByItem = new Map<string, StorefrontAddonGroup[]>();
   for (const group of data.addonGroups ?? []) {
-    const options = (topLevelOptionsByGroup.get(group.id) ?? []).slice().sort((a, b) => a.name.localeCompare(b.name));
+    // Preserve server order — never re-sort; the kitchen's sortOrder is canonical.
+    const options = (topLevelOptionsByGroup.get(group.id) ?? []).slice();
     const list = topLevelGroupsByItem.get(group.menuItemId) ?? [];
     list.push(normalizeGroup(group, options));
     topLevelGroupsByItem.set(group.menuItemId, list);
@@ -212,7 +219,7 @@ export function adaptStorefront(data: StorefrontPayload) {
     list.push({
       id: variant.id,
       name: variant.name,
-      pricePaise: variant.pricePaise,
+      pricePaise: Number.isFinite(variant.pricePaise) ? variant.pricePaise : 0,
       isAvailable: variant.isAvailable ?? true,
     });
     topLevelVariantsByItem.set(variant.menuItemId, list);
@@ -231,7 +238,7 @@ export function adaptStorefront(data: StorefrontPayload) {
         const options: StorefrontAddonOption[] = (group.options ?? []).map(opt => ({
           id: opt.id,
           name: opt.name,
-          pricePaise: opt.pricePaise,
+          pricePaise: Number.isFinite(opt.pricePaise) ? opt.pricePaise : 0,
           isAvailable: opt.isAvailable ?? true,
         }));
         return { ...normalizeGroup(group, options), options };
@@ -240,17 +247,20 @@ export function adaptStorefront(data: StorefrontPayload) {
       const embeddedVariants: StorefrontVariant[] = (item.variants ?? []).map(variant => ({
         id: variant.id,
         name: variant.name,
-        pricePaise: variant.pricePaise,
+        pricePaise: Number.isFinite(variant.pricePaise) ? variant.pricePaise : 0,
         isAvailable: variant.isAvailable ?? true,
       }));
       const joinedVariants = topLevelVariantsByItem.get(item.id) ?? [];
+      const price = item.offerPricePaise
+        ? rupees(item.offerPricePaise, rupees(item.pricePaise))
+        : rupees(item.pricePaise);
       return {
         id: item.id,
         category: categoryName.get(item.categoryId) ?? "Menu",
         name: item.name,
         description: item.description ?? "Prepared fresh by the kitchen.",
-        price: item.offerPricePaise ? item.offerPricePaise / 100 : item.pricePaise / 100,
-        originalPrice: item.offerPricePaise ? item.pricePaise / 100 : undefined,
+        price,
+        originalPrice: item.offerPricePaise ? rupees(item.pricePaise) : undefined,
         image: item.imageUrl ?? undefined,
         kind: item.dietaryType,
         tag: item.isBestseller ? "Bestseller" : item.tag ?? undefined,
@@ -285,11 +295,11 @@ export function adaptStorefront(data: StorefrontPayload) {
       name: data.restaurant.name,
       logo: data.restaurant.logoUrl ?? "",
       bannerImage: data.restaurant.bannerImageUrl ?? "",
-      cuisines: data.restaurant.cuisineSummary.split("•").map(v => v.trim()).filter(Boolean),
+      cuisines: (data.restaurant.cuisineSummary ?? "").split("•").map(v => v.trim()).filter(Boolean),
       eta,
-      deliveryFee: data.restaurant.deliveryFeePaise / 100,
-      packagingFee: data.restaurant.packagingFeePaise / 100,
-      minOrder: data.restaurant.minOrderPaise / 100,
+      deliveryFee: rupees(data.restaurant.deliveryFeePaise),
+      packagingFee: rupees(data.restaurant.packagingFeePaise),
+      minOrder: rupees(data.restaurant.minOrderPaise),
       isOpen: data.restaurant.isOpen,
       description: data.restaurant.description,
       contactPhone: data.restaurant.contactPhone,
@@ -307,8 +317,9 @@ export function adaptStorefront(data: StorefrontPayload) {
           name: data.outlet.name,
           city: data.outlet.city,
           address: data.outlet.address,
-          latitude: (() => { const v = (data.outlet as unknown as Record<string, unknown>).latitude as string | number | null; const n = v == null || v === "" ? NaN : Number(v); return Number.isFinite(n) ? n : null; })(),
-          longitude: (() => { const v = (data.outlet as unknown as Record<string, unknown>).longitude as string | number | null; const n = v == null || v === "" ? NaN : Number(v); return Number.isFinite(n) ? n : null; })(),
+          // Prefer the numeric Num fields when present; fall back to strings.
+          latitude: outletLatitude,
+          longitude: outletLongitude,
         }
       : null,
     categories: data.categories

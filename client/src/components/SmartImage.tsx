@@ -7,7 +7,7 @@
  *   (dish initial) instead of fetching bytes.
  */
 import { useState } from "react";
-import { isLowDataConnection } from "@/lib/network";
+import { useNetworkQuality } from "@/lib/network";
 import { cn } from "@/lib/utils";
 
 export default function SmartImage({
@@ -35,7 +35,10 @@ export default function SmartImage({
 }) {
   const [loaded, setLoaded] = useState(false);
   const [failed, setFailed] = useState(false);
-  const skipFetch = !src || (!critical && !eager && isLowDataConnection());
+  // Reactive: already-mounted images flip to the fallback when the
+  // connection degrades mid-scroll on 2G / Save-Data.
+  const { lowData } = useNetworkQuality();
+  const skipFetch = !src || (!critical && !eager && lowData);
 
   if (skipFetch || failed) {
     return (
@@ -49,7 +52,7 @@ export default function SmartImage({
         )}
       >
         <span aria-hidden="true" className="font-display text-2xl font-bold">
-          {fallbackLabel ?? alt.charAt(0).toUpperCase()}
+          {(fallbackLabel ?? alt).charAt(0).toUpperCase()}
         </span>
       </div>
     );

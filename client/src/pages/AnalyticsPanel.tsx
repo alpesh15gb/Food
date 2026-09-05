@@ -11,39 +11,66 @@ const COLORS = ["#9d3727", "#c97a4e", "#e9bda2", "#6d5140", "#a06e53", "#d4956b"
 const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 function formatCurrency(paise: number) {
-  return `₹${(paise / 100).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
+  const safe = Number.isFinite(paise) ? paise : 0;
+  return `₹${(safe / 100).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
+}
+
+function toLocalDateKey(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function formatTickDate(v: string): string {
+  const d = new Date(v);
+  if (Number.isNaN(d.getTime())) return String(v);
+  return d.toLocaleDateString("en-IN", { month: "short", day: "numeric" });
+}
+
+function formatFullDate(v: string): string {
+  const d = new Date(v);
+  if (Number.isNaN(d.getTime())) return String(v);
+  return d.toLocaleDateString("en-IN");
 }
 
 function getDefaultRange() {
   const end = new Date();
   const start = new Date(Date.now() - 30 * 86400000);
   return {
-    start: start.toISOString().split("T")[0],
-    end: end.toISOString().split("T")[0],
+    start: toLocalDateKey(start),
+    end: toLocalDateKey(end),
   };
 }
 
 export default function AnalyticsPanel({ restaurantId }: { restaurantId: string }) {
   const [range, setRange] = useState(getDefaultRange);
+  const isRangeInvalid = range.start > range.end;
+  const heatmapDays = (() => {
+    const s = new Date(range.start).getTime();
+    const e = new Date(range.end).getTime();
+    if (!Number.isFinite(s) || !Number.isFinite(e) || e < s) return 30;
+    return Math.min(90, Math.max(1, Math.round((e - s) / 86400000) + 1));
+  })();
 
   const summaryQuery = trpc.analytics.summaryStats.useQuery({
     restaurantId, startDate: range.start, endDate: range.end,
-  }, { retry: false });
+  }, { retry: false, enabled: !isRangeInvalid });
   const revenueQuery = trpc.analytics.revenueTrend.useQuery({
     restaurantId, startDate: range.start, endDate: range.end, granularity: "daily",
-  }, { retry: false });
+  }, { retry: false, enabled: !isRangeInvalid });
   const itemQuery = trpc.analytics.itemPerformance.useQuery({
     restaurantId, startDate: range.start, endDate: range.end, limit: 10,
-  }, { retry: false });
+  }, { retry: false, enabled: !isRangeInvalid });
   const heatmapQuery = trpc.analytics.hourlyHeatmap.useQuery({
-    restaurantId, days: 30,
-  }, { retry: false });
+    restaurantId, days: heatmapDays,
+  }, { retry: false, enabled: !isRangeInvalid });
   const categoryQuery = trpc.analytics.categoryBreakdown.useQuery({
     restaurantId, startDate: range.start, endDate: range.end,
-  }, { retry: false });
+  }, { retry: false, enabled: !isRangeInvalid });
   const retentionQuery = trpc.analytics.customerRetention.useQuery({
     restaurantId, startDate: range.start, endDate: range.end,
-  }, { retry: false });
+  }, { retry: false, enabled: !isRangeInvalid });
 
   const summary = summaryQuery.data;
   const revenueData = revenueQuery.data;
@@ -84,13 +111,14 @@ export default function AnalyticsPanel({ restaurantId }: { restaurantId: string 
           <h1 className="text-2xl font-bold tracking-tight">Analytics</h1>
           <p className="mt-1 text-sm text-muted-foreground">Revenue, orders, and customer insights</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <CalendarDays className="h-4 w-4 text-muted-foreground" aria-hidden />
           <label htmlFor="analytics-start" className="sr-only">Start date</label>
           <input
             id="analytics-start"
             type="date"
             value={range.start}
+            max={range.end}
             onChange={(e: React.ChangeEvent<HTMLInputElement>) => setRange(r => ({ ...r, start: e.target.value }))}
             className="min-h-11 rounded-md border px-2 py-1.5 text-sm"
           />
@@ -100,13 +128,20 @@ export default function AnalyticsPanel({ restaurantId }: { restaurantId: string 
             id="analytics-end"
             type="date"
             value={range.end}
+            min={range.start}
             onChange={(e: React.ChangeEvent<HTMLInputElement>) => setRange(r => ({ ...r, end: e.target.value }))}
             className="min-h-11 rounded-md border px-2 py-1.5 text-sm"
           />
         </div>
       </div>
 
-      {(summaryQuery.isError || revenueQuery.isError) && (
+      {isRangeInvalid && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm font-medium text-amber-800">
+          Start date must be before or equal to end date.
+        </div>
+      )}
+
+      {(summaryQuery.isError || revenueQuery.isError) && !isRangeInvalid && (
         <AdminError
           message="We couldn't load analytics for this range. Please retry."
           onRetry={refetchAll}
@@ -143,7 +178,7 @@ export default function AnalyticsPanel({ restaurantId }: { restaurantId: string 
           bg="bg-purple-100"
         />
         <SummaryCard
-          label="Repeat Customers"
+          label="Retention Rate"
           value={`${retentionData?.retentionRate ?? 0}%`}
           subtitle={`${retentionData?.repeatCustomers ?? 0} of ${((retentionData?.newCustomers ?? 0) + (retentionData?.repeatCustomers ?? 0))} customers`}
           icon={Users}
@@ -159,6 +194,10 @@ export default function AnalyticsPanel({ restaurantId }: { restaurantId: string 
         <h2 className="mb-4 font-semibold">Revenue Trend</h2>
         {revenueLoading ? (
           <div className="h-72 animate-pulse rounded-lg bg-muted" aria-label="Loading revenue trend" />
+        ) : !revenueData || revenueData.length === 0 ? (
+          <div className="grid h-72 place-items-center rounded-lg bg-muted/40 text-sm text-muted-foreground">
+            No revenue data for this range.
+          </div>
         ) : (
         <div className="h-72">
           <ResponsiveContainer width="100%" height="100%">
@@ -172,13 +211,13 @@ export default function AnalyticsPanel({ restaurantId }: { restaurantId: string 
               <CartesianGrid strokeDasharray="3 3" stroke="#eee" />
               <XAxis
                 dataKey="period"
-                tickFormatter={(v: string) => new Date(v).toLocaleDateString("en-IN", { month: "short", day: "numeric" })}
+                tickFormatter={(v: string) => formatTickDate(v)}
                 fontSize={11}
               />
-              <YAxis tickFormatter={(v: number) => `₹${(v / 100).toLocaleString("en-IN")}`} fontSize={11} />
+              <YAxis tickFormatter={(v: number) => `₹${((Number.isFinite(v) ? v : 0) / 100).toLocaleString("en-IN")}`} fontSize={11} />
               <Tooltip
                 formatter={(value: number) => [formatCurrency(value), "Revenue"]}
-                labelFormatter={(label: string) => new Date(label).toLocaleDateString("en-IN")}
+                labelFormatter={(label: string) => formatFullDate(label)}
               />
               <Area type="monotone" dataKey="totalRevenuePaise" stroke="#9d3727" fill="url(#revGrad)" strokeWidth={2} />
             </AreaChart>
@@ -193,12 +232,16 @@ export default function AnalyticsPanel({ restaurantId }: { restaurantId: string 
           <h2 className="mb-4 font-semibold">Top Performing Items</h2>
           {itemQuery.isLoading ? (
             <div className="h-72 animate-pulse rounded-lg bg-muted" aria-label="Loading top items" />
+          ) : !itemData || itemData.length === 0 ? (
+            <div className="grid h-72 place-items-center rounded-lg bg-muted/40 text-sm text-muted-foreground">
+              No item sales for this range.
+            </div>
           ) : (
           <div className="h-72">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={itemData ?? []} layout="vertical" margin={{ left: 20 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#eee" horizontal={false} />
-                <XAxis type="number" tickFormatter={(v: number) => `₹${(v / 100).toLocaleString("en-IN")}`} fontSize={11} />
+                <XAxis type="number" tickFormatter={(v: number) => `₹${((Number.isFinite(v) ? v : 0) / 100).toLocaleString("en-IN")}`} fontSize={11} />
                 <YAxis dataKey="itemName" type="category" width={100} fontSize={11} />
                 <Tooltip formatter={(value: number) => [formatCurrency(value), "Revenue"]} />
                 <Bar dataKey="totalRevenuePaise" radius={[0, 4, 4, 0]}>
@@ -217,6 +260,10 @@ export default function AnalyticsPanel({ restaurantId }: { restaurantId: string 
           <h2 className="mb-4 font-semibold">Sales by Category</h2>
           {categoryQuery.isLoading ? (
             <div className="h-72 animate-pulse rounded-lg bg-muted" aria-label="Loading category breakdown" />
+          ) : !categoryData || categoryData.length === 0 ? (
+            <div className="grid h-72 place-items-center rounded-lg bg-muted/40 text-sm text-muted-foreground">
+              No category sales for this range.
+            </div>
           ) : (
           <div className="h-72">
             <ResponsiveContainer width="100%" height="100%">
@@ -246,7 +293,14 @@ export default function AnalyticsPanel({ restaurantId }: { restaurantId: string 
 
       {/* Hourly Heatmap */}
       <div className="rounded-xl border bg-card p-6">
-        <h2 className="mb-4 font-semibold">Order Volume Heatmap (Last 30 Days)</h2>
+        <h2 className="mb-4 font-semibold">Order Volume Heatmap (Last {heatmapDays} Days)</h2>
+        {heatmapQuery.isLoading ? (
+          <div className="h-40 animate-pulse rounded-lg bg-muted" aria-label="Loading heatmap" />
+        ) : maxHeatmap <= 1 && heatmapGrid.every(g => g.count === 0) ? (
+          <div className="grid h-40 place-items-center rounded-lg bg-muted/40 text-sm text-muted-foreground">
+            No orders in the last {heatmapDays} days.
+          </div>
+        ) : (
         <div className="overflow-x-auto">
           <div className="min-w-[600px]">
             <div className="flex">
@@ -278,6 +332,7 @@ export default function AnalyticsPanel({ restaurantId }: { restaurantId: string 
             ))}
           </div>
         </div>
+        )}
       </div>
 
       {/* Customer Retention */}

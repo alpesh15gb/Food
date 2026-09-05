@@ -2,14 +2,14 @@
  * Cloud Kitchen Platform — API Router Composition
  */
 import { ADMIN_COOKIE_NAME, CUSTOMER_COOKIE_NAME } from "@shared/const";
-import { timingSafeEqual } from "node:crypto";
+import { createHash, timingSafeEqual } from "node:crypto";
 import { TRPCError } from "@trpc/server";
 import type { Request } from "express";
 import { z } from "zod";
 import { getAdminCookieOptions, getCustomerCookieOptions } from "./_core/cookies";
 import { sdk } from "./_core/sdk";
 import { systemRouter } from "./_core/systemRouter";
-import { publicProcedure, router } from "./_core/trpc";
+import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
 import { upsertUser, getUserByOpenId, createRestaurant, getDb } from "./db";
 import { adminRouter } from "./routers/admin";
 import { storefrontRouter } from "./routers/storefront";
@@ -19,10 +19,10 @@ import { inventoryRouter } from "./routers/inventory";
 import { analyticsRouter } from "./routers/analytics";
 import { loyaltyRouter } from "./routers/loyalty";
 import { isPlausibleLocalAdminToken, normalizeLocalAdminToken } from "./auth/localAdmin";
-import { hashPassword, verifyPassword } from "./security/passwordHash";
+import { DUMMY_PASSWORD_HASH_FOR_TIMING, hashPassword, needsRehash, verifyPassword } from "./security/passwordHash";
 import { checkLocalAdminIpLimit, checkLoginEmailLimit, checkLoginIpLimit, checkRegisterIpLimit } from "./security/rateLimit";
-import { users, restaurantMembers } from "../drizzle/schema";
-import { eq } from "drizzle-orm";
+import { users } from "../drizzle/schema";
+import { eq, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 
 /**
@@ -46,6 +46,25 @@ export const appRouter = router({
   system: systemRouter,
   auth: router({
     me: publicProcedure.query(opts => opts.ctx.user),
+    /** Restaurants the caller actively belongs to (slug + name for workspace routing). */
+    memberships: protectedProcedure.query(async ({ ctx }) => {
+      const db = await getDb();
+      if (!db) return [];
+      const { restaurantMembers, restaurants } = await import("../drizzle/schema");
+      const { eq, and } = await import("drizzle-orm");
+      return db.select({
+        restaurantId: restaurantMembers.restaurantId,
+        role: restaurantMembers.role,
+        slug: restaurants.slug,
+        name: restaurants.name,
+      })
+        .from(restaurantMembers)
+        .innerJoin(restaurants, eq(restaurantMembers.restaurantId, restaurants.id))
+        .where(and(
+          eq(restaurantMembers.userId, ctx.user.id),
+          eq(restaurantMembers.isActive, true),
+        ));
+    }),
     // M-23: Don't leak whether JWT_SECRET is configured — only check LOCAL_ADMIN_TOKEN
     localAdminEnabled: publicProcedure.query(() =>
       Boolean(process.env.LOCAL_ADMIN_TOKEN)
@@ -60,13 +79,17 @@ export const appRouter = router({
         }
         const submittedToken = normalizeLocalAdminToken(input.token);
         const expected = process.env.LOCAL_ADMIN_TOKEN;
+        // Length-hiding compare: hash both sides first so the timingSafeEqual
+        // inputs are always 32 bytes. Comparing raw buffers of different
+        // lengths would short-circuit and leak the expected length.
+        const submittedDigest = createHash("sha256").update(submittedToken).digest();
+        const expectedDigest = createHash("sha256").update(expected ?? "").digest();
         if (
           !isPlausibleLocalAdminToken(submittedToken) ||
           !expected ||
-          expected.length !== submittedToken.length ||
-          !timingSafeEqual(Buffer.from(expected), Buffer.from(submittedToken))
+          !timingSafeEqual(submittedDigest, expectedDigest)
         ) {
-          throw new Error("The administrator passphrase was not accepted.");
+          throw new TRPCError({ code: "UNAUTHORIZED", message: "The administrator passphrase was not accepted." });
         }
         const openId = "vps-local-administrator";
         await upsertUser({
@@ -107,8 +130,18 @@ export const appRouter = router({
 
         // Normalize identifiers: trim + lowercase so "Foo@X.com" and "foo@x.com"
         // map to one account, and slugs are canonical for lookup/routing.
+        // Trim display fields too — zod min() runs pre-trim, so "  " would
+        // otherwise pass validation but store blank names/addresses.
         const email = input.email.trim().toLowerCase();
         const slug = input.restaurantSlug.trim().toLowerCase();
+        const name = input.name.trim();
+        const restaurantName = input.restaurantName.trim();
+        const address = input.address.trim();
+        const cuisineSummary = input.cuisineSummary?.trim() || undefined;
+        const contactPhone = input.contactPhone?.trim() || undefined;
+        if (!name || !restaurantName || !address) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Name, restaurant name, and address are required." });
+        }
 
         const db = await getDb();
         if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
@@ -125,7 +158,7 @@ export const appRouter = router({
         try {
           await db.insert(users).values({
             openId,
-            name: input.name,
+            name,
             email,
             passwordHash: pwHash,
             loginMethod: "email",
@@ -139,29 +172,35 @@ export const appRouter = router({
           throw err;
         }
 
-        const restaurantId = await createRestaurant({
-          name: input.restaurantName,
-          slug,
-          cuisineSummary: input.cuisineSummary,
-          contactPhone: input.contactPhone,
-          address: input.address,
-          ownerUserId: undefined,
-        });
+        const owner = await getUserByOpenId(openId);
+        if (!owner) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Registration failed. Please try again." });
 
-        const user = await getUserByOpenId(openId);
-        if (user) {
-          await db.insert(restaurantMembers).values({
-            id: nanoid(18),
-            userId: user.id,
-            restaurantId,
-            role: "owner",
-            isActive: true,
+        // Restaurant + owner membership are created atomically inside
+        // createRestaurant's transaction (ownerUserId path). On slug collision
+        // or any bootstrap failure, remove the orphan user row so a retry
+        // with the same email does not hit a false CONFLICT.
+        let restaurantId: string;
+        try {
+          restaurantId = await createRestaurant({
+            name: restaurantName,
+            slug,
+            cuisineSummary,
+            contactPhone,
+            address,
+            ownerUserId: owner.id,
           });
+        } catch (err: unknown) {
+          await db.delete(users).where(eq(users.openId, openId)).catch(() => undefined);
+          const msg = err instanceof Error ? err.message : String(err);
+          if (msg.includes("unique") || msg.includes("23505") || msg.includes("duplicate") || msg.toLowerCase().includes("slug")) {
+            throw new TRPCError({ code: "CONFLICT", message: "This storefront URL is already taken. Please choose another." });
+          }
+          throw err;
         }
 
         // H-03: Use explicit 12-hour expiry for registration session (not default ONE_YEAR_MS)
         const sessionToken = await sdk.signSession(
-          { openId, appId: "self-register", name: input.name },
+          { openId, appId: "self-register", name },
           { expiresInMs: 1000 * 60 * 60 * 12 }
         );
         ctx.res.cookie(ADMIN_COOKIE_NAME, sessionToken, {
@@ -174,8 +213,8 @@ export const appRouter = router({
 
     login: publicProcedure
       .input(z.object({
-        email: z.string().trim().toLowerCase().email(),
-        password: z.string().min(8).max(72),
+        email: z.string().trim().toLowerCase().email().max(320),
+        password: z.string().min(8).max(128),
       }))
       .mutation(async ({ ctx, input }) => {
         const clientIp = getClientIp(ctx.req);
@@ -196,12 +235,25 @@ export const appRouter = router({
           .where(eq(users.email, email)).limit(1);
 
         if (!user?.passwordHash) {
+          // Burn equivalent scrypt work so "unknown email" and "wrong
+          // password" are indistinguishable by timing. Uniform message below.
+          await verifyPassword(input.password, DUMMY_PASSWORD_HASH_FOR_TIMING).catch(() => false);
           throw new TRPCError({ code: "UNAUTHORIZED", message: "Invalid email or password." });
         }
 
         const valid = await verifyPassword(input.password, user.passwordHash);
         if (!valid) {
           throw new TRPCError({ code: "UNAUTHORIZED", message: "Invalid email or password." });
+        }
+
+        // Opportunistic upgrade for pre-v3 hashes without blocking login.
+        if (needsRehash(user.passwordHash)) {
+          try {
+            const upgraded = await hashPassword(input.password);
+            await db.update(users).set({ passwordHash: upgraded }).where(eq(users.id, user.id));
+          } catch {
+            // Non-fatal: old hash already verified, upgrade retries next login.
+          }
         }
 
         await upsertUser({
@@ -226,7 +278,24 @@ export const appRouter = router({
         return { success: true } as const;
       }),
 
-    logout: publicProcedure.mutation(({ ctx }) => {
+    logout: publicProcedure.mutation(async ({ ctx }) => {
+      // Revoke the JWT server-side so a stolen token cannot be replayed until
+      // expiry: bump sessionVersion, which verifySession compares against the
+      // token's `sv` claim. Best-effort — cookie clearing below must run even
+      // when the DB is unavailable.
+      const caller = ctx.user;
+      if (caller) {
+        try {
+          const db = await getDb();
+          if (db) {
+            await db.update(users)
+              .set({ sessionVersion: sql`${users.sessionVersion} + 1` })
+              .where(eq(users.id, caller.id));
+          }
+        } catch {
+          // Never block logout on revocation failure; cookies are still cleared.
+        }
+      }
       // Clear BOTH session cookies: admin (12h options) and customer (30d
       // options). They currently share one name (see shared/const), so this
       // clears with both option sets to cover any path/domain drift.

@@ -26,10 +26,22 @@ export function previewMenuImport(csv: string) {
   // Header row excluded from dish count (-1): allow 1000 dishes + 1 header row.
   if (matrix.length - 1 > 1000) return { columns: expectedHeaders, rows: [], valid: 0, invalid: 1, errors: ["Import a maximum of 1,000 dishes at a time."] };
   const index = (header: string) => headers.indexOf(header);
+  const seen = new Set<string>();
   const rows: ImportRow[] = matrix.slice(1).map((values, rowIndex) => {
     const errors: string[] = []; const category = values[index("category")]?.trim() ?? ""; const name = values[index("name")]?.trim() ?? ""; const description = values[index("description")]?.trim() ?? ""; const price = Number(values[index("price")]?.replace(/[^0-9.]/g, "")); const dietaryRaw = (values[index("dietary_type")] || "veg").trim().toLowerCase(); const availabilityRaw = (values[index("availability")] || "AVAILABLE").trim().toUpperCase(); const imageUrl = values[index("image_url")]?.trim() || undefined; const tag = values[index("tag")]?.trim() || undefined; const customRaw = (values[index("customizable")] || "no").trim().toLowerCase();
     if (!category) errors.push("Category is required."); if (!name) errors.push("Dish name is required."); if (!Number.isFinite(price) || price <= 0) errors.push("Price must be greater than ₹0."); if (!(["veg", "nonveg", "egg"] as string[]).includes(dietaryRaw)) errors.push("Dietary type must be veg, nonveg, or egg."); if (!(availabilityValues as readonly string[]).includes(availabilityRaw)) errors.push("Availability is invalid."); if (imageUrl && !/^https?:\/\//i.test(imageUrl) && !imageUrl.startsWith("/assets/")) errors.push("Image URL must start with https:// or /assets/."); if (!(["yes", "no", "true", "false", "1", "0"] as string[]).includes(customRaw)) errors.push("Customizable must be yes or no.");
-    return { rowNumber: rowIndex + 2, category, name, description, pricePaise: Math.round(price * 100), dietaryType: (dietaryRaw === "nonveg" || dietaryRaw === "egg" ? dietaryRaw : "veg") as "veg" | "nonveg" | "egg", availability: (availabilityValues as readonly string[]).includes(availabilityRaw) ? availabilityRaw as Availability : "AVAILABLE", imageUrl, tag, customizable: ["yes", "true", "1"].includes(customRaw), errors };
+    // Duplicate (category, dish) pairs within the file would silently apply
+    // twice (create then update, double-counting created+updated). Flag them.
+    const dedupKey = `${category.toLowerCase()}::${name.toLowerCase()}`;
+    if (category && name) {
+      if (seen.has(dedupKey)) errors.push("Duplicate dish in this file: keep only one row per category and name.");
+      else seen.add(dedupKey);
+    }
+    // Guard the payload: an unparsable price is NaN, which has no JSON
+    // representation — report 0 here (the row already carries an error and
+    // applyMenuImport refuses to publish while any row is invalid).
+    const pricePaise = Number.isFinite(price) && price > 0 ? Math.round(price * 100) : 0;
+    return { rowNumber: rowIndex + 2, category, name, description, pricePaise, dietaryType: (dietaryRaw === "nonveg" || dietaryRaw === "egg" ? dietaryRaw : "veg") as "veg" | "nonveg" | "egg", availability: (availabilityValues as readonly string[]).includes(availabilityRaw) ? availabilityRaw as Availability : "AVAILABLE", imageUrl, tag, customizable: ["yes", "true", "1"].includes(customRaw), errors };
   });
   return { columns: expectedHeaders, rows, valid: rows.filter(row => !row.errors.length).length, invalid: rows.filter(row => row.errors.length).length, errors: [] as string[] };
 }

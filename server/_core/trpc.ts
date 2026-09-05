@@ -38,14 +38,15 @@ async function resolveTenantId(
   ctx: TrpcContext,
   input?: { slug?: unknown; restaurantId?: unknown },
 ): Promise<string | null> {
-  if (typeof input?.restaurantId === "string" && input.restaurantId.length > 0) {
-    return input.restaurantId;
+  const rawId = typeof input?.restaurantId === "string" ? input.restaurantId.trim() : "";
+  if (rawId.length > 0) {
+    return rawId;
   }
-  const slug = typeof input?.slug === "string" ? input.slug : undefined;
-  if (slug) {
+  const rawSlug = typeof input?.slug === "string" ? input.slug.trim().toLowerCase() : "";
+  if (rawSlug) {
     try {
       const { getRestaurantBySlug } = await import("../db");
-      const restaurant = await getRestaurantBySlug(slug);
+      const restaurant = await getRestaurantBySlug(rawSlug);
       if (restaurant) return restaurant.id;
       return null;
     } catch {
@@ -84,8 +85,12 @@ async function getActiveMembership(userId: number, restaurantId: string) {
  * Resolves restaurantId from input (restaurantId/slug) or custom domain,
  * then enforces an ACTIVE membership in the resolved restaurant — a global
  * admin role alone is NOT sufficient for tenant data.
+ *
+ * Accepts any authenticated user with an active membership (owner/admin/
+ * manager/staff/kitchen). This is what lets self-registered owners
+ * (global role "user" + owner membership) reach their own restaurant.
  */
-export const tenantProcedure = t.procedure.use(requireAdmin).use(async opts => {
+export const tenantProcedure = t.procedure.use(requireUser).use(async opts => {
   const input = opts.input as unknown as Record<string, unknown> | undefined;
   const restaurantId = await resolveTenantId(opts.ctx, input);
 
@@ -117,6 +122,39 @@ export const storeProcedure = t.procedure.use(async opts => {
 });
 
 /**
+ * Shared tenant gate: fail-closed on unresolved scope; global platform
+ * admins (role "admin" without membership) retain access; everyone else
+ * needs an ACTIVE membership in the restaurant.
+ */
+export async function checkTenantAccess(
+  user: { id: number; role: string },
+  restaurantId: string | null | undefined,
+): Promise<void> {
+  if (!restaurantId) {
+    throw new TRPCError({ code: "FORBIDDEN", message: "Restaurant scope is required for this operation." });
+  }
+  if (user.role === "admin") return;
+  const membership = await getActiveMembership(user.id, restaurantId);
+  if (!membership) {
+    throw new TRPCError({ code: "FORBIDDEN", message: "You are not a member of this restaurant." });
+  }
+}
+
+/**
+ * Tenant access for endpoints whose input already carries the tenant
+ * (restaurantId or slug) or whose host resolves one. Any authenticated
+ * operator the gate accepts may proceed — use requirePermission when a
+ * specific permission is needed instead.
+ */
+export const tenantAccessProcedure = t.procedure.use(requireUser).use(async opts => {
+  const user = opts.ctx.user!;
+  const input = opts.input as unknown as Record<string, unknown> | undefined;
+  const restaurantId = await resolveTenantId(opts.ctx, input);
+  await checkTenantAccess(user, restaurantId);
+  return opts.next({ ctx: { ...opts.ctx, user, restaurantId } });
+});
+
+/**
  * Require a specific permission for an admin procedure.
  * Super Admin (user with all permissions) bypasses checks.
  *
@@ -127,7 +165,7 @@ export const storeProcedure = t.procedure.use(async opts => {
  *   restaurant:write, settings:write, audit:read
  */
 export function requirePermission(permission: string) {
-  return t.procedure.use(requireAdmin).use(async opts => {
+  return t.procedure.use(requireUser).use(async opts => {
     const user = opts.ctx.user!;
 
     const input = opts.input as unknown as Record<string, unknown> | undefined;

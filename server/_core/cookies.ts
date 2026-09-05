@@ -31,6 +31,12 @@ export const CUSTOMER_SESSION_MAX_AGE_MS = 1000 * 60 * 60 * 24 * 30; // 30d
  * a blanket `false` leaks sessions; hence this per-request check.
  * `req.protocol === "https"` is equivalent to Express `req.secure` and is
  * included so plain mock requests still resolve correctly.
+ *
+ * X-Forwarded-Proto is attacker-controlled, so it is trusted ONLY behind a
+ * configured trusted proxy (TRUSTED_PROXY=1). Trusting it unconditionally
+ * lets a direct-to-app attacker flip the Secure flag (cookie never stored
+ * over HTTP, or forced Secure in tests). req.secure / req.protocol already
+ * respect Express "trust proxy" and are always safe to check.
  */
 function isSecureRequest(req: Request): boolean {
   const r = req as unknown as {
@@ -42,10 +48,12 @@ function isSecureRequest(req: Request): boolean {
   if (typeof r?.protocol === "string" && r.protocol.split(",")[0]?.trim().toLowerCase() === "https") {
     return true;
   }
-  const proto = r?.headers?.["x-forwarded-proto"];
-  const first = Array.isArray(proto) ? proto[0] : proto;
-  if (typeof first === "string" && first.split(",")[0]?.trim().toLowerCase() === "https") {
-    return true;
+  if (process.env.TRUSTED_PROXY === "1") {
+    const proto = r?.headers?.["x-forwarded-proto"];
+    const first = Array.isArray(proto) ? proto[0] : proto;
+    if (typeof first === "string" && first.split(",")[0]?.trim().toLowerCase() === "https") {
+      return true;
+    }
   }
   return process.env.NODE_ENV === "production";
 }

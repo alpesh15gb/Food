@@ -14,6 +14,12 @@ export function normalizePhone(input: string): string {
   if (digits.length === 12 && digits.startsWith("91")) {
     return digits.slice(2);
   }
+  // Strip trunk prefix: 11-digit numbers starting with 0 (e.g. 09876543210).
+  // Kept in sync with the db.ts local normalizePhone so storefront validation
+  // and OTP storage agree on the canonical form.
+  if (digits.length === 11 && digits.startsWith("0")) {
+    return digits.slice(1);
+  }
   return digits;
 }
 

@@ -205,6 +205,7 @@ class SDKServer {
       sv: payload.sv ?? 0,
     })
       .setProtectedHeader({ alg: "HS256", typ: "JWT" })
+      .setIssuedAt()
       .setExpirationTime(expirationSeconds)
       .sign(secretKey);
   }
@@ -213,7 +214,8 @@ class SDKServer {
     cookieValue: string | undefined | null
   ): Promise<{ openId: string; appId: string; name: string; sv: number } | null> {
     if (!cookieValue) {
-      console.warn("[Auth] Missing session cookie");
+      // Missing cookie is the normal anonymous case (public storefront) —
+      // stay silent to avoid log spam. Only present-but-invalid tokens warn.
       return null;
     }
 
@@ -221,13 +223,18 @@ class SDKServer {
       const secretKey = this.getSessionSecret();
       const { payload } = await jwtVerify(cookieValue, secretKey, {
         algorithms: ["HS256"],
+        // Tolerate small clock differences between VPS / proxies / clients.
+        clockTolerance: 30,
       });
       const { openId, appId, name, sv } = payload as Record<string, unknown>;
 
+      // openId/appId must be non-empty. `name` may legitimately be "" (e.g.
+      // email-login for a user whose name is NULL) — require only that it is
+      // a string, otherwise freshly-issued tokens would fail verification.
       if (
         !isNonEmptyString(openId) ||
         !isNonEmptyString(appId) ||
-        !isNonEmptyString(name)
+        typeof name !== "string"
       ) {
         console.warn("[Auth] Session payload missing required fields");
         return null;
@@ -291,7 +298,8 @@ class SDKServer {
     if (!sessionToken) {
       const authHeader = req.headers.authorization;
       if (typeof authHeader === "string" && authHeader.startsWith("Bearer ")) {
-        sessionToken = authHeader.slice(7);
+        const bearer = authHeader.slice(7).trim();
+        if (bearer) sessionToken = bearer;
       }
     }
 

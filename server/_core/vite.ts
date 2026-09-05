@@ -30,10 +30,18 @@ export function serveStatic(app: Express) {
     return;
   }
 
-  // Serve static assets with long cache
+  // /assets mixes content-hashed bundles (safe to cache long) with unhashed
+  // public/ brand files (replaced in place on redeploy) — cache modestly and
+  // never immutable here; Nginx mirrors the same policy in front.
+  const assetsDir = path.join(distPath, "assets");
+  if (fs.existsSync(assetsDir)) {
+    app.use("/assets", express.static(assetsDir, { maxAge: "7d", immutable: false, index: false }));
+  }
+  // Everything else (fonts, manifest, …) short cache; index.html itself is
+  // served below with no-cache so clients never pin stale bundle hashes.
   app.use(
     express.static(distPath, {
-      maxAge: "30d",
+      maxAge: "1h",
       index: false,
     })
   );
@@ -44,6 +52,12 @@ export function serveStatic(app: Express) {
     if (req.path.startsWith("/api/")) {
       return res.status(404).json({ error: "API route not found" });
     }
+    // Missing build assets must 404, not return the SPA shell with a 200
+    // (an <img>/<script> would silently swallow HTML as its body).
+    if (req.path.startsWith("/assets/")) {
+      return res.status(404).send("Not found");
+    }
+    res.set("Cache-Control", "no-cache");
     res.sendFile(indexPath);
   });
 }

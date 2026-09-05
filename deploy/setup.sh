@@ -75,7 +75,7 @@ done
 # 5. Apply migrations to database (never push --force in deploy)
 echo ""
 echo "🗄️  Applying database migrations..."
-docker compose -f deploy/docker-compose.yml exec -T app npx drizzle-kit migrate 2>&1 || echo "⚠️  Migration will complete after first app boot"
+docker compose -f deploy/docker-compose.yml exec -T app pnpm drizzle-kit migrate 2>&1 || echo "⚠️  Migration will complete after first app boot"
 
 echo ""
 echo "╔══════════════════════════════════════════════╗"

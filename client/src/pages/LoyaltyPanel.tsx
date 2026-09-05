@@ -40,8 +40,30 @@ export default function LoyaltyPanel({ restaurantId }: { restaurantId: string })
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
+    const name = form.name.trim();
+    if (!name) {
+      toast.error("Program name is required.");
+      return;
+    }
+    const ppr = parseFloat(String(form.pointsPerRupee));
+    if (!Number.isFinite(ppr) || ppr <= 0 || ppr > 100) {
+      toast.error("Points per rupee must be a number between 0 and 100.");
+      return;
+    }
+    if (!Number.isInteger(form.redemptionRatePaise) || form.redemptionRatePaise < 1) {
+      toast.error("Redemption rate must be at least 1 paise per point.");
+      return;
+    }
+    if (!Number.isInteger(form.maxRedemptionPercent) || form.maxRedemptionPercent < 1 || form.maxRedemptionPercent > 100) {
+      toast.error("Max redemption must be between 1 and 100%.");
+      return;
+    }
+    if (!Number.isInteger(form.pointsExpiryDays) || form.pointsExpiryDays < 1) {
+      toast.error("Points expiry must be at least 1 day.");
+      return;
+    }
     try {
-      await upsertMutation.mutateAsync({ restaurantId, ...form });
+      await upsertMutation.mutateAsync({ restaurantId, ...form, name, pointsPerRupee: String(ppr) });
     } catch {
       // Error toast is handled by the mutation's onError.
     }
@@ -108,11 +130,18 @@ export default function LoyaltyPanel({ restaurantId }: { restaurantId: string })
         </div>
       </div>
 
+      {!program && (
+        <div className="rounded-xl border border-dashed p-5 text-center">
+          <p className="font-medium">No loyalty program configured yet</p>
+          <p className="mt-1 text-sm text-muted-foreground">Save the configuration below to create your first program.</p>
+        </div>
+      )}
+
       {/* Tier Breakdown */}
       {stats?.tierBreakdown && stats.tierBreakdown.length > 0 && (
         <div className="rounded-xl border bg-card p-6">
           <h2 className="mb-4 font-semibold">Tier Distribution</h2>
-          <div className="flex gap-4">
+          <div className="grid gap-4 sm:grid-cols-3">
             {(stats.tierBreakdown as Array<{ tier: string; count: number }>).map(t => (
               <div key={t.tier} className="flex-1 rounded-lg bg-muted/50 p-4 text-center">
                 <p className="text-lg font-bold capitalize">{t.tier}</p>
@@ -138,7 +167,7 @@ export default function LoyaltyPanel({ restaurantId }: { restaurantId: string })
           </div>
           <div>
             <label className="block text-xs font-medium text-muted-foreground mb-1">Points per Rupee Spent</label>
-            <input value={form.pointsPerRupee} onChange={e => setForm(f => ({ ...f, pointsPerRupee: e.target.value }))} className="w-full rounded-md border px-3 py-2 text-sm" />
+            <input type="number" min="0.01" max="100" step="0.01" value={form.pointsPerRupee} onChange={e => setForm(f => ({ ...f, pointsPerRupee: e.target.value }))} className="w-full rounded-md border px-3 py-2 text-sm" />
             <p className="mt-1 text-[10px] text-muted-foreground">e.g., 1 = 1 point per rupee, 0.5 = 1 point per 2 rupees</p>
           </div>
           <div>

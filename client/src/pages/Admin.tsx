@@ -45,8 +45,10 @@ import NotificationsPanel from "@/pages/NotificationsPanel";
 import OutletsPanel from "@/pages/OutletsPanel";
 import LoyaltyPanel from "@/pages/LoyaltyPanel";
 
-const money = (paise: number) =>
-  `₹${(paise / 100).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
+const money = (paise: number) => {
+  const safe = Number.isFinite(paise) ? paise : 0;
+  return `₹${(safe / 100).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
+};
 
 const statusLabel: Record<string, string> = {
   PENDING_PAYMENT: "Awaiting payment",
@@ -130,10 +132,19 @@ export default function Admin() {
   const [location] = useLocation();
   const { slug: restaurantSlug, section } = parseAdminLocation(location);
   const safeSection = ADMIN_SECTIONS.has(section) ? section : "overview";
+  // Member-owners carry global role "user": admit anyone with an active
+  // restaurant membership, not just global admins.
+  const memberships = trpc.auth.memberships.useQuery(undefined, {
+    enabled: !!user && user.role !== "admin",
+    retry: false,
+    staleTime: 60_000,
+  });
 
-  if (loading)
+  if (loading || (!!user && user.role !== "admin" && memberships.isLoading))
     return <div className="min-h-screen bg-[#f7f2eb]" />;
-  if (!user || user.role !== "admin") return <AdminAccess />;
+  const isOperator =
+    !!user && (user.role === "admin" || (memberships.data?.length ?? 0) > 0);
+  if (!isOperator) return <AdminAccess />;
 
   // /admin and /admin/:section (no slug): platform host gets the restaurant
   // registry; restaurant hosts resolve their own workspace as before.
@@ -526,27 +537,31 @@ function AdminWorkspace({ section, slug }: { section: string; slug: string }) {
   });
 
   // Stable row callbacks for the memoized menu list. TanStack's `mutate`
-  // fns are referentially stable, so these don't churn and break memo.
+  // fns are referentially stable, and the scope id is a primitive, so these
+  // don't churn and break memo across dashboard refetches.
+  // restaurantId is required scope for platform-host callers (the permission
+  // gate fails closed without a tenant) and is re-verified server-side.
+  const scopeRestaurantId = dashboard.data?.restaurant?.id as string | undefined;
   const handleMenuAvailability = useCallback(
     (itemId: string, availability: string) =>
-      updateAvailability.mutate({ itemId, availability: availability as never }),
-    [updateAvailability.mutate]
+      updateAvailability.mutate({ itemId, availability: availability as never, restaurantId: scopeRestaurantId }),
+    [updateAvailability.mutate, scopeRestaurantId]
   );
   const handleMenuToggle = useCallback(
-    (itemId: string, isOpen: boolean) => toggleItem.mutate({ itemId, isOpen }),
-    [toggleItem.mutate]
+    (itemId: string, isOpen: boolean) => toggleItem.mutate({ itemId, isOpen, restaurantId: scopeRestaurantId }),
+    [toggleItem.mutate, scopeRestaurantId]
   );
   const handleMenuDelete = useCallback(
-    (itemId: string) => deleteItem.mutate({ itemId }),
-    [deleteItem.mutate]
+    (itemId: string) => deleteItem.mutate({ itemId, restaurantId: scopeRestaurantId }),
+    [deleteItem.mutate, scopeRestaurantId]
   );
   const handleMenuUpdateItem = useCallback(
-    (input: any) => updateItem.mutate(input),
-    [updateItem.mutate]
+    (input: any) => updateItem.mutate({ ...input, restaurantId: scopeRestaurantId }),
+    [updateItem.mutate, scopeRestaurantId]
   );
   const handleMenuBulkUpdate = useCallback(
-    (input: any) => bulkUpdate.mutate(input),
-    [bulkUpdate.mutate]
+    (input: any) => bulkUpdate.mutate({ ...input, restaurantId: scopeRestaurantId }),
+    [bulkUpdate.mutate, scopeRestaurantId]
   );
 
   if (dashboard.isLoading) return <AdminLoading />;
@@ -703,7 +718,7 @@ function AdminWorkspace({ section, slug }: { section: string; slug: string }) {
             data={data}
             pending={createCat.isPending || updateCat.isPending}
             onCreateCategory={(input) => createCat.mutate(input)}
-            onUpdateCategory={(input) => updateCat.mutate(input)}
+            onUpdateCategory={(input) => updateCat.mutate({ ...input, restaurantId: data.restaurant.id })}
           />
         ) : section === "coupons" ? (
           <CouponsPanel
@@ -859,11 +874,17 @@ function OverviewPanel({ data, slug }: { data: any; slug: string }) {
   const [, setLocation] = useLocation();
   const go = (section: string) => setLocation(adminPath(slug, section));
   const m = data.metrics;
+  // Server truth check: purchasable = isOpen AND availability AVAILABLE
+  // (server/domain/availability.ts + orderPricing.ts). The precomputed
+  // m.availableItems counts availability only, so recompute from the items.
+  const availableCount = (data.items ?? []).filter(
+    (i: any) => i.isOpen !== false && i.availability === "AVAILABLE"
+  ).length;
   const cards = [
     {
       label: "Today's orders",
       value: m.todayOrders,
-      detail: "Orders placed today",
+      detail: "All orders started today",
       icon: ClipboardList,
       tone: "bg-[#f7e4d3] text-[#c84630]",
     },
@@ -883,8 +904,8 @@ function OverviewPanel({ data, slug }: { data: any; slug: string }) {
     },
     {
       label: "Available dishes",
-      value: `${m.availableItems}/${m.totalItems}`,
-      detail: "Shown to customers",
+      value: `${availableCount}/${(data.items ?? []).length}`,
+      detail: "Ready to order",
       icon: UtensilsCrossed,
       tone: "bg-[#f5ecd8] text-[#9e692a]",
     },
@@ -892,7 +913,7 @@ function OverviewPanel({ data, slug }: { data: any; slug: string }) {
 
   const statusCards = [
     {
-      label: "Pending",
+      label: "New",
       value: m.pendingOrders,
       icon: Clock3,
       color: "text-amber-600",
@@ -990,7 +1011,12 @@ function OverviewPanel({ data, slug }: { data: any; slug: string }) {
           </span>
         </div>
         <div className="mt-5 space-y-3">
-          {(data.orders ?? []).slice(0, 8).map((order: any) => (
+          {(data.orders ?? []).length === 0 ? (
+            <p className="rounded-xl border border-dashed border-[#dbc3b0] bg-[#fff9f3] p-5 text-center text-xs font-bold text-[#91725e]">
+              No orders yet — new orders will appear here as soon as they're placed.
+            </p>
+          ) : (
+          (data.orders ?? []).slice(0, 8).map((order: any) => (
             <div
               key={order.id}
               className="flex items-center justify-between rounded-xl border border-[#eadccf] bg-[#fffaf5] p-3"
@@ -1010,7 +1036,7 @@ function OverviewPanel({ data, slug }: { data: any; slug: string }) {
                 {statusLabel[order.status]?.slice(0, 12) || order.status}
               </span>
             </div>
-          ))}
+          )))}
         </div>
       </section>
 
@@ -1111,8 +1137,12 @@ const ORDER_ACTIVE_STATUSES = [
   "OUT_FOR_DELIVERY",
 ];
 
-// Legal next states per status. Cancel/Reject require confirmation.
-const ORDER_TRANSITIONS: Record<string, Array<{ to: string; label: string; danger?: boolean }>> = {
+// Legal next states per the server state machine
+// (server/domain/orderStateMachine.ts VALID_TRANSITIONS). Every entry here must
+// be accepted by validateTransition — offering anything else fails with
+// InvalidTransitionError after an optimistic "Saving..." flash.
+// Cancel/Reject/Delivered require confirmation.
+const ORDER_TRANSITIONS: Record<string, Array<{ to: string; label: string; danger?: boolean; confirm?: boolean }>> = {
   PENDING_PAYMENT: [{ to: "CANCELLED", label: "Cancel order", danger: true }],
   PAYMENT_CONFIRMED: [
     { to: "PLACED", label: "Move to queue" },
@@ -1120,8 +1150,8 @@ const ORDER_TRANSITIONS: Record<string, Array<{ to: string; label: string; dange
   ],
   PLACED: [
     { to: "RESTAURANT_ACCEPTED", label: "Accept" },
-    { to: "PREPARING", label: "Start preparing" },
     { to: "REJECTED", label: "Reject", danger: true },
+    { to: "CANCELLED", label: "Cancel order", danger: true },
   ],
   RESTAURANT_ACCEPTED: [
     { to: "PREPARING", label: "Start preparing" },
@@ -1133,19 +1163,18 @@ const ORDER_TRANSITIONS: Record<string, Array<{ to: string; label: string; dange
   ],
   READY_FOR_PICKUP: [
     { to: "DELIVERY_REQUESTED", label: "Request delivery" },
-    { to: "OUT_FOR_DELIVERY", label: "Out for delivery" },
-    { to: "DELIVERED", label: "Delivered" },
+    { to: "CANCELLED", label: "Cancel order", danger: true },
   ],
   DELIVERY_REQUESTED: [
-    { to: "OUT_FOR_DELIVERY", label: "Out for delivery" },
-    { to: "DELIVERED", label: "Delivered" },
+    { to: "RIDER_ASSIGNED", label: "Assign rider" },
+    { to: "CANCELLED", label: "Cancel order", danger: true },
   ],
   RIDER_ASSIGNED: [
     { to: "PICKED_UP", label: "Picked up" },
-    { to: "OUT_FOR_DELIVERY", label: "Out for delivery" },
+    { to: "CANCELLED", label: "Cancel order", danger: true },
   ],
   PICKED_UP: [{ to: "OUT_FOR_DELIVERY", label: "Out for delivery" }],
-  OUT_FOR_DELIVERY: [{ to: "DELIVERED", label: "Delivered" }],
+  OUT_FOR_DELIVERY: [{ to: "DELIVERED", label: "Delivered", confirm: true }],
 };
 
 // Memoized order rows: `order` keeps a stable reference from the query
@@ -1158,17 +1187,19 @@ const OrderActions = memo(function OrderActions({
 }: {
   order: any;
   busy: boolean;
-  onChange: (order: any, next: string, danger?: boolean) => void;
+  onChange: (order: any, next: string, danger?: boolean, confirm?: boolean) => void;
 }) {
   const transitions = ORDER_TRANSITIONS[order.status] ?? [];
-  if (!transitions.length) return <span className="text-xs text-[#a37d64]">No actions</span>;
+  const showInvoice = order.status === "DELIVERED" || order.status === "READY_FOR_PICKUP";
+  if (!transitions.length && !showInvoice)
+    return <span className="text-xs text-[#a37d64]">No actions</span>;
   return (
     <div className="flex flex-col gap-2">
       {transitions.map((t) => (
         <button
           key={t.to}
           disabled={busy}
-          onClick={() => onChange(order, t.to, t.danger)}
+          onClick={() => onChange(order, t.to, t.danger, t.confirm)}
           aria-label={`${t.label} order ${order.orderNumber}`}
           className={`min-h-11 rounded-lg px-3 py-2 text-xs font-extrabold disabled:opacity-50 ${
             t.danger
@@ -1179,7 +1210,7 @@ const OrderActions = memo(function OrderActions({
           {busy ? "Saving..." : t.label}
         </button>
       ))}
-      {(order.status === "DELIVERED" || order.status === "READY_FOR_PICKUP") && (
+      {showInvoice && (
         <InvoiceButton orderId={order.id} />
       )}
     </div>
@@ -1189,16 +1220,28 @@ const OrderActions = memo(function OrderActions({
 const OrderDesktopRow = memo(function OrderDesktopRow({
   order,
   busy,
+  expanded,
+  onToggleExpand,
   onChange,
 }: {
   order: any;
   busy: boolean;
-  onChange: (order: any, next: string, danger?: boolean) => void;
+  expanded: boolean;
+  onToggleExpand: (id: string) => void;
+  onChange: (order: any, next: string, danger?: boolean, confirm?: boolean) => void;
 }) {
   return (
+    <>
     <tr className="border-t border-[#f0e4d9]">
       <td className="px-5 py-4">
-        <p className="font-extrabold">{order.orderNumber}</p>
+        <button
+          onClick={() => onToggleExpand(order.id)}
+          aria-expanded={expanded}
+          aria-label={`${expanded ? "Hide" : "Show"} details for order ${order.orderNumber}`}
+          className="text-left font-extrabold text-[#382719] underline decoration-dotted decoration-[#c9a88f] underline-offset-4 hover:text-[#c84630]"
+        >
+          {order.orderNumber}
+        </button>
         <div className="mt-1 flex items-center gap-2">
           <p className="text-xs text-[#8c6d58]">
             {new Date(order.createdAt).toLocaleString("en-IN", {
@@ -1251,23 +1294,42 @@ const OrderDesktopRow = memo(function OrderDesktopRow({
         <OrderActions order={order} busy={busy} onChange={onChange} />
       </td>
     </tr>
+    {expanded && (
+      <tr className="border-t border-dashed border-[#e4d2c2] bg-[#fff8f1]">
+        <td colSpan={6} className="px-5 py-4">
+          <OrderDetails orderId={order.id} />
+        </td>
+      </tr>
+    )}
+    </>
   );
 });
 
 const OrderMobileCard = memo(function OrderMobileCard({
   order,
   busy,
+  expanded,
+  onToggleExpand,
   onChange,
 }: {
   order: any;
   busy: boolean;
-  onChange: (order: any, next: string, danger?: boolean) => void;
+  expanded: boolean;
+  onToggleExpand: (id: string) => void;
+  onChange: (order: any, next: string, danger?: boolean, confirm?: boolean) => void;
 }) {
   return (
     <article className="rounded-xl border border-[#eadccf] bg-[#fffaf5] p-4">
       <div className="flex items-start justify-between gap-2">
         <div>
-          <p className="text-sm font-extrabold">{order.orderNumber}</p>
+          <button
+            onClick={() => onToggleExpand(order.id)}
+            aria-expanded={expanded}
+            aria-label={`${expanded ? "Hide" : "Show"} details for order ${order.orderNumber}`}
+            className="text-left text-sm font-extrabold text-[#382719] underline decoration-dotted decoration-[#c9a88f] underline-offset-4"
+          >
+            {order.orderNumber}
+          </button>
           <p className="mt-0.5 text-xs text-[#8c6d58]">
             {new Date(order.createdAt).toLocaleString("en-IN", {
               dateStyle: "medium",
@@ -1288,12 +1350,81 @@ const OrderMobileCard = memo(function OrderMobileCard({
         <p className="font-extrabold">{money(order.totalPaise)}</p>
       </div>
       <p className="mt-1 text-xs text-[#8c6d58]">{order.customerPhone || "No phone"} · {order.paymentStatus}</p>
+      {expanded && (
+        <div className="mt-3 border-t border-[#f0e4d9] pt-3">
+          <OrderDetails orderId={order.id} />
+        </div>
+      )}
       <div className="mt-3 border-t border-[#f0e4d9] pt-3">
         <OrderActions order={order} busy={busy} onChange={onChange} />
       </div>
     </article>
   );
 });
+
+// Lazily-loaded line items / address / history for one order. The queue query
+// returns headers only, so without this the desk cannot verify a pick.
+function OrderDetails({ orderId }: { orderId: string }) {
+  const detail = trpc.admin.orderDetail.useQuery({ orderId }, { retry: false });
+  if (detail.isLoading) {
+    return (
+      <div className="space-y-2" aria-label="Loading order details">
+        <div className="h-8 animate-pulse rounded-lg bg-[#f0e2d3]" />
+        <div className="h-8 animate-pulse rounded-lg bg-[#f0e2d3]" />
+      </div>
+    );
+  }
+  if (detail.isError || !detail.data) {
+    return (
+      <div className="flex flex-wrap items-center gap-2 text-xs font-bold text-[#a34630]">
+        <span>Could not load order details.</span>
+        <button onClick={() => detail.refetch()} className="underline underline-offset-2">Retry</button>
+      </div>
+    );
+  }
+  const d = detail.data as any;
+  const addr = (d.addressSnapshot ?? {}) as Record<string, string>;
+  const addrLine = [addr.flatHouse, addr.building, addr.street, addr.area, addr.city, addr.postalCode]
+    .filter((v) => typeof v === "string" && v.trim())
+    .join(", ");
+  return (
+    <div className="space-y-3 text-sm">
+      <div className="space-y-1.5">
+        {(d.items ?? []).map((it: any) => (
+          <div key={it.id} className="flex items-start gap-2">
+            <span className="w-8 shrink-0 font-extrabold text-[#382719]">{it.quantity}x</span>
+            <div className="min-w-0">
+              <p className="font-bold text-[#382719]">{it.itemNameSnapshot}</p>
+              {it.variantNameSnapshot && (
+                <p className="text-xs text-[#8c6d58]">{it.variantNameSnapshot}</p>
+              )}
+              {Array.isArray(it.selectedModifiers) && it.selectedModifiers.length > 0 && (
+                <p className="text-xs italic text-[#8c6d58]">
+                  + {it.selectedModifiers.map((m: any) => m.optionName ?? "").filter(Boolean).join(", ")}
+                </p>
+              )}
+              {it.specialInstructions && (
+                <p className="text-xs font-bold text-[#a3541f]">Note: {it.specialInstructions}</p>
+              )}
+            </div>
+            <span className="ml-auto shrink-0 font-bold text-[#553d2c]">
+              {money((it.unitPricePaise ?? 0) * (it.quantity ?? 1))}
+            </span>
+          </div>
+        ))}
+        {(d.items ?? []).length === 0 && (
+          <p className="text-xs text-[#8c6d58]">No line items recorded.</p>
+        )}
+      </div>
+      <div className="grid gap-2 border-t border-[#f0e4d9] pt-3 text-xs text-[#71513e] sm:grid-cols-2">
+        <p><span className="font-extrabold">Deliver to: </span>{addrLine || "—"}</p>
+        <p><span className="font-extrabold">Instructions: </span>{d.specialInstructions || d.deliveryNotes || "—"}</p>
+        <p><span className="font-extrabold">Payment: </span>{d.paymentStatus}{d.payment ? ` via ${d.payment.method ?? d.payment.provider ?? "—"}` : ""}</p>
+        <p><span className="font-extrabold">Updates: </span>{(d.history ?? []).length} status event{(d.history ?? []).length === 1 ? "" : "s"}</p>
+      </div>
+    </div>
+  );
+}
 
 function OrdersPanel({ restaurantId }: { restaurantId: string }) {
   const utils = trpc.useUtils();
@@ -1302,9 +1433,23 @@ function OrdersPanel({ restaurantId }: { restaurantId: string }) {
   const search = useDebouncedValue(searchInput, 200);
   const [page, setPage] = useState(0);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+
+  const q = search.trim().toLowerCase();
+  // Concrete statuses are filtered server-side so paging stays correct; "all"
+  // and "active" still filter client-side ("active" spans 8 statuses).
+  const serverStatus =
+    filter !== "all" && filter !== "active" ? (filter as never) : undefined;
+  // Free-text search has no server endpoint, so it only covers loaded rows.
+  // Widen the window to the server max while searching instead of one page.
+  const searching = q.length > 0;
+  const queryLimit = searching ? 200 : ORDERS_PAGE_SIZE;
+  const queryOffset = searching ? 0 : page * ORDERS_PAGE_SIZE;
 
   const ordersQuery = trpc.admin.orders.useQuery(
-    { restaurantId, limit: ORDERS_PAGE_SIZE, offset: page * ORDERS_PAGE_SIZE },
+    serverStatus
+      ? { restaurantId, status: serverStatus, limit: queryLimit, offset: queryOffset }
+      : { restaurantId, limit: queryLimit, offset: queryOffset },
     { refetchInterval: 5000, retry: false }
   );
 
@@ -1319,7 +1464,6 @@ function OrdersPanel({ restaurantId }: { restaurantId: string }) {
   });
 
   const orders = (ordersQuery.data ?? []) as any[];
-  const q = search.trim().toLowerCase();
   const filtered = useMemo(
     () =>
       orders.filter((o: any) => {
@@ -1334,16 +1478,22 @@ function OrdersPanel({ restaurantId }: { restaurantId: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [ordersQuery.data, filter, q]
   );
-  const openCount = useMemo(
+  // Page-scoped by construction (the queue has no server count endpoint) —
+  // label it as such so it is never mistaken for the workspace total.
+  const openOnPage = useMemo(
     () => orders.filter((o: any) => ORDER_ACTIVE_STATUSES.includes(o.status)).length,
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [ordersQuery.data]
   );
-  const hasMore = orders.length === ORDERS_PAGE_SIZE;
+  const hasMore = !searching && orders.length === ORDERS_PAGE_SIZE;
+
+  const toggleExpand = useCallback((id: string) => {
+    setExpandedId((prev) => (prev === id ? null : id));
+  }, []);
 
   const changeStatus = useCallback(
-    (order: any, next: string, danger?: boolean) => {
-      if (danger) {
+    (order: any, next: string, danger?: boolean, confirm?: boolean) => {
+      if (danger || confirm || next === "DELIVERED") {
         const ok = window.confirm(
           `This will mark order ${order.orderNumber} as ${statusLabel[next] ?? next}. Continue?`
         );
@@ -1376,8 +1526,11 @@ function OrdersPanel({ restaurantId }: { restaurantId: string }) {
             <h2 className="font-display mt-1 text-2xl">Order queue</h2>
           </div>
           <div className="flex items-center gap-2">
-            <span className="rounded-full bg-[#f7e4d3] px-3 py-1 text-xs font-extrabold text-[#a64130]">
-              {openCount} open
+            <span
+              className="rounded-full bg-[#f7e4d3] px-3 py-1 text-xs font-extrabold text-[#a64130]"
+              title="Counts only the orders loaded on this page — the workspace total lives on the overview."
+            >
+              {openOnPage} open on this page
             </span>
             <button
               onClick={() => ordersQuery.refetch()}
@@ -1449,6 +1602,8 @@ function OrdersPanel({ restaurantId }: { restaurantId: string }) {
                     key={order.id}
                     order={order}
                     busy={busyId === order.id}
+                    expanded={expandedId === order.id}
+                    onToggleExpand={toggleExpand}
                     onChange={changeStatus}
                   />
                 ))}
@@ -1463,6 +1618,8 @@ function OrdersPanel({ restaurantId }: { restaurantId: string }) {
                 key={order.id}
                 order={order}
                 busy={busyId === order.id}
+                expanded={expandedId === order.id}
+                onToggleExpand={toggleExpand}
                 onChange={changeStatus}
               />
             ))}
@@ -1471,8 +1628,11 @@ function OrdersPanel({ restaurantId }: { restaurantId: string }) {
           {/* Server pagination */}
           <div className="flex items-center justify-between border-t border-[#eadccf] px-5 py-3">
             <p className="text-xs font-bold text-[#856652]">
-              Page {page + 1} · {filtered.length} shown
+              {searching
+                ? `Searching recent ${orders.length} · ${filtered.length} match${filtered.length === 1 ? "" : "es"}`
+                : `Page ${page + 1} · ${filtered.length} shown`}
             </p>
+            {!searching && (
             <div className="flex gap-2">
               <Button
                 onClick={() => setPage((p) => Math.max(0, p - 1))}
@@ -1491,8 +1651,25 @@ function OrdersPanel({ restaurantId }: { restaurantId: string }) {
                 Next
               </Button>
             </div>
+            )}
           </div>
         </>
+      ) : searching || filter !== "all" ? (
+        <div className="space-y-3 p-8 text-center">
+          <p className="text-sm font-extrabold text-[#593f2d]">No orders match this search</p>
+          <p className="text-xs text-[#91725e]">
+            {searching
+              ? "Search covers the 200 most recent orders — older orders need a narrower status filter."
+              : "Try a different status filter."}
+          </p>
+          <Button
+            onClick={() => { setSearchInput(""); setFilter("all"); setPage(0); }}
+            variant="outline"
+            className="h-11 rounded-xl border-[#ddc6b5] px-4 text-xs font-extrabold text-[#704d37]"
+          >
+            Clear search & filters
+          </Button>
+        </div>
       ) : (
         <div className="p-8">
           <EmptyKitchen />
@@ -1556,7 +1733,10 @@ const MenuItemRow = memo(function MenuItemRow({
         <button onClick={() => onStartEdit(item)} disabled={listPending} className="rounded-lg border border-[#ddc6b5] bg-white px-2 py-1.5 text-[10px] font-bold text-[#5c4332] hover:bg-[#fff4e9] disabled:opacity-50">Edit</button>
         <button onClick={() => onDeleteRequest(item.id)} disabled={listPending} className="rounded-lg border border-red-200 bg-white px-2 py-1.5 text-[10px] font-bold text-red-600 hover:bg-red-50 disabled:opacity-50">Delete</button>
         <label className="relative inline-flex cursor-pointer items-center">
-          <input type="checkbox" role="switch" aria-checked={item.isOpen} aria-label={`Show ${item.name} on storefront`} checked={item.isOpen} onChange={(e) => onToggle(item.id, e.target.checked)} disabled={listPending} className="peer sr-only" />
+          <input type="checkbox" role="switch" aria-checked={item.isOpen} aria-label={`Show ${item.name} on storefront`} checked={item.isOpen} onChange={(e) => {
+            if (!e.target.checked && !window.confirm(`Hide "${item.name}" from the storefront?`)) return;
+            onToggle(item.id, e.target.checked);
+          }} disabled={listPending} className="peer sr-only" />
           <div className="h-6 w-11 rounded-full bg-gray-200 after:absolute after:left-[2px] after:top-[2px] after:h-5 after:w-5 after:rounded-full after:bg-white after:transition-all peer-checked:bg-[#c84630] after:peer-checked:translate-x-full" />
         </label>
         <label className="sr-only" htmlFor={`avail-${item.id}`}>Availability for {item.name}</label>
@@ -1564,7 +1744,10 @@ const MenuItemRow = memo(function MenuItemRow({
           id={`avail-${item.id}`}
           value={item.availability}
           disabled={listPending}
-          onChange={(e) => onAvailability(item.id, e.target.value)}
+          onChange={(e) => {
+            if (e.target.value === "DISABLED" && !window.confirm(`Hide "${item.name}" from the storefront?`)) return;
+            onAvailability(item.id, e.target.value);
+          }}
           className="rounded-lg border border-[#ddc6b5] bg-white px-2 py-2 text-xs font-extrabold disabled:opacity-50"
         >
           <option value="AVAILABLE">Available</option>
@@ -1648,6 +1831,9 @@ function MenuPanel({
     scopeRestaurantId: string,
   ) => {
     if (file.size > 2 * 1024 * 1024) return toast.error("Image must be under 2 MB.");
+    if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
+      return toast.error("Use a PNG, JPG or WebP image.");
+    }
     setUploading(true);
     try {
       const reader = new FileReader();
@@ -1698,21 +1884,36 @@ function MenuPanel({
 
   const saveEdit = () => {
     if (!editingId) return;
+    if (!String(editForm.name ?? "").trim())
+      return toast.error("Dish name cannot be empty.");
     const pricePaise = Number(editForm.pricePaise);
     if (!Number.isFinite(pricePaise) || pricePaise <= 0)
       return toast.error("Enter a valid price greater than ₹0.");
+    if (editForm.offerPricePaise !== null && editForm.offerPricePaise !== undefined) {
+      const offer = Number(editForm.offerPricePaise);
+      if (!Number.isFinite(offer) || offer <= 0)
+        return toast.error("Offer price must be greater than ₹0, or cleared.");
+      if (offer >= Math.round(pricePaise))
+        return toast.error("Offer price must be lower than the regular price.");
+    }
     onUpdateItem({
       itemId: editingId,
-      name: editForm.name,
+      name: String(editForm.name).trim(),
       description: editForm.description || undefined,
       pricePaise: Math.round(pricePaise),
       offerPricePaise: editForm.offerPricePaise || undefined,
       dietaryType: editForm.dietaryType,
       isBestseller: editForm.isBestseller,
-      imageUrl: editForm.imageUrl || undefined,
+      imageUrl: editForm.imageUrl === null ? null : editForm.imageUrl || undefined,
     });
     setEditingId(null);
   };
+
+  // The create form lives in the parent: once it resets imageUrl after a
+  // successful add, drop the stale local preview too.
+  useEffect(() => {
+    if (!itemForm.imageUrl) setImagePreview(null);
+  }, [itemForm.imageUrl]);
 
   return (
     <div className="grid gap-5 xl:grid-cols-[0.72fr_1.28fr]">
@@ -1733,7 +1934,7 @@ function MenuPanel({
             ) : (
               <label className="flex h-16 w-16 cursor-pointer items-center justify-center rounded-xl border-2 border-dashed border-white/30 hover:border-white/60">
                 {uploading ? <RefreshCw className="h-5 w-5 animate-spin" /> : <Plus className="h-5 w-5 text-white/50" />}
-                <input type="file" accept="image/jpeg,image/png,image/webp" aria-label="Upload dish photo" className="hidden" onChange={(e) => e.target.files?.[0] && handleImageUpload(e.target.files[0], "create", restaurantId)} />
+                <input type="file" accept="image/jpeg,image/png,image/webp" aria-label="Upload dish photo" className="hidden" onChange={(e) => { const file = e.target.files?.[0]; e.target.value = ""; if (file) void handleImageUpload(file, "create", restaurantId); }} />
               </label>
             )}
             <span className="text-xs text-white/50">{imagePreview ? "Image ready" : "Tap to add photo"}</span>
@@ -1853,13 +2054,31 @@ function MenuPanel({
               <span className="text-xs font-bold text-white">{selectedIds.size} selected</span>
               <button onClick={() => onBulkUpdate({ itemIds: Array.from(selectedIds), availability: "AVAILABLE" })} disabled={listPending} className="rounded-lg bg-white/10 px-2.5 py-1 text-[10px] font-bold text-white hover:bg-white/20 disabled:opacity-50">Set available</button>
               <button onClick={() => onBulkUpdate({ itemIds: Array.from(selectedIds), availability: "SOLD_OUT" })} disabled={listPending} className="rounded-lg bg-white/10 px-2.5 py-1 text-[10px] font-bold text-white hover:bg-white/20 disabled:opacity-50">Sold out</button>
-              <button onClick={() => onBulkUpdate({ itemIds: Array.from(selectedIds), isOpen: false, availability: "DISABLED" })} disabled={listPending} className="rounded-lg bg-white/10 px-2.5 py-1 text-[10px] font-bold text-white hover:bg-white/20 disabled:opacity-50">Disable</button>
+              <button onClick={() => { if (window.confirm(`Hide ${selectedIds.size} selected dish${selectedIds.size === 1 ? "" : "es"} from the storefront?`)) onBulkUpdate({ itemIds: Array.from(selectedIds), isOpen: false, availability: "DISABLED" }); }} disabled={listPending} className="rounded-lg bg-white/10 px-2.5 py-1 text-[10px] font-bold text-white hover:bg-white/20 disabled:opacity-50">Disable</button>
               <button onClick={() => { setSelectedIds(new Set()); }} className="ml-auto text-[10px] font-bold text-white/60 hover:text-white">Clear</button>
             </div>
           )}
         </div>
         <div className="divide-y divide-[#f0e4d9]">
-          {items.map((item: any) => (
+          {(data.items ?? []).length === 0 ? (
+            <div className="p-10 text-center">
+              <UtensilsCrossed className="mx-auto h-8 w-8 text-[#c84630]" />
+              <p className="mt-3 text-sm font-extrabold text-[#593f2d]">No dishes yet</p>
+              <p className="mt-1 text-xs text-[#91725e]">Add your first dish from the panel, or import the whole menu as CSV.</p>
+            </div>
+          ) : items.length === 0 ? (
+            <div className="space-y-3 p-10 text-center">
+              <p className="text-sm font-extrabold text-[#593f2d]">No dishes match “{search.trim()}”</p>
+              <Button
+                onClick={() => setSearchInput("")}
+                variant="outline"
+                className="h-11 rounded-xl border-[#ddc6b5] px-4 text-xs font-extrabold text-[#704d37]"
+              >
+                Clear search
+              </Button>
+            </div>
+          ) : (
+          items.map((item: any) => (
             <article key={item.id} className="p-4">
               {editingId === item.id ? (
                 /* Inline Edit Form */
@@ -1868,11 +2087,12 @@ function MenuPanel({
                     {editForm.imageUrl ? (
                       <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-lg border border-[#dfcbb9]">
                         <img src={editForm.imageUrl} alt="" className="h-full w-full object-cover" />
+                        <button type="button" aria-label="Remove dish photo" onClick={() => setEditForm({ ...editForm, imageUrl: null })} className="absolute right-0.5 top-0.5 grid h-5 w-5 place-items-center rounded-full bg-red-500 text-white"><X className="h-3 w-3" /></button>
                       </div>
                     ) : (
                       <label className="flex h-14 w-14 shrink-0 cursor-pointer items-center justify-center rounded-lg border-2 border-dashed border-[#d9b89e] hover:border-[#c84630]">
                         <Plus className="h-4 w-4 text-[#a37d64]" />
-                        <input type="file" accept="image/jpeg,image/png,image/webp" aria-label="Upload dish photo" className="hidden" onChange={(e) => e.target.files?.[0] && handleImageUpload(e.target.files[0], "edit", restaurantId)} />
+                        <input type="file" accept="image/jpeg,image/png,image/webp" aria-label="Upload dish photo" className="hidden" onChange={(e) => { const file = e.target.files?.[0]; e.target.value = ""; if (file) void handleImageUpload(file, "edit", restaurantId); }} />
                       </label>
                     )}
                     <div className="flex-1 space-y-2">
@@ -1881,8 +2101,8 @@ function MenuPanel({
                     </div>
                   </div>
                   <div className="grid grid-cols-3 gap-2">
-                    <Input value={editForm.pricePaise != null ? (editForm.pricePaise / 100).toFixed(2) : ""} aria-label="Price in rupees" onChange={(e) => setEditForm({ ...editForm, pricePaise: Math.round(Number(e.target.value) * 100) })} placeholder="Price ₹" inputMode="numeric" className="h-9 rounded-lg border-[#dfcbb9] text-sm" />
-                    <Input value={editForm.offerPricePaise != null ? (editForm.offerPricePaise / 100).toFixed(2) : ""} aria-label="Offer price in rupees" onChange={(e) => setEditForm({ ...editForm, offerPricePaise: e.target.value ? Math.round(Number(e.target.value) * 100) : null })} placeholder="Offer ₹" inputMode="numeric" className="h-9 rounded-lg border-[#dfcbb9] text-sm" />
+                    <Input value={Number.isFinite(editForm.pricePaise) ? (editForm.pricePaise / 100).toFixed(2) : ""} aria-label="Price in rupees" onChange={(e) => setEditForm({ ...editForm, pricePaise: Math.round(Number(e.target.value) * 100) })} placeholder="Price ₹" inputMode="numeric" className="h-9 rounded-lg border-[#dfcbb9] text-sm" />
+                    <Input value={editForm.offerPricePaise != null && Number.isFinite(Number(editForm.offerPricePaise)) ? (Number(editForm.offerPricePaise) / 100).toFixed(2) : ""} aria-label="Offer price in rupees" onChange={(e) => setEditForm({ ...editForm, offerPricePaise: e.target.value ? Math.round(Number(e.target.value) * 100) : null })} placeholder="Offer ₹" inputMode="numeric" className="h-9 rounded-lg border-[#dfcbb9] text-sm" />
                     <label className="sr-only" htmlFor={`edit-diet-${item.id}`}>Dietary type</label>
                     <select id={`edit-diet-${item.id}`} value={editForm.dietaryType ?? "veg"} onChange={(e) => setEditForm({ ...editForm, dietaryType: e.target.value })} className="h-9 rounded-lg border border-[#dfcbb9] px-2 text-sm">
                       <option value="veg">Veg</option>
@@ -1915,7 +2135,7 @@ function MenuPanel({
                 />
               )}
             </article>
-          ))}
+          )))}
         </div>
       </section>
 
@@ -2063,6 +2283,10 @@ function CategoryRow({
   const [name, setName] = useState(cat.name);
   const [sortOrder, setSortOrder] = useState(cat.sortOrder != null ? String(cat.sortOrder) : "0");
   const [confirmDelete, setConfirmDelete] = useState(false);
+  // Re-sync local fields when the server row changes (e.g. after a rename
+  // save + dashboard refetch); untouched while the user is typing.
+  useEffect(() => { setName(cat.name); }, [cat.name]);
+  useEffect(() => { setSortOrder(cat.sortOrder != null ? String(cat.sortOrder) : "0"); }, [cat.sortOrder]);
   const dirtyName = name.trim() !== (cat.name ?? "");
   const dirtyOrder = sortOrder.trim() !== String(cat.sortOrder ?? 0);
 
@@ -2347,7 +2571,11 @@ function CouponsPanel({
               );
             })
           ) : (
-            <EmptyKitchen />
+            <div className="rounded-2xl border border-dashed border-[#dbc3b0] bg-[#fff9f3] p-10 text-center">
+              <TicketPercent className="mx-auto h-8 w-8 text-[#c84630]" />
+              <p className="font-display mt-3 text-xl text-[#593f2d]">No offers yet</p>
+              <p className="mt-1 text-sm text-[#91725e]">Create your first coupon from the panel — it goes live immediately.</p>
+            </div>
           )}
         </div>
       </section>
@@ -2674,6 +2902,21 @@ function RestaurantPanel({
     const radiusNum = form.deliveryRadiusKm.trim() ? Number(form.deliveryRadiusKm) : NaN;
     if (form.deliveryRadiusKm.trim() && (!Number.isFinite(radiusNum) || radiusNum <= 0))
       return toast.error("Delivery radius must be a number greater than 0.");
+    // Guard paise math: blank means 0, but typed garbage must not reach the
+    // server as NaN (zod would reject it with a cryptic error).
+    const feeEntries = [
+      ["Delivery fee", form.deliveryFee],
+      ["Packaging fee", form.packagingFee],
+      ["Minimum order", form.minOrder],
+    ] as const;
+    for (const [label, raw] of feeEntries) {
+      const n = raw.trim() === "" ? 0 : Number(raw);
+      if (!Number.isFinite(n) || n < 0)
+        return toast.error(`${label} must be a number, 0 or more.`);
+    }
+    const prepNum = Number(form.preparationMinutes);
+    if (!Number.isFinite(prepNum) || !Number.isInteger(prepNum) || prepNum <= 0)
+      return toast.error("Preparation time must be a whole number of minutes greater than 0.");
     onSave({
       id: restaurant.id,
       restaurantId: restaurant.id,
@@ -2958,7 +3201,7 @@ function Toggle({
 
 function InvoiceButton({ orderId }: { orderId: string }) {
   const [open, setOpen] = useState(false);
-  const { data, isLoading } = trpc.admin.generateInvoice.useQuery(
+  const { data, isLoading, isError, error } = trpc.admin.generateInvoice.useQuery(
     { orderId },
     { enabled: open, retry: false }
   );
@@ -2966,6 +3209,13 @@ function InvoiceButton({ orderId }: { orderId: string }) {
   const handlePrint = () => {
     setOpen(true);
   };
+
+  useEffect(() => {
+    if (isError) {
+      toast.error(error?.message || "Could not load the invoice.");
+      setOpen(false);
+    }
+  }, [isError, error]);
 
   useEffect(() => {
     if (data?.html && open) {

@@ -201,9 +201,11 @@ export const storefrontRouter = router({
     }),
 
   customerLogout: publicProcedure
-    .mutation(({ ctx }) => {
-      const { COOKIE_NAME } = require("@shared/const");
-      const { getCustomerCookieOptions } = require("../_core/cookies");
+    .mutation(async ({ ctx }) => {
+      // Dynamic imports (never require()): the server bundles to ESM where
+      // require is undefined and logout would throw on every call.
+      const { COOKIE_NAME } = await import("@shared/const");
+      const { getCustomerCookieOptions } = await import("../_core/cookies");
       ctx.res.clearCookie(COOKIE_NAME, {
         ...getCustomerCookieOptions(ctx.req),
         maxAge: -1,

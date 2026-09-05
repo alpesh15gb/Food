@@ -22,7 +22,8 @@ echo ""
 echo "📦 Installing system dependencies..."
 if command -v apt-get &>/dev/null; then
   apt-get update -qq
-  apt-get install -y -qq nginx certbot python3-certbot-nginx curl git
+  # dnsutils provides `dig` for the DNS check below.
+  apt-get install -y -qq nginx certbot python3-certbot-nginx curl git dnsutils
 elif command -v yum &>/dev/null; then
   yum install -y nginx certbot python3-certbot-nginx curl git
 fi
@@ -75,7 +76,8 @@ if [ ! -f "$ENV_FILE" ]; then
   echo "║  Admin Token:        ${ADMIN_TOKEN}"
   echo "╚══════════════════════════════════════════════════╝"
   echo ""
-  read -p "Press Enter to continue after saving credentials..."
+  # Non-interactive safe: without a TTY (CI/pipe) read fails and set -e would abort.
+  read -p "Press Enter to continue after saving credentials..." < /dev/tty || true
 else
   echo "✅ Config file exists"
 fi
@@ -173,7 +175,7 @@ done
 # =============================================================================
 echo ""
 echo "🗄️  Applying database migrations..."
-docker compose -f "$COMPOSE_FILE" exec -T app npx drizzle-kit migrate 2>&1 || {
+docker compose -f "$COMPOSE_FILE" exec -T app pnpm drizzle-kit migrate 2>&1 || {
   echo "⚠️  Migration had issues. Checking database..."
   docker compose -f "$COMPOSE_FILE" exec -T db psql -U cloudkitchen -d cloudkitchen -c "\dt" 2>&1 || true
 }
@@ -184,15 +186,15 @@ docker compose -f "$COMPOSE_FILE" exec -T app npx drizzle-kit migrate 2>&1 || {
 echo ""
 echo "🔍 Verifying deployment..."
 
-# Check app is running
-if curl -sf http://127.0.0.1:4300/api/trpc/system.health >/dev/null 2>&1; then
+# Check app is running (plain probe — system.health needs tRPC batch params)
+if curl -sf http://127.0.0.1:4300/api/healthz >/dev/null 2>&1; then
   echo "✅ App is responding"
 else
   echo "⚠️  App health check pending..."
 fi
 
 # Check nginx
-if curl -sf "https://${DOMAIN}/api/trpc/system.health" >/dev/null 2>&1; then
+if curl -sf "https://${DOMAIN}/api/healthz" >/dev/null 2>&1; then
   echo "✅ HTTPS is working"
 else
   echo "⚠️  HTTPS check pending (SSL may need a moment)"

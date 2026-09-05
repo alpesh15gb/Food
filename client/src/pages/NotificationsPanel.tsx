@@ -4,7 +4,14 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { AdminError } from "@/components/DashboardLayout";
 
-const NOTIFICATION_TYPES = [
+type NotificationKey =
+  | "notifications_order_confirmed"
+  | "notifications_preparing"
+  | "notifications_out_for_delivery"
+  | "notifications_delivered"
+  | "notifications_cancelled";
+
+const NOTIFICATION_TYPES: Array<{ key: NotificationKey; label: string; description: string }> = [
   { key: "notifications_order_confirmed", label: "Order Confirmed", description: "Sent when restaurant accepts the order" },
   { key: "notifications_preparing", label: "Preparing", description: "Sent when kitchen starts preparing" },
   { key: "notifications_out_for_delivery", label: "Out for Delivery", description: "Sent when rider picks up the order" },
@@ -22,14 +29,14 @@ export default function NotificationsPanel({ restaurantId }: { restaurantId: str
     },
     onError: (err) => toast.error(err.message || "Could not save notification setting."),
   });
-  const [toggling, setToggling] = useState<string | null>(null);
+  const [toggling, setToggling] = useState<NotificationKey | null>(null);
 
-  const isEnabled = (key: string) => {
+  const isEnabled = (key: NotificationKey) => {
     const setting = settings?.find(s => s.key === key);
     return setting ? setting.value !== "false" : true;
   };
 
-  const handleToggle = async (key: string) => {
+  const handleToggle = async (key: NotificationKey) => {
     setToggling(key);
     try {
       const current = isEnabled(key);

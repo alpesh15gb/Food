@@ -4,8 +4,23 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { AdminError } from "@/components/DashboardLayout";
 import { trpc } from "@/lib/trpc";
+
+function formatJoinedAt(value: unknown): string {
+  const d = value instanceof Date ? value : new Date(String(value ?? ""));
+  return Number.isNaN(d.getTime()) ? "—" : d.toLocaleDateString();
+}
 
 const ROLES = [
   { value: "owner", label: "Owner", desc: "Full access including billing and team" },
@@ -46,6 +61,7 @@ export default function StaffPanel({ restaurantId }: { restaurantId: string }) {
 
   const [showInvite, setShowInvite] = useState(false);
   const [inviteForm, setInviteForm] = useState({ email: "", role: "staff" as RoleValue });
+  const [deactivateId, setDeactivateId] = useState<string | null>(null);
 
   const list = members.data ?? [];
 
@@ -62,7 +78,7 @@ export default function StaffPanel({ restaurantId }: { restaurantId: string }) {
         </Button>
       ) : (
         <div className="bg-white rounded-xl border border-[#e8ddd0] p-4 space-y-3">
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="space-y-1">
               <Label htmlFor="invite-email">Email</Label>
               <Input id="invite-email" type="email" value={inviteForm.email} onChange={e => setInviteForm({ ...inviteForm, email: e.target.value })} placeholder="staff@restaurant.com" />
@@ -74,8 +90,8 @@ export default function StaffPanel({ restaurantId }: { restaurantId: string }) {
               </select>
             </div>
           </div>
-          <div className="flex gap-2 pt-2">
-            <Button onClick={() => { if (!inviteForm.email) { toast.error("Email required"); return; } inviteMember.mutate({ restaurantId, email: inviteForm.email, role: inviteForm.role }); }} disabled={inviteMember.isPending} className="bg-[#38271F] hover:bg-[#2a1d17] text-white">
+          <div className="flex flex-wrap gap-2 pt-2">
+            <Button onClick={() => { const email = inviteForm.email.trim().toLowerCase(); if (!email) { toast.error("Email required"); return; } if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { toast.error("Enter a valid email address."); return; } inviteMember.mutate({ restaurantId, email, role: inviteForm.role }); }} disabled={inviteMember.isPending} className="bg-[#38271F] hover:bg-[#2a1d17] text-white">
               {inviteMember.isPending ? <LoaderCircle className="w-4 h-4 animate-spin mr-1" /> : null} Send Invite
             </Button>
             <Button variant="outline" onClick={() => setShowInvite(false)}>Cancel</Button>
@@ -123,7 +139,7 @@ export default function StaffPanel({ restaurantId }: { restaurantId: string }) {
                     className="min-h-11 text-xs font-bold px-2 py-1 rounded border border-[#e8ddd0] bg-transparent"
                     value={m.role}
                     disabled={updateRole.isPending}
-                    onChange={e => updateRole.mutate({ memberId: m.id, role: e.target.value as RoleValue })}
+                    onChange={e => updateRole.mutate({ memberId: m.id, role: e.target.value as RoleValue, restaurantId })}
                   >
                     {ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
                   </select>
@@ -133,10 +149,10 @@ export default function StaffPanel({ restaurantId }: { restaurantId: string }) {
                     {m.isActive ? "Active" : "Inactive"}
                   </span>
                 </td>
-                <td className="px-4 py-2.5 text-[#6b5c52]">{new Date(m.joinedAt).toLocaleDateString()}</td>
+                <td className="px-4 py-2.5 text-[#6b5c52]">{formatJoinedAt(m.joinedAt)}</td>
                 <td className="px-4 py-2.5 text-right">
                   {m.isActive && (
-                    <Button size="sm" variant="ghost" aria-label={`Deactivate ${m.userEmail ?? m.userName ?? "member"}`} className="text-red-500 hover:text-red-700 hover:bg-red-50 h-7 px-2" disabled={deactivate.isPending} onClick={() => deactivate.mutate({ memberId: m.id })}>
+                    <Button size="sm" variant="ghost" aria-label={`Deactivate ${m.userEmail ?? m.userName ?? "member"}`} className="text-red-500 hover:text-red-700 hover:bg-red-50 h-7 px-2" disabled={deactivate.isPending} onClick={() => setDeactivateId(m.id)}>
                       <UserMinus className="w-3 h-3" />
                     </Button>
                   )}
@@ -147,6 +163,26 @@ export default function StaffPanel({ restaurantId }: { restaurantId: string }) {
         </table>
       </div>
       )}
+
+      <AlertDialog open={!!deactivateId} onOpenChange={(open) => { if (!open) setDeactivateId(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Deactivate this member?</AlertDialogTitle>
+            <AlertDialogDescription>
+              The member will immediately lose access to this restaurant. You can re-invite them later if needed.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep member</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => { if (deactivateId) deactivate.mutate({ memberId: deactivateId, restaurantId }); setDeactivateId(null); }}
+              className="bg-red-600 hover:bg-red-700"
+            >
+              Deactivate
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Role Reference */}
       <div className="bg-white rounded-xl border border-[#e8ddd0] p-4">

@@ -128,7 +128,8 @@ export default function DeliveryLocationDrawer({
   });
   const biasedCenter = initialCenter ?? lastPin ?? DEFAULT_MAP_CENTER;
 
-  // Address form
+  // Address form — re-synced whenever the drawer opens so edits always
+  // start from the latest confirmed location (the drawer stays mounted).
   const [flatHouse, setFlatHouse] = useState(existingLocation?.flatHouse ?? "");
   const [building, setBuilding] = useState(existingLocation?.building ?? "");
   const [street, setStreet] = useState(existingLocation?.street ?? "");
@@ -136,6 +137,16 @@ export default function DeliveryLocationDrawer({
   const [area, setArea] = useState(existingLocation?.area ?? "");
   const [city, setCity] = useState(existingLocation?.city ?? "");
   const [postalCode, setPostalCode] = useState(existingLocation?.postalCode ?? "");
+  useEffect(() => {
+    if (!open) return;
+    setFlatHouse(existingLocation?.flatHouse ?? "");
+    setBuilding(existingLocation?.building ?? "");
+    setStreet(existingLocation?.street ?? "");
+    setLandmark(existingLocation?.landmark ?? "");
+    setArea(existingLocation?.area ?? "");
+    setCity(existingLocation?.city ?? "");
+    setPostalCode(existingLocation?.postalCode ?? "");
+  }, [open, existingLocation]);
 
   // Map state
   const mapRef = useRef<google.maps.Map | null>(null);
@@ -146,6 +157,9 @@ export default function DeliveryLocationDrawer({
   const [searchResults, setSearchResults] = useState<PlaceSearchResult[]>([]);
   const [searching, setSearching] = useState(false);
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+  }, []);
 
   const reset = useCallback(() => {
     setStep("choose_method");
@@ -241,7 +255,9 @@ export default function DeliveryLocationDrawer({
     setSearching(true);
     setGeoError(null);
     try {
-      const biased = cityBias ? `${value}, ${cityBias}` : value;
+      // Ignore placeholder outlet cities ("To be configured") — biasing with
+      // them poisons the query and returns zero results.
+      const biased = cityBias && cityBias !== "To be configured" ? `${value}, ${cityBias}` : value;
       const results = await searchPlaces(biased);
       setSearchResults(results);
       if (results.length === 0) {
@@ -335,12 +351,20 @@ export default function DeliveryLocationDrawer({
     });
   }, []);
 
-  // Center map when geoState changes and we're on map_confirm step
+  // Center map when geoState changes and we're on map_confirm step.
+  // Skip re-centering when the map is already there: idle-drag updates echo
+  // the map center back into geoState, and re-centering would fight the user
+  // (plus force-zoom them back to 16 after every pinch-zoom).
   useEffect(() => {
-    if (step === "map_confirm" && geoState && mapRef.current) {
-      mapRef.current.setCenter({ lat: geoState.latitude, lng: geoState.longitude });
-      mapRef.current.setZoom(16);
+    if (step !== "map_confirm" || !geoState || !mapRef.current) return;
+    const center = mapRef.current.getCenter();
+    if (center) {
+      const dLat = Math.abs(center.lat() - geoState.latitude);
+      const dLng = Math.abs(center.lng() - geoState.longitude);
+      if (dLat < 0.00005 && dLng < 0.00005) return;
     }
+    mapRef.current.setCenter({ lat: geoState.latitude, lng: geoState.longitude });
+    mapRef.current.setZoom(16);
   }, [step, geoState?.latitude, geoState?.longitude]);
 
   // Reverse geocode when map settles (debounced)
@@ -397,7 +421,7 @@ export default function DeliveryLocationDrawer({
     onOpenChange(false);
   }, [flatHouse, building, street, landmark, area, city, postalCode, geoState, onConfirm, onOpenChange]);
 
-  const formValid = flatHouse.trim() && area.trim() && city.trim() && /^\d{6}$/.test(postalCode) && geoState;
+  const formValid = Boolean(flatHouse.trim() && area.trim() && city.trim() && /^\d{6}$/.test(postalCode) && geoState);
 
   const accuracyLevel = geoState ? classifyAccuracy(geoState.deviceAccuracyMeters ?? geoState.accuracyMeters) : null;
 
@@ -482,6 +506,7 @@ export default function DeliveryLocationDrawer({
                     {searchResults.map((result) => (
                       <button
                         key={result.placeId}
+                        type="button"
                         onClick={() => handlePlaceSelect(result.placeId, result.description)}
                         className="w-full px-4 py-3 text-left text-sm text-[#382719] hover:bg-[#fff4e9]"
                       >
@@ -503,6 +528,16 @@ export default function DeliveryLocationDrawer({
                   setVisitedChoice(true);
                   setCameViaMap(true);
                   setStep("map_confirm");
+                  // Autofill empty fields for a fresh pin — never overwrite
+                  // what the user already typed or confirmed.
+                  reverseGeocode(biasedCenter.lat, biasedCenter.lng).then((result) => {
+                    if (result.area) setArea((prev) => prev || result.area || prev);
+                    if (result.city) setCity((prev) => prev || result.city || prev);
+                    if (result.postalCode) setPostalCode((prev) => prev || result.postalCode || prev);
+                    if (result.street) setStreet((prev) => prev || result.street || prev);
+                  }).catch(() => {
+                    // Offline / lookup failed — the user fills the form manually.
+                  });
                 }}
                 variant="outline"
                 className="h-11 w-full rounded-xl border-[#dfcbb9] bg-white font-bold text-[#5c4332]"
@@ -632,30 +667,35 @@ export default function DeliveryLocationDrawer({
               <div className="space-y-3">
                 <Input
                   placeholder="Flat / House number *"
+                  aria-label="Flat or house number"
                   value={flatHouse}
                   onChange={(e) => setFlatHouse(e.target.value)}
                   className="h-11 rounded-xl border-[#dfcbb9] bg-white text-[#382719]"
                 />
                 <Input
                   placeholder="Building / Apartment name"
+                  aria-label="Building or apartment name"
                   value={building}
                   onChange={(e) => setBuilding(e.target.value)}
                   className="h-11 rounded-xl border-[#dfcbb9] bg-white text-[#382719]"
                 />
                 <Input
                   placeholder="Street"
+                  aria-label="Street"
                   value={street}
                   onChange={(e) => setStreet(e.target.value)}
                   className="h-11 rounded-xl border-[#dfcbb9] bg-white text-[#382719]"
                 />
                 <Input
                   placeholder="Landmark"
+                  aria-label="Landmark"
                   value={landmark}
                   onChange={(e) => setLandmark(e.target.value)}
                   className="h-11 rounded-xl border-[#dfcbb9] bg-white text-[#382719]"
                 />
                 <Input
                   placeholder="Area / Locality *"
+                  aria-label="Area or locality"
                   value={area}
                   onChange={(e) => setArea(e.target.value)}
                   className="h-11 rounded-xl border-[#dfcbb9] bg-white text-[#382719]"
@@ -663,6 +703,7 @@ export default function DeliveryLocationDrawer({
                 <div className="grid grid-cols-2 gap-2">
                   <Input
                     placeholder="City *"
+                    aria-label="City"
                     value={city}
                     onChange={(e) => setCity(e.target.value)}
                     className="h-11 rounded-xl border-[#dfcbb9] bg-white text-[#382719]"

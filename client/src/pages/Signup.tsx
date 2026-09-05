@@ -26,6 +26,8 @@ export default function SignupPage() {
   const register = trpc.auth.register.useMutation({
     onSuccess: (result) => {
       toast.success("Welcome! Your restaurant has been created.");
+      // Drop the password from memory — it must not linger in component state.
+      setForm(prev => ({ ...prev, password: "" }));
       // Prefer the slug returned by the server; fall back to the slug preview.
       const returned = (result ?? {}) as { slug?: string; restaurantSlug?: string; restaurantId?: string };
       const slug = returned.slug || returned.restaurantSlug || form.restaurantSlug;
@@ -37,6 +39,7 @@ export default function SignupPage() {
   const login = trpc.auth.login.useMutation({
     onSuccess: () => {
       toast.success("Signed in successfully.");
+      setForm(prev => ({ ...prev, password: "" }));
       // Slug is unknown at login time; /admin resolves it via redirect helper.
       setLocation("/admin");
     },
@@ -46,21 +49,32 @@ export default function SignupPage() {
   const [isLogin, setIsLogin] = useState(false);
 
   function update(field: string, value: string) {
-    setForm(prev => ({ ...prev, [field]: value }));
     if (field === "restaurantName") {
-      const slug = value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+      const slug = value.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 64);
       setForm(prev => ({ ...prev, restaurantName: value, restaurantSlug: slug }));
+      return;
     }
+    setForm(prev => ({ ...prev, [field]: value }));
   }
 
   function handleAccountNext(e: React.FormEvent) {
     e.preventDefault();
-    if (!form.name || !form.email || !form.password) {
+    const name = form.name.trim();
+    const email = form.email.trim();
+    if (!name || !email || !form.password) {
       toast.error("Please fill in all fields.");
       return;
     }
-    if (form.password.length < 8) {
-      toast.error("Password must be at least 8 characters.");
+    if (name.length < 2) {
+      toast.error("Please enter your name.");
+      return;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      toast.error("Please enter a valid email address.");
+      return;
+    }
+    if (form.password.length < 8 || form.password.length > 128) {
+      toast.error("Password must be 8–128 characters.");
       return;
     }
     setStep("restaurant");
@@ -68,11 +82,22 @@ export default function SignupPage() {
 
   function handleRegister(e: React.FormEvent) {
     e.preventDefault();
-    if (!form.restaurantName || !form.address) {
-      toast.error("Restaurant name and address are required.");
+    const restaurantName = form.restaurantName.trim();
+    const slug = form.restaurantSlug.trim().toLowerCase();
+    const address = form.address.trim();
+    if (!restaurantName || restaurantName.length < 2) {
+      toast.error("Restaurant name must be at least 2 characters.");
       return;
     }
-    register.mutate(form);
+    if (!slug || slug.length < 2 || slug.length > 64 || !/^[a-z0-9-]+$/.test(slug)) {
+      toast.error("Storefront URL must be 2–64 chars: lowercase letters, numbers, hyphens.");
+      return;
+    }
+    if (!address || address.length < 5) {
+      toast.error("Please enter the full address of your kitchen (min 5 characters).");
+      return;
+    }
+    register.mutate({ ...form, restaurantName, restaurantSlug: slug, address });
   }
 
   function handleLogin(e: React.FormEvent) {
@@ -196,6 +221,11 @@ export default function SignupPage() {
                 Your storefront URL: <span className="font-mono text-[#38271F]">/{form.restaurantSlug}</span>
               </p>
             )}
+            <div className="space-y-2">
+              <Label htmlFor="restaurantSlug">Storefront URL (editable)</Label>
+              <Input id="restaurantSlug" placeholder="your-restaurant" className="font-mono" value={form.restaurantSlug} onChange={e => update("restaurantSlug", e.target.value.toLowerCase())} maxLength={64} />
+              <p className="text-xs text-[#6b5c52]">Lowercase letters, numbers, hyphens only.</p>
+            </div>
             <div className="space-y-2">
               <Label htmlFor="cuisineSummary">Cuisine Type</Label>
               <Input id="cuisineSummary" placeholder="North Indian, Chinese, Biryani" value={form.cuisineSummary} onChange={e => update("cuisineSummary", e.target.value)} />

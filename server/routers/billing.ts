@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { adminProcedure, requirePermission, router } from "../_core/trpc";
+import { TRPCError } from "@trpc/server";
 
 export const billingRouter = router({
   listPlans: adminProcedure.query(async () => {
@@ -10,8 +11,12 @@ export const billingRouter = router({
     return db.select().from(subscriptionPlans).where(eq(subscriptionPlans.isActive, true));
   }),
 
-  getSubscription: adminProcedure.input(z.object({ restaurantId: z.string().min(4) }))
-    .query(async ({ input }) => {
+  getSubscription: requirePermission("settings:read").input(z.object({ restaurantId: z.string().min(4) }))
+    .query(async ({ ctx, input }) => {
+      // Tenant isolation: callers bound to a restaurant cannot read another tenant's billing.
+      if (ctx.restaurantId && input.restaurantId !== ctx.restaurantId) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Subscription not found for this restaurant." });
+      }
       const db = await import("../db").then(m => m.getDb());
       if (!db) return null;
       const { restaurantSubscriptions, subscriptionPlans } = await import("../../drizzle/schema");

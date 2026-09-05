@@ -4,7 +4,7 @@
  * Original premium design, not a copy of any existing brand.
  */
 import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useLocation } from "wouter";
+import { useLocation, useSearch } from "wouter";
 import { toast } from "sonner";
 import {
   ArrowLeft, ArrowRight, Bike, Check, ChevronRight, Clock3, Copy,
@@ -51,6 +51,14 @@ type Filter = "all" | FoodKind | "bestseller";
 function normalizePhone(raw: string): string {
   return raw.replace(/[^\d]/g, "").slice(-10);
 }
+
+/** Fail fast on non-Indian numbers (server enforces 6–9 start authoritatively). */
+function isPlausibleIndianPhone(raw: string): boolean {
+  return /^[6-9]\d{9}$/.test(normalizePhone(raw));
+}
+
+/** Server caps a line at 20 units — the client clamps to match, never submits over. */
+const MAX_LINE_QTY = 20;
 
 function newIdempotencyKey(): string {
   try {
@@ -222,6 +230,7 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
   // Route from wouter's location (pathname only) — never window.location.pathname,
   // so in-app navigation updates the screen without a full reload.
   const path = location;
+  const searchString = useSearch();
   const segments = path.split("/").filter(Boolean);
   const tail = segments.length > 1 ? segments[segments.length - 1] : "";
   const screen =
@@ -237,10 +246,10 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
   const pathOrderNumber = screen === "tracking" ? segments[1] ?? "" : "";
   const activeOrderNumber = trackingNumber || pathOrderNumber;
   const queryParams = useMemo(
-    () => new URLSearchParams(typeof window !== "undefined" ? window.location.search : ""),
-    // Re-parse when the route changes (confirmation/tracking carry ?order=&token=).
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [location],
+    () => new URLSearchParams(searchString),
+    // Subscribe to the search string itself: confirmation/tracking carry
+    // ?order=&token=, and the query can change while the pathname stays put.
+    [searchString],
   );
 
   const [cart, setCart] = useState<CartLine[]>([]);
@@ -276,6 +285,16 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
   const [deliveryNotes, setDeliveryNotes] = useState("");
   const [cutlery, setCutlery] = useState(false);
   const [processing, setProcessing] = useState(false);
+  // Sync guard for double-tap: state lags a render, the ref does not, so a
+  // second tap while the first request is in flight is dropped, not reordered.
+  const processingRef = useRef(false);
+  const stopProcessing = useCallback(() => {
+    processingRef.current = false;
+    setProcessing(false);
+  }, []);
+  // Stable idempotency key per checkout attempt: retries reuse it (no dupes),
+  // any cart/detail change rotates it (no stale idempotent replays).
+  const idempotencyKeyRef = useRef<string | null>(null);
   // Issue 4: Delivery address and phone for checkout
   const [deliveryAddress, setDeliveryAddress] = useState<DeliveryLocation | null>(null);
   const [locationOpen, setLocationOpen] = useState(false);
@@ -314,6 +333,11 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
     const sessionPhone = customerMe.data?.phone;
     if (sessionPhone && !sessionPhone.includes("*")) setCustomerPhone(sessionPhone);
   }, [customerMe.data?.phone]);
+
+  // A new checkout attempt whenever the cart or its details change.
+  useEffect(() => {
+    idempotencyKeyRef.current = null;
+  }, [cart, deliveryAddress, customerPhone, couponCode, deliveryNotes, cutlery]);
 
   // Resend-cooldown countdown (driven by the server's retryAfterSeconds).
   useEffect(() => {
@@ -378,6 +402,10 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
     }
     return map;
   }, [cart]);
+  // Ref mirror so the stable simpleAdd callback can enforce the per-line cap
+  // without depending on cart (which would bust memoization of every row).
+  const cartQtyRef = useRef(cartQtyByItem);
+  cartQtyRef.current = cartQtyByItem;
 
   // Dish counts per category for the desktop index.
   const countByCategory = useMemo(() => {
@@ -398,39 +426,45 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
       quantity < 1
         ? current.filter((line) => line.id !== id)
         : current.map((line) =>
-            line.id === id ? { ...line, quantity } : line
+            line.id === id ? { ...line, quantity: Math.min(quantity, MAX_LINE_QTY) } : line
           )
     );
 
   // Stable reference: passed straight into memoized menu rows.
   const simpleAdd = useCallback(
-    (item: StorefrontMenuItem) => {
+    (item: StorefrontMenuItem, opts?: { silent?: boolean }) => {
     if (!restaurantOpen) {
       toast.error("The kitchen is closed right now.", { description: closureMessage });
       return;
     }
     if (item.availability !== "AVAILABLE") return;
+    const lineId = `${item.id}-default`;
+    const currentQty = cartQtyRef.current.get(item.id) ?? 0;
+    if (currentQty >= MAX_LINE_QTY) {
+      toast.error(`You can add up to ${MAX_LINE_QTY} of an item per order.`);
+      return;
+    }
     setCart((current) => {
       const found = current.find(
-        (line) => line.id === `${item.id}-default`
+        (line) => line.id === lineId
       );
       return found
         ? current.map((line) =>
             line.id === found.id
-              ? { ...line, quantity: line.quantity + 1 }
+              ? { ...line, quantity: Math.min(line.quantity + 1, MAX_LINE_QTY) }
               : line
           )
         : [
             ...current,
             {
-              id: `${item.id}-default`,
+              id: lineId,
               item,
               quantity: 1,
               unitPrice: item.price,
             },
           ];
     });
-    toast.success(`${item.name} added to your order`);
+    if (!opts?.silent) toast.success(`${item.name} added to your order`);
     },
     [restaurantOpen, closureMessage],
   );
@@ -448,6 +482,12 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
           );
     });
   }, []);
+
+  // Stepper taps already show the new count inline — no success toast per tap.
+  const incrementSilent = useCallback(
+    (item: StorefrontMenuItem) => simpleAdd(item, { silent: true }),
+    [simpleAdd],
+  );
 
   const openItem = useCallback(
     (item: StorefrontMenuItem) => {
@@ -476,7 +516,11 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
 
   // Category rail: highlight + scroll the section into view below the
   // sticky header/rail (scroll-margin handled by .section-anchor CSS).
+  // Also exits search mode — sections don't exist in the flat result list,
+  // so scrolling without clearing would silently do nothing.
   const scrollToCategory = useCallback((categoryId: string, categoryName: string) => {
+    setQuery("");
+    setDebouncedQuery("");
     setActiveCategory(categoryName);
     requestAnimationFrame(() => {
       const el = document.getElementById(`menu-section-${categoryId}`);
@@ -514,6 +558,10 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
 
   const addCustomItem = () => {
     if (!selected) return;
+    if (!restaurantOpen) {
+      toast.error("The kitchen is closed right now.", { description: closureMessage });
+      return;
+    }
     const variant = selected.variants?.find((v) => v.id === selectedVariantId) ?? null;
     if (variant && !variant.isAvailable) {
       toast.error(`"${variant.name}" is currently unavailable.`);
@@ -545,9 +593,9 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
     setCart((current) => [
       ...current,
       {
-        id: `${selected.id}-${Date.now()}`,
+        id: `${selected.id}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
         item: selected,
-        quantity: customQty,
+        quantity: Math.min(Math.max(1, customQty), MAX_LINE_QTY),
         unitPrice,
         note,
         modifiers: displayNames,
@@ -578,6 +626,11 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
     try {
       await sendOtp.mutateAsync({ phone });
       setOtpStep("verify");
+      // Fresh code on its way — drop the stale one and pre-empt the next
+      // resend so a double-tap can't SMS-bomb the user before the server
+      // rate limit answers.
+      setOtpCode("");
+      setResendCooldown((current) => (current > 0 ? current : 30));
     } catch (err) {
       setOtpError(cooldownFromError(err));
     } finally {
@@ -624,7 +677,20 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
     toast.success("Logged out.");
   };
 
+  // Closing the sheet drops the transient error so reopening never shows
+  // a stale failure; the phone/code drafts are kept for convenience.
+  const handleAuthOpenChange = (open: boolean) => {
+    if (!open) setOtpError("");
+    setAuthOpen(open);
+  };
+
   const startSecurePayment = async () => {
+    // Drop double-taps: the ref flips synchronously, state settles a render later.
+    if (processingRef.current) return;
+    if (paymentConfig.isLoading) {
+      toast.info("Loading payment options — one moment…");
+      return;
+    }
     if (!paymentConfig.data?.enabled) {
       toast.error("Online payments are not configured yet.", {
         description:
@@ -649,17 +715,18 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
         description: "Tap on the delivery address bar to set your location.",
       });
     }
-    if (normalizePhone(customerPhone).length !== 10) {
+    if (normalizePhone(customerPhone).length !== 10 || !isPlausibleIndianPhone(customerPhone)) {
       return toast.error("Please enter your 10-digit phone number.");
     }
 
     // Serviceability pre-check — server-authoritative, blocks out-of-area orders.
+    processingRef.current = true;
     setProcessing(true);
     try {
       const svcResult = await serviceability.refetch();
       const service = svcResult.data;
       if (!service?.serviceable) {
-        setProcessing(false);
+        stopProcessing();
         const reason = (service as { reason?: string } | undefined)?.reason ?? "";
         toast.error("Sorry, we can't deliver to this location.", {
           description: reason === "OUTSIDE_DELIVERY_RADIUS"
@@ -669,12 +736,16 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
         return;
       }
     } catch {
-      setProcessing(false);
+      stopProcessing();
       toast.error("Could not verify delivery availability. Please try again.");
       return;
     }
 
     try {
+      // Reused across retries of this attempt so a double-tap or a failed
+      // Razorpay load can't mint a second order. Rotated by the effect above
+      // whenever the cart or its details change.
+      if (!idempotencyKeyRef.current) idempotencyKeyRef.current = newIdempotencyKey();
       const created = await initiatePayment.mutateAsync({
         slug: storefrontSlug,
         lines: cart.map((line) => ({
@@ -703,13 +774,22 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
         couponCode: couponCode.trim() ? couponCode.trim().toUpperCase() : undefined,
         deliveryNotes: deliveryNotes.trim() ? deliveryNotes.trim() : undefined,
         cutleryPreference: cutlery || undefined,
-        idempotencyKey: newIdempotencyKey(),
+        idempotencyKey: idempotencyKeyRef.current,
       });
 
       if (created.alreadyExists) {
-        setProcessing(false);
+        // Order already exists for this attempt — hand over its real token so
+        // confirmation/tracking authenticate, and park the cart to prevent
+        // an accidental second order on Back.
+        const existingToken = (created as { trackingToken?: string }).trackingToken;
+        stopProcessing();
+        setCart([]);
+        idempotencyKeyRef.current = null;
         toast.success("This order was already placed — opening it now.");
-        navigate(`/${storefrontSlug}/confirmation?order=${created.orderNumber}`);
+        navigate(
+          `/${storefrontSlug}/confirmation?order=${created.orderNumber}` +
+          (existingToken ? `&token=${existingToken}` : "")
+        );
         return;
       }
 
@@ -722,14 +802,25 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
         });
       }
 
-      // Load Razorpay checkout
+      // Load Razorpay checkout (dedupe the tag across retries — appending a
+      // second copy re-executes the vendor bundle and can double-fire load).
       if (!window.Razorpay) {
-        const script = document.createElement("script");
-        script.src = "https://checkout.razorpay.com/v1/checkout.js";
-        await new Promise<void>((resolve, reject) => {
-          script.onload = () => resolve();
-          script.onerror = () => reject(new Error("Failed to load Razorpay"));
+        let script = document.querySelector<HTMLScriptElement>(
+          'script[src="https://checkout.razorpay.com/v1/checkout.js"]'
+        );
+        if (!script) {
+          script = document.createElement("script");
+          script.src = "https://checkout.razorpay.com/v1/checkout.js";
           document.body.appendChild(script);
+        }
+        const pending = script;
+        await new Promise<void>((resolve, reject) => {
+          if (window.Razorpay) {
+            resolve();
+            return;
+          }
+          pending.addEventListener("load", () => resolve(), { once: true });
+          pending.addEventListener("error", () => reject(new Error("Failed to load Razorpay")), { once: true });
         });
       }
 
@@ -750,6 +841,10 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
               providerPaymentId: response.razorpay_payment_id,
               signature: response.razorpay_signature,
             });
+            // Park the cart: the order is paid, and Back must not offer a
+            // one-tap accidental reorder of the same items.
+            setCart([]);
+            idempotencyKeyRef.current = null;
             // Persist the tracking token so confirmation/tracking can authenticate.
             navigate(
               `/${storefrontSlug}/confirmation?order=${created.orderNumber}&token=${created.trackingToken}`
@@ -761,15 +856,15 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
                 : "Payment verification failed."
             );
           } finally {
-            setProcessing(false);
+            stopProcessing();
           }
         },
         modal: {
-          ondismiss: () => setProcessing(false),
+          ondismiss: () => stopProcessing(),
         },
       }).open();
     } catch (error) {
-      setProcessing(false);
+      stopProcessing();
       toast.error(
         error instanceof Error ? error.message : "We couldn't start payment."
       );
@@ -791,7 +886,12 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
     );
   }
 
-  const goMenu = () => navigate(`/${storefrontSlug}`);
+  // Custom-domain roots (no path slug) stay on "/" — pushing /<slug> would
+  // break the clean domain URL the restaurant advertises.
+  const goMenu = useCallback(
+    () => navigate(hasPathSlug ? `/${storefrontSlug}` : "/"),
+    [hasPathSlug, navigate, storefrontSlug],
+  );
 
   if (["cart", "checkout", "confirmation", "tracking"].includes(screen)) {
     return (
@@ -827,8 +927,8 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
         slug={storefrontSlug}
         eta={restaurant?.eta}
         activeOrderNumber={activeOrderNumber}
-        queryOrder={queryParams.get("order") ?? ""}
-        queryToken={queryParams.get("token") ?? ""}
+        queryOrder={(queryParams.get("order") ?? "").trim()}
+        queryToken={(queryParams.get("token") ?? "").trim()}
       />
         {/* Location picker must stay mounted on sub-screens: the checkout
             form's address buttons open it from here too. */}
@@ -1158,7 +1258,7 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
                 onAdd={openItem}
                 orderingDisabled={!restaurantOpen}
                 cartQtyByItem={cartQtyByItem}
-                onIncrement={simpleAdd}
+                onIncrement={incrementSilent}
                 onDecrement={decrementSimple}
                 onSpyCategory={setActiveCategory}
               />
@@ -1177,6 +1277,7 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
                 onCheckout={startSecurePayment}
                 processing={processing}
                 restaurant={restaurant}
+                estimated
                 checkoutBlocked={!restaurantOpen || serviceBlocked}
                 checkoutHint={
                   !restaurantOpen
@@ -1231,7 +1332,7 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
 
       {/* Customer Auth — Dialog on sm+ screens, Drawer on mobile */}
       {isDesktop ? (
-        <Dialog open={authOpen} onOpenChange={setAuthOpen}>
+        <Dialog open={authOpen} onOpenChange={handleAuthOpenChange}>
           <DialogContent className="border-[#dfcbb9] bg-[#fffaf3] sm:max-w-md">
             <DialogHeader className="text-left">
               <DialogTitle className="font-display text-2xl text-[#382719]">
@@ -1263,7 +1364,7 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
           </DialogContent>
         </Dialog>
       ) : (
-        <Drawer open={authOpen} onOpenChange={setAuthOpen}>
+        <Drawer open={authOpen} onOpenChange={handleAuthOpenChange}>
           <DrawerContent className="max-h-[85vh]">
             <DrawerHeader className="px-6 pb-2 text-left">
               <DrawerTitle className="font-display text-2xl text-[#382719]">
@@ -1756,6 +1857,23 @@ const MenuStream = memo(function MenuStream({
   }
 
   // Browse mode: every category is a section; the rail scroll-spies them.
+  // No visible categories at all (fresh kitchen) gets an explicit empty
+  // state — otherwise the page below the rail is silently blank.
+  if (!searching && categories.length === 0) {
+    return (
+      <div className="ticket-edge mt-5 bg-[#fffdf8] p-9 text-center shadow-sm">
+        <div className="mx-auto grid h-14 w-14 place-items-center rounded-full bg-[#faede0] text-[#c84630]">
+          <Utensils className="h-6 w-6" />
+        </div>
+        <h2 className="font-display mt-4 text-2xl">
+          Menu coming soon
+        </h2>
+        <p className="mt-2 text-sm text-[#856855]">
+          The kitchen is setting up its menu — please check back shortly.
+        </p>
+      </div>
+    );
+  }
   return (
     <div className="space-y-8 pb-3">
       {categories.map((category) => {
@@ -2202,12 +2320,13 @@ function CustomizationDrawer({
               value={note}
               onChange={(event) => onNote(event.target.value)}
               placeholder="Less spicy, no onions..."
+              maxLength={300}
               className="mt-2 min-h-20 w-full resize-none rounded-xl border border-[#e5d0bd] bg-white p-3 text-sm outline-none ring-[#c84630] focus:ring-2"
             />
           </div>
 
           <div className="mt-5">
-            <Quantity value={quantity} onChange={(next) => onQuantity(Math.max(1, next))} />
+            <Quantity value={quantity} onChange={(next) => onQuantity(Math.min(MAX_LINE_QTY, Math.max(1, next)))} />
           </div>
         </div>
         <DrawerFooter className="border-t border-[#ead8c6] bg-[#fffdf9] px-5 pb-5 pt-4">
@@ -2547,6 +2666,7 @@ function ServiceSetupScreen({
               onCheckout={onCheckout}
               processing={processing}
               restaurant={restaurant}
+              estimated
               checkoutBlocked={!restaurantOpen || serviceBlocked}
               checkoutHint={
                 !restaurantOpen
@@ -2656,7 +2776,9 @@ function ServiceSetupScreen({
         trackingToken={queryToken}
         restaurantName={restaurant?.name}
         etaFallback={restaurant?.eta ?? eta}
-        onMenu={slug ? onMenu : undefined}
+        // Guest tracking (/order/:number) carries no slug — goMenu falls back
+        // to "/" there, so the error/success cards always offer a way out.
+        onMenu={onMenu}
         variant="tracking"
       />
     );

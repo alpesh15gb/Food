@@ -7,10 +7,25 @@ set -eu
 
 cd "$(dirname "$0")/.."
 
-APP_CONTAINER="${APP_CONTAINER:-deploy-app-1}"
-DB_CONTAINER="${DB_CONTAINER:-deploy-db-1}"
 COMPOSE_FILE="deploy/docker-compose.yml"
 ENV_FILE="deploy/config.env"
+
+# Container names depend on the compose project name, which varies with how
+# the stack was first created. Prefer live discovery via compose; fall back
+# to the historic deploy-* names (overridable via APP_CONTAINER/DB_CONTAINER).
+# Never `down` the db service or rename the project: named volumes are
+# project-prefixed, so a rename would orphan the database volume.
+resolve_container() {
+  found="$(docker compose -f "$COMPOSE_FILE" ps -q "$1" 2>/dev/null | head -n 1 || true)"
+  if [ -n "$found" ]; then
+    printf '%s' "$found"
+  else
+    printf '%s' "$2"
+  fi
+}
+
+APP_CONTAINER="${APP_CONTAINER:-$(resolve_container app deploy-app-1)}"
+DB_CONTAINER="${DB_CONTAINER:-$(resolve_container db deploy-db-1)}"
 
 # 1. Backfill deploy/config.env from the RUNNING containers so a rebuild can
 # never boot with blank secrets. Existing non-empty values in config.env win.

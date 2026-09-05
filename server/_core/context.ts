@@ -17,7 +17,11 @@ export type TrpcContext = {
 // request. This stays fail-closed because tenant/permission procedures
 // re-verify membership before authorizing anything.
 async function resolveRestaurantFromHost(host: string, requestId: string): Promise<string | null> {
-  const domain = host.split(":")[0].toLowerCase();
+  const raw = host.split(":")[0].toLowerCase().replace(/^\.+|\.+$/g, "");
+  // Strip a leading www. so www.example.com and example.com resolve to the
+  // same verified custom-domain row (matches storefront defaultSlug).
+  const domain = raw.replace(/^www\./, "");
+  if (!domain) return null;
   try {
     const { getDb } = await import("../db");
     const { customDomains } = await import("../../drizzle/schema");
@@ -50,8 +54,10 @@ export async function createContext({
   res: Response;
 }): Promise<TrpcContext> {
   const rawRequestId = req.headers["x-request-id"];
+  // X-Request-Id is attacker-controlled: use only for log correlation, bound
+  // its length to avoid log-injection / oversized-header abuse.
   const requestId =
-    (Array.isArray(rawRequestId) ? rawRequestId[0] : rawRequestId)?.split(",")[0]?.trim() ||
+    (Array.isArray(rawRequestId) ? rawRequestId[0] : rawRequestId)?.split(",")[0]?.trim().slice(0, 64) ||
     randomUUID();
 
   let user: AuthenticatedUser | null = null;

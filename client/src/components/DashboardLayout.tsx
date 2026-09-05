@@ -91,21 +91,27 @@ export const SECTION_TITLES: Record<string, string> = {
   notifications: "Notification settings",
 };
 
+/** Pathname without ?query/#hash, duplicate slashes collapsed, no trailing slash. */
+export function cleanAdminLocation(location: string): string {
+  const path = location.split(/[?#]/, 1)[0].replace(/\/{2,}/g, "/");
+  return path.length > 1 ? path.replace(/\/+$/, "") : path;
+}
+
 export function parseAdminLocation(location: string): { slug?: string; section: string } {
-  const parts = location.split("/").filter(Boolean); // ["admin", ...]
-  if (parts[0] !== "admin") return { section: "overview" };
-  if (parts.length >= 3) return { slug: parts[1], section: parts[2] || "overview" };
+  const parts = cleanAdminLocation(location).split("/").filter(Boolean); // ["admin", ...]
+  if (parts[0]?.toLowerCase() !== "admin") return { section: "overview" };
+  if (parts.length >= 3) return { slug: parts[1], section: parts[2].toLowerCase() || "overview" };
   if (parts.length === 2) {
     // /admin/:x — either a slug (restaurant home) or a bare section (backward compat)
-    if (parts[1] in SECTION_TITLES) return { section: parts[1] };
+    if (parts[1].toLowerCase() in SECTION_TITLES) return { section: parts[1].toLowerCase() };
     return { slug: parts[1], section: "overview" };
   }
   return { section: "overview" };
 }
 
 export function adminPath(slug: string | undefined, section: string): string {
-  const base = slug ? `/admin/${slug}` : "/admin";
-  return section === "overview" ? base : `${base}/${section}`;
+  const base = slug ? `/admin/${encodeURIComponent(slug)}` : "/admin";
+  return section === "overview" ? base : `${base}/${encodeURIComponent(section)}`;
 }
 
 export function sectionTitle(section: string): string {
@@ -182,19 +188,33 @@ const DEFAULT_WIDTH = 280;
 const MIN_WIDTH = 200;
 const MAX_WIDTH = 480;
 
+function readSavedSidebarWidth(): number {
+  try {
+    const raw = localStorage.getItem(SIDEBAR_WIDTH_KEY);
+    const n = raw ? parseInt(raw, 10) : NaN;
+    // Corrupt values (NaN, out of range) fall back instead of emitting NaNpx.
+    if (!Number.isFinite(n)) return DEFAULT_WIDTH;
+    return Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, n));
+  } catch {
+    // Storage unavailable (SSR/private mode) — use the default width.
+    return DEFAULT_WIDTH;
+  }
+}
+
 export default function DashboardLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  const [sidebarWidth, setSidebarWidth] = useState(() => {
-    const saved = localStorage.getItem(SIDEBAR_WIDTH_KEY);
-    return saved ? parseInt(saved, 10) : DEFAULT_WIDTH;
-  });
+  const [sidebarWidth, setSidebarWidth] = useState(readSavedSidebarWidth);
   const { loading, user } = useAuth();
 
   useEffect(() => {
-    localStorage.setItem(SIDEBAR_WIDTH_KEY, sidebarWidth.toString());
+    try {
+      localStorage.setItem(SIDEBAR_WIDTH_KEY, sidebarWidth.toString());
+    } catch {
+      // Quota/private-mode writes must never break the layout.
+    }
   }, [sidebarWidth]);
 
   if (loading) {
@@ -260,11 +280,12 @@ function DashboardLayoutContent({
   const { slug, section } = parseAdminLocation(location);
   const base = slug ? `/admin/${slug}` : "/admin";
   const pathFor = (s: string) => adminPath(slug, s);
-  // Sidebar highlights via endsWith so slug-prefixed and legacy paths both match.
+  // Exact match on the cleaned location (no ?query, no trailing slash): the
+  // old endsWith highlighted the wrong item for suffixed paths and missed
+  // entirely when a query string was present.
+  const loc = cleanAdminLocation(location);
   const isActiveSection = (s: string) =>
-    s === "overview"
-      ? location === base || location.endsWith("/overview")
-      : location.endsWith(`/${s}`);
+    s === "overview" ? loc === base || loc === `${base}/overview` : loc === `${base}/${s}`;
 
   // Permission-gated nav: resolve the restaurant id for the current slug, then
   // hide Team / Integrations / Domains when the server answers FORBIDDEN.

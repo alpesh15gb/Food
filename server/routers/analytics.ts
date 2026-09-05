@@ -4,7 +4,7 @@ import { router } from "../_core/trpc";
 
 /** Validate date range: start <= end and range <= 366 days. */
 function assertValidRange(start: Date, end: Date) {
-  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+  if (!(start instanceof Date) || !(end instanceof Date) || Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
     throw new Error("Invalid startDate or endDate.");
   }
   if (start > end) {
@@ -14,6 +14,19 @@ function assertValidRange(start: Date, end: Date) {
   if (days > 366) {
     throw new Error("Date range must not exceed 366 days.");
   }
+}
+
+/**
+ * Normalize YYYY-MM-DD inputs to full-day UTC bounds so the end date is
+ * inclusive. Date inputs arrive as midnight; without this the entire end
+ * day (except 00:00:00) is excluded from every report.
+ */
+function normalizeDayBounds(start: Date, end: Date): { start: Date; end: Date } {
+  const s = new Date(start);
+  s.setUTCHours(0, 0, 0, 0);
+  const e = new Date(end);
+  e.setUTCHours(23, 59, 59, 999);
+  return { start: s, end: e };
 }
 
 const dateRangeSchema = {
@@ -33,9 +46,8 @@ export const analyticsRouter = router({
       if (!db) return [];
       const { sql } = await import("drizzle-orm");
 
-      const start = input.startDate;
-      const end = input.endDate;
-      assertValidRange(start, end);
+      assertValidRange(input.startDate, input.endDate);
+      const { start, end } = normalizeDayBounds(input.startDate, input.endDate);
 
       // Timezone Asia/Kolkata: bucket periods in IST, not UTC.
       const truncFn = input.granularity === "monthly" ? "date_trunc('month', created_at AT TIME ZONE 'Asia/Kolkata')"
@@ -75,9 +87,8 @@ export const analyticsRouter = router({
       if (!db) return [];
       const { sql } = await import("drizzle-orm");
 
-      const start = input.startDate;
-      const end = input.endDate;
-      assertValidRange(start, end);
+      assertValidRange(input.startDate, input.endDate);
+      const { start, end } = normalizeDayBounds(input.startDate, input.endDate);
 
       const rows = await db.execute(sql`
         SELECT oi.item_name_snapshot AS item_name,
@@ -144,9 +155,8 @@ export const analyticsRouter = router({
       if (!db) return [];
       const { sql } = await import("drizzle-orm");
 
-      const start = input.startDate;
-      const end = input.endDate;
-      assertValidRange(start, end);
+      assertValidRange(input.startDate, input.endDate);
+      const { start, end } = normalizeDayBounds(input.startDate, input.endDate);
 
       const rows = await db.execute(sql`
         SELECT COALESCE(mc.name, 'Uncategorized') AS category_name,
@@ -181,9 +191,8 @@ export const analyticsRouter = router({
       if (!db) return { newCustomers: 0, repeatCustomers: 0, retentionRate: 0 };
       const { sql } = await import("drizzle-orm");
 
-      const start = input.startDate;
-      const end = input.endDate;
-      assertValidRange(start, end);
+      assertValidRange(input.startDate, input.endDate);
+      const { start, end } = normalizeDayBounds(input.startDate, input.endDate);
 
       // First-ever order CTE: new = first order ever falls in range;
       // repeat = ordered in range but first order was before range.
@@ -234,9 +243,8 @@ export const analyticsRouter = router({
       if (!db) return { totalOrders: 0, totalRevenuePaise: 0, avgOrderValuePaise: 0, cancelledCount: 0 };
       const { sql } = await import("drizzle-orm");
 
-      const start = input.startDate;
-      const end = input.endDate;
-      assertValidRange(start, end);
+      assertValidRange(input.startDate, input.endDate);
+      const { start, end } = normalizeDayBounds(input.startDate, input.endDate);
 
       const rows = await db.execute(sql`
         SELECT

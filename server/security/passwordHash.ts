@@ -25,6 +25,15 @@ const SCRYPT_OPTIONS = { N: SCRYPT_N, r: SCRYPT_R, p: SCRYPT_P, maxmem: SCRYPT_M
 /** Current hash version — explicit N=32768 r=8 p=1 maxmem. */
 export const PASSWORD_HASH_VERSION = "v3";
 
+/**
+ * Dummy v3 hash used ONLY to equalize login timing when the email is unknown.
+ * Verifying against it burns the same scrypt cost as a real check, so an
+ * attacker cannot distinguish "unknown email" from "wrong password" by timing.
+ * It is never stored and never accepted as a real credential.
+ */
+export const DUMMY_PASSWORD_HASH_FOR_TIMING =
+  "v3:1eae2f33ad0385fca2c42868ad887768:904ca6d5d90a2d899feec8524c4e5ee4b2c2833e817abc60a4b9dbb7a4f23cd67a309cd517d582d38260fcdcd8caf9dd50792285b04d473adb3aca3f7b6ce6e4";
+
 export async function hashPassword(password: string): Promise<string> {
   const salt = randomBytes(16).toString("hex");
   const derived = await scryptAsync(password, salt, SCRYPT_KEYLEN, SCRYPT_OPTIONS);

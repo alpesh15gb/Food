@@ -13,6 +13,9 @@ ENV NODE_ENV=production
 RUN pnpm run build
 
 EXPOSE 4300
+# Plain probe endpoint: system.health is a tRPC batch query and needs
+# ?batch=1&input=… params, so a bare GET never returns 2xx (the container
+# would report unhealthy forever).
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-  CMD node -e "fetch('http://127.0.0.1:4300/api/trpc/system.health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
+  CMD node -e "fetch('http://127.0.0.1:4300/api/healthz').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
 CMD ["node", "dist/index.js"]

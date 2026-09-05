@@ -19,7 +19,7 @@ export default function InventoryPanel({ restaurantId }: { restaurantId: string 
         <p className="text-sm text-[#6b5c52] mt-1">Track raw materials, link ingredients to menu items, manage suppliers and purchase orders.</p>
       </div>
 
-      <div className="flex gap-1 border-b border-[#e8ddd0] pb-0">
+      <div className="flex gap-1 border-b border-[#e8ddd0] pb-0 overflow-x-auto">
         {([
           { id: "materials", label: "Materials", icon: Box },
           { id: "recipes", label: "Recipes", icon: UtensilsCrossed },
@@ -29,7 +29,7 @@ export default function InventoryPanel({ restaurantId }: { restaurantId: string 
           <button
             key={t.id}
             onClick={() => setTab(t.id)}
-            className={`flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
+            className={`flex shrink-0 whitespace-nowrap items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
               tab === t.id
                 ? "border-[#38271F] text-[#38271F]"
                 : "border-transparent text-[#6b5c52] hover:text-[#38271F]"
@@ -110,7 +110,7 @@ function MaterialsTab({ restaurantId }: { restaurantId: string }) {
         </Button>
       ) : (
         <div className="bg-white rounded-xl border border-[#e8ddd0] p-4 space-y-3">
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="space-y-1">
               <Label>Name</Label>
               <Input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="e.g., Chicken Breast" />
@@ -135,14 +135,26 @@ function MaterialsTab({ restaurantId }: { restaurantId: string }) {
           </div>
           <div className="flex gap-2 pt-2">
             <Button onClick={() => {
-              if (!form.name) { toast.error("Name is required"); return; }
+              const name = form.name.trim();
+              if (!name) { toast.error("Name is required"); return; }
+              let minStock: number | undefined;
+              if (form.minStock) {
+                minStock = parseFloat(form.minStock);
+                if (!Number.isFinite(minStock) || minStock < 0) { toast.error("Min stock must be 0 or more."); return; }
+              }
+              let costPerUnitPaise: number | undefined;
+              if (form.costPerUnit) {
+                const cost = parseFloat(form.costPerUnit);
+                if (!Number.isFinite(cost) || cost < 0) { toast.error("Cost must be 0 or more."); return; }
+                costPerUnitPaise = Math.round(cost * 100);
+              }
               createMaterial.mutate({
                 restaurantId,
-                name: form.name,
+                name,
                 unit: form.unit,
-                minStock: form.minStock ? parseFloat(form.minStock) : undefined,
-                costPerUnitPaise: form.costPerUnit ? Math.round(parseFloat(form.costPerUnit) * 100) : undefined,
-                category: form.category || undefined,
+                minStock,
+                costPerUnitPaise,
+                category: form.category.trim() || undefined,
               });
             }} disabled={createMaterial.isPending} className="bg-[#38271F] hover:bg-[#2a1d17] text-white">
               {createMaterial.isPending ? <LoaderCircle className="w-4 h-4 animate-spin mr-1" /> : null} Save
@@ -167,15 +179,18 @@ function MaterialsTab({ restaurantId }: { restaurantId: string }) {
             {list.length === 0 ? (
               <tr><td colSpan={5} className="px-4 py-8 text-center text-[#a09080]">No materials added yet</td></tr>
             ) : list.map(m => {
-              const stock = parseFloat(m.currentStock);
-              const min = parseFloat(m.minStock);
+              const rawStock = parseFloat(String(m.currentStock));
+              const rawMin = parseFloat(String(m.minStock));
+              const stock = Number.isFinite(rawStock) ? rawStock : 0;
+              const min = Number.isFinite(rawMin) ? rawMin : 0;
               const isLow = stock <= min;
+              const cost = Number.isFinite(m.costPerUnitPaise) ? m.costPerUnitPaise : 0;
               return (
                 <tr key={m.id} className="border-t border-[#f0e8de]">
                   <td className="px-4 py-2.5 font-medium">{m.name}</td>
                   <td className={`px-4 py-2.5 ${isLow ? "text-red-600 font-bold" : ""}`}>{stock} {m.unit}</td>
                   <td className="px-4 py-2.5 text-[#6b5c52]">{min} {m.unit}</td>
-                  <td className="px-4 py-2.5">₹{(m.costPerUnitPaise / 100).toFixed(2)}</td>
+                  <td className="px-4 py-2.5">₹{(cost / 100).toFixed(2)}</td>
                   <td className="px-4 py-2.5 text-[#6b5c52]">{m.category ?? "-"}</td>
                 </tr>
               );
@@ -249,13 +264,25 @@ function SuppliersTab({ restaurantId }: { restaurantId: string }) {
         </Button>
       ) : (
         <div className="bg-white rounded-xl border border-[#e8ddd0] p-4 space-y-3">
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div className="space-y-1"><Label>Name</Label><Input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} /></div>
             <div className="space-y-1"><Label>Phone</Label><Input value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} /></div>
-            <div className="space-y-1"><Label>Email</Label><Input value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} /></div>
+            <div className="space-y-1"><Label>Email</Label><Input type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} /></div>
           </div>
           <div className="flex gap-2 pt-2">
-            <Button onClick={() => { if (!form.name) { toast.error("Name required"); return; } createSupplier.mutate({ restaurantId, ...form }); }} disabled={createSupplier.isPending} className="bg-[#38271F] hover:bg-[#2a1d17] text-white">
+            <Button onClick={() => {
+              const name = form.name.trim();
+              if (!name) { toast.error("Name required"); return; }
+              const phone = form.phone.trim();
+              const email = form.email.trim();
+              if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { toast.error("Enter a valid email address."); return; }
+              createSupplier.mutate({
+                restaurantId,
+                name,
+                phone: phone || undefined,
+                email: email || undefined,
+              });
+            }} disabled={createSupplier.isPending} className="bg-[#38271F] hover:bg-[#2a1d17] text-white">
               {createSupplier.isPending ? <LoaderCircle className="w-4 h-4 animate-spin mr-1" /> : null} Save
             </Button>
             <Button variant="outline" onClick={() => setShowForm(false)}>Cancel</Button>
@@ -294,7 +321,16 @@ function SuppliersTab({ restaurantId }: { restaurantId: string }) {
 // =============================================================================
 
 function PurchaseOrdersTab({ restaurantId }: { restaurantId: string }) {
+  const utils = trpc.useUtils();
   const pos = trpc.inventory.listPurchaseOrders.useQuery({ restaurantId }, { retry: false });
+  const receivePo = trpc.inventory.receivePurchaseOrder.useMutation({
+    onSuccess: (d) => {
+      toast.success(`Purchase order received (${d.itemsReceived} items)`);
+      utils.inventory.listPurchaseOrders.invalidate({ restaurantId });
+      utils.inventory.listMaterials.invalidate({ restaurantId });
+    },
+    onError: (err) => toast.error(err.message),
+  });
   const list = pos.data ?? [];
 
   if (pos.isLoading) {
@@ -327,15 +363,20 @@ function PurchaseOrdersTab({ restaurantId }: { restaurantId: string }) {
               <th className="px-4 py-2.5 font-semibold text-[#6b5c52]">Status</th>
               <th className="px-4 py-2.5 font-semibold text-[#6b5c52]">Total</th>
               <th className="px-4 py-2.5 font-semibold text-[#6b5c52]">Date</th>
+              <th className="px-4 py-2.5 font-semibold text-[#6b5c52]"></th>
             </tr>
           </thead>
           <tbody>
             {list.length === 0 ? (
-              <tr><td colSpan={5} className="px-4 py-8 text-center text-[#a09080]">
+              <tr><td colSpan={6} className="px-4 py-8 text-center text-[#a09080]">
                 <Package className="w-8 h-8 mx-auto mb-2 opacity-40" />
                 No purchase orders yet
               </td></tr>
-            ) : list.map(po => (
+            ) : list.map(po => {
+              const total = Number.isFinite(po.totalPaise) ? po.totalPaise : 0;
+              const created = new Date(po.createdAt);
+              const canReceive = po.status === "DRAFT" || po.status === "SENT";
+              return (
               <tr key={po.id} className="border-t border-[#f0e8de]">
                 <td className="px-4 py-2.5 font-mono text-xs">{po.id.slice(-8)}</td>
                 <td className="px-4 py-2.5">{po.supplierName ?? "-"}</td>
@@ -347,10 +388,24 @@ function PurchaseOrdersTab({ restaurantId }: { restaurantId: string }) {
                     "bg-yellow-100 text-yellow-700"
                   }`}>{po.status}</span>
                 </td>
-                <td className="px-4 py-2.5">₹{(po.totalPaise / 100).toLocaleString("en-IN")}</td>
-                <td className="px-4 py-2.5 text-[#6b5c52]">{new Date(po.createdAt).toLocaleDateString()}</td>
+                <td className="px-4 py-2.5">₹{(total / 100).toLocaleString("en-IN")}</td>
+                <td className="px-4 py-2.5 text-[#6b5c52]">{Number.isNaN(created.getTime()) ? "—" : created.toLocaleDateString()}</td>
+                <td className="px-4 py-2.5 text-right">
+                  {canReceive && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={receivePo.isPending}
+                      onClick={() => { if (window.confirm(`Mark PO ${po.id.slice(-8)} as received? Stock will be added.`)) receivePo.mutate({ poId: po.id, restaurantId }); }}
+                      className="h-7 text-xs"
+                    >
+                      {receivePo.isPending ? <LoaderCircle className="w-3 h-3 animate-spin" /> : "Receive"}
+                    </Button>
+                  )}
+                </td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       </div>

@@ -1,10 +1,11 @@
 /** Market Table design: a hospitality-led app shell with warm, crisp, action-focused UI. */
-import { Suspense, lazy } from "react";
+import { Suspense, lazy, useEffect } from "react";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { Route, Switch } from "wouter";
+import { Route, Switch, useLocation } from "wouter";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
+import { canonicalPath } from "./lib/platform";
 import Home from "./pages/Home";
 
 // Storefront (Home) stays eager for fastest initial paint.
@@ -32,9 +33,26 @@ function RouteFallback() {
   );
 }
 
+/**
+ * Normalize the URL once per navigation (trailing slashes, duplicate
+ * slashes, slug case) with a replace — no extra history entries, so the
+ * back button skips the un-normalized URL. Without this, `/admin/` or
+ * `/9House` would fall through to `/:slug` and render a storefront lookup
+ * for "admin" instead of the admin desk.
+ */
+function LocationNormalizer() {
+  const [location, navigate] = useLocation();
+  useEffect(() => {
+    const fixed = canonicalPath(location);
+    if (fixed && fixed !== location) navigate(fixed, { replace: true });
+  }, [location, navigate]);
+  return null;
+}
+
 function Router() {
   return (
     <Suspense fallback={<RouteFallback />}>
+      <LocationNormalizer />
       <Switch>
         <Route path="/signup" component={SignupPage} />
         <Route path="/admin" component={Admin} />

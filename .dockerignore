@@ -14,5 +14,11 @@ dist
 # Local database volume data
 pgdata
 
+# Runtime uploads (persisted via the cloudkitchen_images volume, never baked in)
+images/
+
+# Dev-only browser debug logs (vite debug-collector plugin output)
+.manus-logs/
+
 # Unused template asset staging dir
 attached_assets

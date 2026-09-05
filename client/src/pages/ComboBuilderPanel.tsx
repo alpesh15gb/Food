@@ -120,15 +120,20 @@ export default function ComboBuilderPanel({
       : "";
     const description = `${form.description.trim()}${sectionsNote}`.trim() || undefined;
 
-    await createItemMutation.mutateAsync({
-      restaurantId,
-      categoryId: form.categoryId,
-      name: form.name.trim(),
-      pricePaise: Math.round(priceNum * 100),
-      description,
-      dietaryType: "veg",
-      isCustomizable: true,
-    });
+    try {
+      await createItemMutation.mutateAsync({
+        restaurantId,
+        categoryId: form.categoryId,
+        name: form.name.trim(),
+        pricePaise: Math.round(priceNum * 100),
+        description,
+        dietaryType: "veg",
+        isCustomizable: true,
+      });
+    } catch {
+      // onError already toasted — keep the form open with its data intact.
+      return;
+    }
 
     if (namedGroups.length > 0) {
       toast.warning("Sections saved as item notes — configure add-on options from the Menu panel.");

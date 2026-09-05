@@ -1,5 +1,5 @@
 /** Secure integration workspace: owner admins can add values over HTTPS; the server encrypts and never returns them. */
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { CheckCircle2, CircleAlert, KeyRound, LoaderCircle, LockKeyhole, ShieldCheck, Split } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -20,6 +20,8 @@ export default function IntegrationPanel({ restaurantId }: { restaurantId?: stri
   const utils = trpc.useUtils();
   const [drafts, setDrafts] = useState<SecretDrafts>({});
   const [openProvider, setOpenProvider] = useState<Provider | null>(null);
+  const [routeForm, setRouteForm] = useState({ contactEmail: "", contactPhone: "", legalBusinessName: "", pan: "", gstin: "" });
+  const [feeInput, setFeeInput] = useState("");
   const rid = restaurantId || "";
 
   const integrationQuery = trpc.admin.integrationStatus.useQuery(
@@ -30,12 +32,6 @@ export default function IntegrationPanel({ restaurantId }: { restaurantId?: stri
     { restaurantId: rid },
     { enabled: !!rid, retry: false }
   );
-
-  if (!restaurantId) {
-    return (
-      <AdminError message="We couldn't determine which restaurant these integrations belong to." />
-    );
-  }
 
   const verifySecret = trpc.admin.verifyIntegrationSecret.useMutation({
     onSuccess: result => toast.success(
@@ -48,7 +44,7 @@ export default function IntegrationPanel({ restaurantId }: { restaurantId?: stri
   const saveSecret = trpc.admin.saveIntegrationSecret.useMutation({
     onSuccess: (_result, value) => {
       setDrafts(current => ({ ...current, [value.keyName]: "" }));
-      utils.admin.integrationStatus.invalidate();
+      utils.admin.integrationStatus.invalidate({ restaurantId: rid });
       toast.success(`${value.keyName} saved securely`, { description: "The value is encrypted on the server and will not be shown again." });
     },
     onError: error => toast.error(error.message),
@@ -56,7 +52,7 @@ export default function IntegrationPanel({ restaurantId }: { restaurantId?: stri
 
   const setupRoute = trpc.admin.setupRazorpayRoute.useMutation({
     onSuccess: () => {
-      utils.admin.getRazorpayRouteStatus.invalidate();
+      utils.admin.getRazorpayRouteStatus.invalidate({ restaurantId: rid });
       toast.success("Razorpay Route account linked", { description: "Payments will now auto-split to the restaurant account." });
     },
     onError: error => toast.error(error.message),
@@ -64,14 +60,24 @@ export default function IntegrationPanel({ restaurantId }: { restaurantId?: stri
 
   const updateFee = trpc.admin.updatePlatformFee.useMutation({
     onSuccess: () => {
-      utils.admin.getRazorpayRouteStatus.invalidate();
+      utils.admin.getRazorpayRouteStatus.invalidate({ restaurantId: rid });
       toast.success("Platform fee updated");
     },
     onError: error => toast.error(error.message),
   });
 
-  const [routeForm, setRouteForm] = useState({ contactEmail: "", contactPhone: "", legalBusinessName: "", pan: "", gstin: "" });
-  const [feeInput, setFeeInput] = useState("");
+  const routeData = routeStatusQuery.data;
+  useEffect(() => {
+    if (routeData && feeInput === "") {
+      setFeeInput(String(routeData.platformFeePercent ?? 0));
+    }
+  }, [routeData, feeInput]);
+
+  if (!restaurantId) {
+    return (
+      <AdminError message="We couldn't determine which restaurant these integrations belong to." />
+    );
+  }
 
   if (integrationQuery.isLoading) {
     return <div className="grid min-h-72 place-items-center rounded-2xl bg-[#fffdf9] text-sm font-bold text-[#8a6a56]"><LoaderCircle className="mr-2 h-4 w-4 animate-spin" />Checking connection readiness…</div>;
@@ -87,7 +93,6 @@ export default function IntegrationPanel({ restaurantId }: { restaurantId?: stri
   }
 
   const services = Object.values(integrationQuery.data);
-  const routeData = routeStatusQuery.data;
   const isRouteActive = routeData?.status === "active";
 
   return (
@@ -218,7 +223,8 @@ export default function IntegrationPanel({ restaurantId }: { restaurantId?: stri
                   min={0}
                   max={100}
                   step={0.5}
-                  value={feeInput || String(routeData?.platformFeePercent ?? 0)}
+                  placeholder={String(routeData?.platformFeePercent ?? 0)}
+                  value={feeInput}
                   onChange={e => setFeeInput(e.target.value)}
                   className="mt-1.5 h-10 rounded-xl border-[#ddc6b5] text-xs"
                 />

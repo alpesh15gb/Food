@@ -64,6 +64,31 @@ function normalizePhone(phone: string | null | undefined): string | null {
   return null;
 }
 
+/** Parse restaurant GST rate safely: finite 0-100, else fallback. */
+function parseGstRate(raw: unknown, fallback = 5): number {
+  const n = typeof raw === "number" ? raw : parseFloat(String(raw ?? ""));
+  if (!Number.isFinite(n) || n < 0 || n > 100) return fallback;
+  return n;
+}
+
+/** Minimal email check for order contact (router validates strictly with zod). */
+function isPlausibleEmail(email: string): boolean {
+  if (email.length > 320) return false;
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+function assertAddrStr(value: unknown, max: number): string {
+  const s = String(value ?? "").trim();
+  if (!s) throw new Error("__REQUIRED__");
+  if (s.length > max) throw new CartValidationError(`Address field exceeds ${max} characters.`);
+  return s;
+}
+
+function isUniqueViolation(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  return msg.includes("23505") || msg.toLowerCase().includes("duplicate") || msg.toLowerCase().includes("unique");
+}
+
 let _pool: Pool | null = null;
 let _db: ReturnType<typeof drizzle> | null = null;
 const id = () => nanoid(18);
@@ -305,10 +330,13 @@ export async function updateRestaurant(input: {
   tempClosureMessage?: string | null;
 }) {
   const db = await requireDb();
-  // restaurantId is scope-only (verified by the router); never written.
-  const { deliveryRadiusKm, restaurantId: _scope, ...rest } = input as typeof input & { restaurantId?: string };
+  // restaurantId is scope-only (verified by the router); id is the row locator — never written.
+  const { deliveryRadiusKm, restaurantId: _scope, id: _id, ...rest } = input as typeof input & { restaurantId?: string };
   const updateData: Record<string, unknown> = { ...rest };
   if (deliveryRadiusKm !== undefined) {
+    if (typeof deliveryRadiusKm !== "number" || !Number.isFinite(deliveryRadiusKm) || deliveryRadiusKm <= 0 || deliveryRadiusKm > 100) {
+      throw new Error("Invalid delivery radius.");
+    }
     updateData.deliveryRadiusKm = String(deliveryRadiusKm);
   }
   await db.update(restaurants).set(updateData).where(eq(restaurants.id, input.id));
@@ -512,7 +540,14 @@ export async function upsertRestaurantCoupon(input: {
   endsAt?: Date;
 }) {
   const db = await requireDb();
-  const code = input.code.toUpperCase();
+  const code = input.code.trim().toUpperCase();
+  if (!code) throw new Error("Coupon code is required.");
+  if (typeof input.discountValue !== "number" || !Number.isFinite(input.discountValue) || input.discountValue < 0) {
+    throw new Error("Invalid coupon discount value.");
+  }
+  if (input.discountType === "percent" && input.discountValue > 100) {
+    throw new Error("Invalid coupon discount value.");
+  }
 
   const existing = (await db.select().from(coupons)
     .where(and(eq(coupons.code, code), eq(coupons.restaurantId, input.restaurantId)))
@@ -573,19 +608,73 @@ export async function createOrderFromValidatedCart(args: {
   if (!phone || phone.length < 10) {
     throw new Error("A valid delivery phone number is required.");
   }
-  const addr = args.address;
-  if (!addr.flatHouse || !String(addr.flatHouse).trim()) {
+  const addr = args.address ?? {};
+  let flatHouse: string;
+  let area: string;
+  let city: string;
+  try {
+    flatHouse = assertAddrStr(addr.flatHouse, 180);
+  } catch {
     throw new Error("Flat / House number is required.");
   }
-  if (!addr.area || !String(addr.area).trim()) {
+  try {
+    area = assertAddrStr(addr.area, 180);
+  } catch {
     throw new Error("Area / Locality is required.");
   }
-  if (!addr.city || !String(addr.city).trim()) {
+  try {
+    city = assertAddrStr(addr.city, 120);
+  } catch {
     throw new Error("City is required.");
   }
-  if (!addr.postalCode || !/^\d{6}$/.test(String(addr.postalCode))) {
+  if (!addr.postalCode || !/^\d{6}$/.test(String(addr.postalCode).trim())) {
     throw new Error("A valid 6-digit pincode is required.");
   }
+  // Canonical snapshot strings are length-capped (matches varchar limits).
+  const building = typeof addr.building === "string" && addr.building.trim()
+    ? String(addr.building).trim().slice(0, 180) : null;
+  const street = typeof addr.street === "string" && addr.street.trim()
+    ? String(addr.street).trim().slice(0, 180) : null;
+  const landmark = typeof addr.landmark === "string" && addr.landmark.trim()
+    ? String(addr.landmark).trim().slice(0, 180) : null;
+  const customerName = typeof addr.name === "string" && addr.name.trim()
+    ? String(addr.name).trim().slice(0, 180) : null;
+  if (typeof addr.name === "string" && addr.name.trim() && String(addr.name).trim().length > 180) {
+    throw new CartValidationError("Customer name is too long.");
+  }
+  if (args.customerEmail != null && String(args.customerEmail).trim() !== "") {
+    const email = String(args.customerEmail).trim();
+    if (!isPlausibleEmail(email)) {
+      throw new CartValidationError("Invalid customer email.");
+    }
+  }
+  if (args.deliveryNotes != null && String(args.deliveryNotes).length > 1000) {
+    throw new CartValidationError("Delivery notes are too long.");
+  }
+  if (!Array.isArray(args.lines) || args.lines.length === 0) {
+    throw new CartValidationError("Cart must contain at least one item.");
+  }
+  if (args.lines.length > 50) {
+    throw new CartValidationError("Cart contains too many items.");
+  }
+  for (const l of args.lines) {
+    if (!l || typeof l.menuItemId !== "string" || !l.menuItemId.trim()) {
+      throw new CartValidationError("Invalid cart item.");
+    }
+    if (typeof l.quantity !== "number" || !Number.isInteger(l.quantity) || l.quantity < 1 || l.quantity > 50) {
+      throw new CartValidationError("Invalid cart quantity.");
+    }
+    if (l.specialInstructions != null && String(l.specialInstructions).length > 300) {
+      throw new CartValidationError("Special instructions are too long.");
+    }
+    const seen = new Set<string>();
+    for (const oid of (l.modifierOptionIds ?? [])) {
+      if (typeof oid !== "string" || !oid) throw new CartValidationError("Invalid modifier option.");
+      if (seen.has(oid)) throw new CartValidationError("Duplicate modifier option.");
+      seen.add(oid);
+    }
+  }
+  const cleanCoupon = args.couponCode?.trim().toUpperCase() || undefined;
 
   // --- Require precise delivery coordinates ---
   const lat = typeof addr.latitude === "string" ? parseFloat(addr.latitude) : addr.latitude;
@@ -605,7 +694,11 @@ export async function createOrderFromValidatedCart(args: {
   const allOutlets = await db.select().from(outlets).where(
     and(eq(outlets.restaurantId, storefront.restaurant.id), eq(outlets.isActive, true), eq(outlets.isOpen, true))
   );
-  const outletSelection = selectBestOutlet(allOutlets, Number(lat), Number(lng));
+  const restaurantRadius = (() => {
+    const r = parseFloat(String(storefront.restaurant.deliveryRadiusKm ?? "5"));
+    return Number.isFinite(r) && r > 0 && r <= 100 ? r : 5;
+  })();
+  const outletSelection = selectBestOutlet(allOutlets, Number(lat), Number(lng), restaurantRadius);
   if (!outletSelection) {
     throw new Error("No outlet can deliver to your location. Please choose a different delivery address.");
   }
@@ -613,14 +706,22 @@ export async function createOrderFromValidatedCart(args: {
   const deliveryDistanceKm = outletSelection.distanceKm;
 
   // --- Issue 5: Resolve modifier prices from DB, never trust client ---
-  const addonOptionIds = args.lines.flatMap(l => l.modifierOptionIds ?? []);
+  // Always load groups for ORDERED items (even with no modifiers) to enforce
+  // required/min/max/selection rules. Scoped to ordered ids (not the whole menu).
+  const orderedIdsForGroups = args.lines.map(l => l.menuItemId).filter((v, i, a) => a.indexOf(v) === i);
   let addonOptionMap = new Map<string, { id: string; name: string; pricePaise: number; addonGroupId: string; isAvailable: boolean }>();
-  let groups: Array<{ id: string; menuItemId: string }> = [];
-  if (addonOptionIds.length > 0) {
-    // Fetch all addon options for this restaurant's menu items
-    const menuItemIds = storefront.items.map(i => i.id);
-    groups = menuItemIds.length > 0
-      ? await db.select().from(addonGroups).where(inArray(addonGroups.menuItemId, menuItemIds))
+  let groups: Array<{ id: string; menuItemId: string; name: string; selectionType: string; isRequired: boolean; minSelections: number; maxSelections: number }> = [];
+  {
+    groups = orderedIdsForGroups.length > 0
+      ? await db.select({
+          id: addonGroups.id,
+          menuItemId: addonGroups.menuItemId,
+          name: addonGroups.name,
+          selectionType: addonGroups.selectionType,
+          isRequired: addonGroups.isRequired,
+          minSelections: addonGroups.minSelections,
+          maxSelections: addonGroups.maxSelections,
+        }).from(addonGroups).where(inArray(addonGroups.menuItemId, orderedIdsForGroups)) as typeof groups
       : [];
     const groupIds = groups.map(g => g.id);
     if (groupIds.length > 0) {
@@ -630,6 +731,7 @@ export async function createOrderFromValidatedCart(args: {
       }
     }
   }
+  const groupById = new Map(groups.map(g => [g.id, g]));
 
   // Resolve variant prices from DB
   const variantIds = args.lines.flatMap(l => l.selectedVariantId ? [l.selectedVariantId] : []);
@@ -641,57 +743,121 @@ export async function createOrderFromValidatedCart(args: {
     }
   }
 
-  // Per-line availability/scheduling gate via the canonical engine.
+  // Full-hierarchy availability gate: restaurant + outlet schedule + category
+  // (flag + schedule) + item (flag + schedule + stock). Uses the canonical engine.
   {
-    const { checkItemAvailability } = await import("./domain/availability");
-    const { productSchedules } = await import("../drizzle/schema");
-    const orderedIds = args.lines.map(l => l.menuItemId);
-    const [prodScheds, catScheds] = await Promise.all([
-      orderedIds.length ? db.select().from(productSchedules).where(inArray(productSchedules.menuItemId, orderedIds)) : Promise.resolve([] as Array<{ menuItemId: string; dayOfWeek: number | null; openTime: string | null; closeTime: string | null; startDate: Date | null; endDate: Date | null; isActive: boolean }>),
-      Promise.resolve([] as Array<{ categoryId: string }>),
+    const { checkItemAvailability, checkCategoryAvailability } = await import("./domain/availability");
+    const { isScheduledOpen } = await import("./domain/scheduling");
+    const { productSchedules, categorySchedules, outletSchedules } = await import("../drizzle/schema");
+    const orderedIds = args.lines.map(l => l.menuItemId).filter((v, i, a) => a.indexOf(v) === i);
+    const itemById = new Map(storefront.items.map(i => [i.id, i]));
+    const categoryIds = orderedIds.map(oid => itemById.get(oid)?.categoryId).filter((v): v is string => Boolean(v)).filter((v, i, a) => a.indexOf(v) === i);
+    const [prodScheds, catScheds, outletScheds] = await Promise.all([
+      orderedIds.length ? db.select().from(productSchedules).where(inArray(productSchedules.menuItemId, orderedIds)) : [],
+      categoryIds.length ? db.select().from(categorySchedules).where(inArray(categorySchedules.categoryId, categoryIds)) : [],
+      db.select().from(outletSchedules).where(inArray(outletSchedules.outletId, allOutlets.map(o => o.id))),
     ]);
-    void catScheds;
     const prodSchedByItem = new Map<string, typeof prodScheds>();
     for (const s of prodScheds) {
-      const arr = prodSchedByItem.get(s.menuItemId) ?? [];
+      const arr = prodSchedByItem.get((s as { menuItemId: string }).menuItemId) ?? [];
       arr.push(s);
-      prodSchedByItem.set(s.menuItemId, arr);
+      prodSchedByItem.set((s as { menuItemId: string }).menuItemId, arr);
+    }
+    const catSchedByCat = new Map<string, typeof catScheds>();
+    for (const s of catScheds) {
+      const cid = (s as { categoryId: string }).categoryId;
+      const arr = catSchedByCat.get(cid) ?? [];
+      arr.push(s);
+      catSchedByCat.set(cid, arr);
+    }
+    const outletSchedByOutlet = new Map<string, typeof outletScheds>();
+    for (const s of outletScheds) {
+      const oid = (s as { outletId: string }).outletId;
+      const arr = outletSchedByOutlet.get(oid) ?? [];
+      arr.push(s);
+      outletSchedByOutlet.set(oid, arr);
     }
     const now = new Date();
+    // Selected outlet must also satisfy its schedule window when configured.
+    const selScheds = outletSchedByOutlet.get(selectedOutlet.id) ?? [];
+    if (selScheds.length > 0 && !isScheduledOpen(selScheds as never, now)) {
+      throw new CartValidationError("The selected outlet is currently closed.");
+    }
+    const categoryById = new Map(storefront.categories.map(c => [c.id, c]));
     for (const line of args.lines) {
-      const item = storefront.items.find(mi => mi.id === line.menuItemId);
+      const item = itemById.get(line.menuItemId);
       if (!item) throw new CartValidationError(`Item "${line.menuItemId}" is not in the menu.`);
+      if (item.restaurantId !== storefront.restaurant.id) {
+        throw new CartValidationError(`Item "${line.menuItemId}" is not in the menu.`);
+      }
+      const cat = categoryById.get((item as { categoryId: string }).categoryId);
+      if (cat) {
+        const catCheck = checkCategoryAvailability(
+          { isVisible: (cat as { isVisible: boolean }).isVisible, isOpen: (cat as { isOpen: boolean }).isOpen },
+          catSchedByCat.get((cat as { id: string }).id) ?? [],
+          now
+        );
+        if (!catCheck.isAvailable) {
+          throw new CartValidationError(`"${item.name}" is currently unavailable.`);
+        }
+      }
       const scheds = prodSchedByItem.get(line.menuItemId) ?? [];
-      const check = checkItemAvailability(item, scheds, now);
+      const check = checkItemAvailability(item as never, scheds as never, now);
       if (!check.isAvailable) {
         throw new CartValidationError(check.reason ?? `"${item.name}" is currently unavailable.`);
       }
     }
   }
 
-  // Build resolved lines with server-side prices
+  // Build resolved lines with server-side prices + group-rule enforcement.
   const resolvedLines = args.lines.map(line => {
     const item = storefront.items.find(mi => mi.id === line.menuItemId);
     if (!item) throw new CartValidationError(`Item "${line.menuItemId}" is not in the menu.`);
 
-    const resolvedModifiers: Array<{ optionId: string; name: string; pricePaise: number }> = [];
+    const resolvedModifiers: Array<{ optionId: string; name: string; pricePaise: number; groupId: string; groupName: string }> = [];
+    const countByGroup = new Map<string, number>();
     for (const optId of (line.modifierOptionIds ?? [])) {
       const dbOption = addonOptionMap.get(optId);
       if (!dbOption) throw new CartValidationError(`Modifier option "${optId}" does not exist.`);
       if (!dbOption.isAvailable) throw new CartValidationError(`Modifier "${dbOption.name}" is currently unavailable.`);
-      // Verify the option's addon group belongs to this menu item
-      const groupBelongsToItem = groups.some(g => g.id === dbOption.addonGroupId && g.menuItemId === line.menuItemId);
-      if (!groupBelongsToItem) throw new CartValidationError(`Modifier "${dbOption.name}" is not available for "${item.name}".`);
-      resolvedModifiers.push({ optionId: optId, name: dbOption.name, pricePaise: dbOption.pricePaise });
+      if (typeof dbOption.pricePaise !== "number" || !Number.isInteger(dbOption.pricePaise) || dbOption.pricePaise < 0) {
+        throw new CartValidationError(`Invalid modifier price for "${item.name}".`);
+      }
+      const group = groupById.get(dbOption.addonGroupId);
+      if (!group || group.menuItemId !== line.menuItemId) {
+        throw new CartValidationError(`Modifier "${dbOption.name}" is not available for "${item.name}".`);
+      }
+      countByGroup.set(group.id, (countByGroup.get(group.id) ?? 0) + 1);
+      resolvedModifiers.push({ optionId: optId, name: dbOption.name, pricePaise: dbOption.pricePaise, groupId: group.id, groupName: group.name });
+    }
+    // Enforce required/min/max/selectionType per group for this item.
+    for (const g of groups.filter(gg => gg.menuItemId === line.menuItemId)) {
+      const count = countByGroup.get(g.id) ?? 0;
+      const min = Math.max(g.isRequired ? 1 : 0, g.minSelections ?? 0);
+      const max = g.maxSelections ?? (g.selectionType === "single" ? 1 : 99);
+      if (g.selectionType === "single" && count > 1) {
+        throw new CartValidationError(`Only one option allowed for "${g.name}".`);
+      }
+      if (count < min) {
+        throw new CartValidationError(`"${g.name}" is required for "${item.name}".`);
+      }
+      if (count > max) {
+        throw new CartValidationError(`Too many options for "${g.name}".`);
+      }
     }
 
     let variantPricePaise: number | undefined;
+    let variantName: string | undefined;
     if (line.selectedVariantId) {
       const dbVariant = variantMap.get(line.selectedVariantId);
       if (!dbVariant) throw new CartValidationError(`Variant "${line.selectedVariantId}" does not exist.`);
       if (!dbVariant.isAvailable) throw new CartValidationError(`Variant "${dbVariant.name}" is currently unavailable.`);
       if (dbVariant.menuItemId !== line.menuItemId) throw new CartValidationError(`Variant "${dbVariant.name}" does not belong to "${item.name}".`);
+      if (typeof dbVariant.pricePaise !== "number" || !Number.isInteger(dbVariant.pricePaise) || dbVariant.pricePaise < 0) {
+        throw new CartValidationError(`Invalid variant price for "${item.name}".`);
+      }
       variantPricePaise = dbVariant.pricePaise;
+      variantName = dbVariant.name;
     }
 
     return {
@@ -699,9 +865,28 @@ export async function createOrderFromValidatedCart(args: {
       quantity: line.quantity,
       modifiers: resolvedModifiers,
       variantId: line.selectedVariantId,
+      variantName,
       variantPricePaise,
+      specialInstructions: line.specialInstructions ?? null,
     };
   });
+  // Prevent splitting one item across lines to bypass per-order max.
+  {
+    const totals = new Map<string, { qty: number; name: string; max: number }>();
+    for (const rl of resolvedLines) {
+      const item = storefront.items.find(mi => mi.id === rl.menuItemId)!;
+      const max = (item as { maxQuantityPerOrder?: number | null }).maxQuantityPerOrder ?? 20;
+      const cur = totals.get(rl.menuItemId) ?? { qty: 0, name: item.name, max };
+      cur.qty += rl.quantity;
+      totals.set(rl.menuItemId, cur);
+    }
+    let qtyOverflow = false;
+    let qtyOverflowName = "";
+    totals.forEach(({ qty, name, max }) => {
+      if (qty > max) { qtyOverflow = true; qtyOverflowName = name; }
+    });
+    if (qtyOverflow) throw new CartValidationError(`Invalid quantity for "${qtyOverflowName}".`);
+  }
 
   // --- Issue 3: Guest checkout — create guest user if needed ---
   let effectiveUserId = args.userId;
@@ -709,18 +894,29 @@ export async function createOrderFromValidatedCart(args: {
     effectiveUserId = await getOrCreateGuestUser();
   }
 
-  // Ensure customer profile exists
+  // Ensure customer profile exists (race-safe: concurrent orders for a fresh
+  // verified user could both miss; unique(userId) guards, second re-reads).
   // NOTE: mobileNumber is NOT set here — guest phone is unverified identity.
   // Only OTP verification populates mobileNumber as verified identity.
-  const profile = (await db.select().from(customerProfiles)
+  let profile = (await db.select().from(customerProfiles)
     .where(eq(customerProfiles.userId, effectiveUserId)).limit(1))[0];
-  const customerId = profile?.id ?? id();
+  let customerId = profile?.id ?? id();
   if (!profile) {
-    await db.insert(customerProfiles).values({
-      id: customerId,
-      userId: effectiveUserId,
-      // mobileNumber left null — only set after OTP verification
-    });
+    try {
+      await db.insert(customerProfiles).values({
+        id: customerId,
+        userId: effectiveUserId,
+        // mobileNumber left null — only set after OTP verification
+      });
+    } catch (err) {
+      if (!isUniqueViolation(err)) throw err;
+      profile = (await db.select().from(customerProfiles)
+        .where(eq(customerProfiles.userId, effectiveUserId)).limit(1))[0];
+      if (!profile) throw err;
+      customerId = profile.id;
+    }
+    profile = profile ?? (await db.select().from(customerProfiles)
+      .where(eq(customerProfiles.userId, effectiveUserId)).limit(1))[0];
   }
 
   // Calculate base pricing server-side using resolved (DB-verified) prices.
@@ -729,19 +925,19 @@ export async function createOrderFromValidatedCart(args: {
     catalog: storefront.items,
     packagingFeePaise: storefront.restaurant.packagingFeePaise,
     deliveryFeePaise: storefront.restaurant.deliveryFeePaise,
-    taxPercent: parseFloat(storefront.restaurant.gstPercentage ?? "5"),
+    taxPercent: parseGstRate(storefront.restaurant.gstPercentage, 5),
   });
 
   // P0: unknown coupon codes must throw (never silently ignore).
   let appliedCoupon: typeof storefront.offers[0] | undefined;
-  if (args.couponCode) {
-    appliedCoupon = storefront.offers.find(o => o.code === args.couponCode?.toUpperCase());
+  if (cleanCoupon) {
+    appliedCoupon = storefront.offers.find(o => o.code === cleanCoupon);
     if (!appliedCoupon) {
       // Re-check DB in case storefront offers are stale.
       const dbCoupon = (await db.select().from(coupons)
-        .where(and(eq(coupons.restaurantId, storefront.restaurant.id), eq(coupons.code, args.couponCode.toUpperCase())))
+        .where(and(eq(coupons.restaurantId, storefront.restaurant.id), eq(coupons.code, cleanCoupon)))
         .limit(1))[0];
-      if (!dbCoupon) throw new CartValidationError(`Coupon "${args.couponCode.toUpperCase()}" is not valid for this restaurant.`);
+      if (!dbCoupon) throw new CartValidationError(`Coupon "${cleanCoupon}" is not valid for this restaurant.`);
       appliedCoupon = dbCoupon as typeof storefront.offers[0];
     }
   }
@@ -752,12 +948,20 @@ export async function createOrderFromValidatedCart(args: {
   }
 
   // Idempotency: return existing order when the key was already used.
+  // Scoped to this restaurant — a key from another tenant never leaks its order.
+  // (Legacy orderNumber fallback removed: orderNumbers are guessable and must
+  // never disclose trackingTokens via an idempotency lookup.)
   const idempotencyKey = args.idempotencyKey?.trim() || null;
   if (idempotencyKey) {
+    if (idempotencyKey.length < 8 || idempotencyKey.length > 64) {
+      throw new CartValidationError("Invalid idempotency key.");
+    }
     const existingByKey = (await db.select().from(orders)
-      .where(eq(orders.idempotencyKey, idempotencyKey)).limit(1))[0]
-      ?? (await db.select().from(orders).where(eq(orders.orderNumber, idempotencyKey)).limit(1))[0];
+      .where(eq(orders.idempotencyKey, idempotencyKey)).limit(1))[0];
     if (existingByKey) {
+      if (existingByKey.restaurantId !== storefront.restaurant.id) {
+        throw new CartValidationError("Duplicate order request. Please retry with a new idempotency key.");
+      }
       const existingQuote = {
         itemTotalPaise: existingByKey.itemTotalPaise,
         discountPaise: existingByKey.discountPaise,
@@ -780,33 +984,60 @@ export async function createOrderFromValidatedCart(args: {
 
   // Canonical address snapshot keys (never spread raw client input).
   const addressSnapshot = {
-    flatHouse: String(addr.flatHouse ?? "").trim(),
-    building: typeof addr.building === "string" ? addr.building.trim() : null,
-    street: typeof addr.street === "string" ? addr.street.trim() : null,
-    landmark: typeof addr.landmark === "string" ? addr.landmark.trim() : null,
-    area: String(addr.area ?? "").trim(),
-    city: String(addr.city ?? "").trim(),
+    flatHouse,
+    building,
+    street,
+    landmark,
+    area,
+    city,
     postalCode: String(addr.postalCode ?? "").trim(),
     latitude: Number(lat),
     longitude: Number(lng),
     deliveryDistanceKm,
   };
 
-  // --- Issue 1: Generate secure tracking token ---
+  // --- Issue 1: Generate secure tracking token + unguessable order number ---
   const orderId = id();
-  const orderNumber = `ORD-${Date.now().toString(36).toUpperCase()}-${Math.floor(1000 + Math.random() * 9000)}`;
+  const orderNumber = `ORD-${Date.now().toString(36).toUpperCase()}-${randomInt(100000, 999999)}`;
   const trackingToken = generateTrackingToken();
   let finalQuote = baseQuote;
 
   // --- Issue 18: Atomic transaction — coupon counts + usage INSIDE tx with SELECT FOR UPDATE. ---
   try {
     await db.transaction(async (tx) => {
+      // Re-validate locked catalog rows inside the tx (TOCTOU: item could be
+      // disabled after the pre-check). Row locks serialize concurrent checkouts.
+      {
+        const lockIds = resolvedLines.map(l => l.menuItemId).filter((v, i, a) => a.indexOf(v) === i);
+        const lockedRows = lockIds.length
+          ? await tx.execute(sql`SELECT id, availability, is_open, stock FROM menu_items WHERE id IN (${sql.join(lockIds.map(v => sql`${v}`), sql`, `)}) FOR UPDATE`)
+          : null;
+        void lockedRows;
+        const fresh = lockIds.length
+          ? await tx.select({ id: menuItems.id, availability: menuItems.availability, isOpen: menuItems.isOpen }).from(menuItems).where(inArray(menuItems.id, lockIds))
+          : [];
+        const freshById = new Map(fresh.map(r => [r.id, r]));
+        for (const rl of resolvedLines) {
+          const fr = freshById.get(rl.menuItemId);
+          if (!fr || (fr as { isOpen: boolean }).isOpen !== true || (fr as { availability: string }).availability !== "AVAILABLE") {
+            const item = storefront.items.find(mi => mi.id === rl.menuItemId)!;
+            throw new CartValidationError(`"${item.name}" is currently unavailable.`);
+          }
+        }
+      }
       // Lock coupon row when a coupon is applied.
       let couponDiscountPaise = 0;
       if (appliedCoupon) {
         await tx.execute(sql`SELECT id FROM coupons WHERE id = ${appliedCoupon.id} FOR UPDATE`);
-        const totalUsageCount = Number((await tx.select({ count: sql<number>`count(*)::int` })
-          .from(couponUsage).where(eq(couponUsage.couponId, appliedCoupon.id)))[0]?.count ?? 0);
+        // Cancelled/rejected orders release their coupon burn (usage rows for live
+        // orders only). PENDING_PAYMENT rows still count to prevent oversell.
+        // NOTE: burn-on-create blocks coupon retry with a fresh key after a failed
+        // payment — full fix defers burn to confirmPayment (razorpay seam).
+        const totalUsageCount = Number((await tx.execute(sql`
+          SELECT count(*)::int AS count FROM coupon_usage cu
+          JOIN orders o ON o.id = cu.order_id
+          WHERE cu.coupon_id = ${appliedCoupon.id} AND o.status NOT IN ('CANCELLED', 'REJECTED')
+        `) as unknown as { rows: Array<{ count: number }> }).rows?.[0]?.count ?? 0);
         // Guest limits by verified phone: guests share no customerId, so count by phone.
         const isGuest = !profile?.mobileNumber;
         let customerUsageCount = 0;
@@ -818,14 +1049,16 @@ export async function createOrderFromValidatedCart(args: {
             SELECT count(*)::int AS count FROM coupon_usage cu
             JOIN orders o ON o.id = cu.order_id
             WHERE cu.coupon_id = ${appliedCoupon.id} AND o.customer_phone = ${phone}
+              AND o.status NOT IN ('CANCELLED', 'REJECTED')
           `);
           customerUsageCount = Number((usageByPhone as unknown as { rows: Array<{ count: number }> }).rows?.[0]?.count ?? 0);
         } else {
-          customerUsageCount = Number((await tx.select({ count: sql<number>`count(*)::int` })
-            .from(couponUsage).where(and(
-              eq(couponUsage.couponId, appliedCoupon.id),
-              eq(couponUsage.customerId, customerId),
-            )))[0]?.count ?? 0);
+          customerUsageCount = Number((await tx.execute(sql`
+            SELECT count(*)::int AS count FROM coupon_usage cu
+            JOIN orders o ON o.id = cu.order_id
+            WHERE cu.coupon_id = ${appliedCoupon.id} AND cu.customer_id = ${customerId}
+              AND o.status NOT IN ('CANCELLED', 'REJECTED')
+          `) as unknown as { rows: Array<{ count: number }> }).rows?.[0]?.count ?? 0);
           customerOrderCount = Number((await tx.select({ count: sql<number>`count(*)::int` })
             .from(orders).where(eq(orders.customerId, customerId)))[0]?.count ?? 0);
         }
@@ -862,13 +1095,16 @@ export async function createOrderFromValidatedCart(args: {
         packagingFeePaise: storefront.restaurant.packagingFeePaise,
         deliveryFeePaise: storefront.restaurant.deliveryFeePaise,
         couponDiscountPaise,
-        taxPercent: parseFloat(storefront.restaurant.gstPercentage ?? "5"),
+        taxPercent: parseGstRate(storefront.restaurant.gstPercentage, 5),
       });
 
       if (finalQuote.itemTotalPaise < storefront.restaurant.minOrderPaise) {
         throw new Error(`Minimum order is ₹${Math.ceil(storefront.restaurant.minOrderPaise / 100)}.`);
       }
 
+      const cleanEmail = args.customerEmail != null && String(args.customerEmail).trim() !== ""
+        ? String(args.customerEmail).trim().slice(0, 320)
+        : null;
       await tx.insert(orders).values({
         id: orderId,
         orderNumber,
@@ -880,14 +1116,14 @@ export async function createOrderFromValidatedCart(args: {
         status: "PENDING_PAYMENT",
         paymentStatus: "PENDING",
         addressSnapshot,
-        customerName: (typeof addr.name === "string" && addr.name.trim()) || null,
+        customerName,
         customerPhone: phone,
-        customerEmail: args.customerEmail ?? null,
+        customerEmail: cleanEmail,
         ...finalQuote,
-        couponCode: args.couponCode?.toUpperCase() ?? null,
+        couponCode: cleanCoupon ?? null,
         couponDiscountPaise: finalQuote.couponDiscountPaise,
-        deliveryNotes: args.deliveryNotes ?? null,
-        specialInstructions: args.lines.map(l => l.specialInstructions).filter(Boolean).join("; ") || null,
+        deliveryNotes: args.deliveryNotes ? String(args.deliveryNotes).slice(0, 1000) : null,
+        specialInstructions: resolvedLines.map(l => l.specialInstructions).filter(Boolean).join("; ").slice(0, 2000) || null,
         cutleryPreference: args.cutleryPreference ?? false,
         estimatedMinutes: selectedOutlet.preparationMinutes + 15,
       });
@@ -906,11 +1142,16 @@ export async function createOrderFromValidatedCart(args: {
         }
       }
 
-      // Create order items (using server-resolved prices)
+      // Create order items (server-resolved prices; variant upcharge folded into
+      // unitPrice so invoice subtotal matches the authoritative quote).
       await tx.insert(orderItems).values(
         resolvedLines.map(line => {
           const item = storefront.items.find(mi => mi.id === line.menuItemId)!;
-          const unitPrice = item.offerPricePaise ?? item.pricePaise;
+          const base = (item.offerPricePaise != null && item.offerPricePaise > 0 && item.offerPricePaise < item.pricePaise)
+            ? item.offerPricePaise
+            : item.pricePaise;
+          const variantUp = (line as { variantPricePaise?: number }).variantPricePaise ?? 0;
+          const unitPrice = base + variantUp;
           return {
             id: id(),
             orderId,
@@ -919,14 +1160,18 @@ export async function createOrderFromValidatedCart(args: {
             unitPricePaise: unitPrice,
             quantity: line.quantity,
             dietaryType: item.dietaryType,
+            selectedVariantId: (line as { variantId?: string }).variantId ?? null,
+            variantNameSnapshot: (line as { variantName?: string }).variantName ?? null,
             selectedModifiers: line.modifiers.map(m => ({
-              groupId: "",
-              groupName: "",
+              groupId: (m as { groupId?: string }).groupId ?? "",
+              groupName: (m as { groupName?: string }).groupName ?? "",
               optionId: m.optionId,
               optionName: m.name,
               pricePaise: m.pricePaise,
             })),
-            specialInstructions: args.lines.find(l => l.menuItemId === line.menuItemId)?.specialInstructions ?? null,
+            specialInstructions: (line as { specialInstructions?: string | null }).specialInstructions
+              ? String((line as { specialInstructions?: string | null }).specialInstructions).slice(0, 300)
+              : null,
           };
         })
       );
@@ -938,6 +1183,16 @@ export async function createOrderFromValidatedCart(args: {
         note: "Order created; awaiting payment.",
       });
 
+      // Zero-total (fully discounted + free fees) orders have no chargeable payment;
+      // the payments CHECK requires amount > 0, so record a Re 1 placeholder? No —
+      // fail closed with a clear message and let the caller (seam) handle free orders
+      // via a dedicated free-checkout path. Prevents CHECK-violation 500s.
+      if (!Number.isSafeInteger(finalQuote.totalPaise) || finalQuote.totalPaise < 0) {
+        throw new CartValidationError("Invalid order total.");
+      }
+      if (finalQuote.totalPaise === 0) {
+        throw new CartValidationError("Order total is zero. Free orders are not supported for online payment.");
+      }
       await tx.insert(payments).values({
         id: id(),
         orderId,
@@ -945,7 +1200,7 @@ export async function createOrderFromValidatedCart(args: {
       });
 
       // Record coupon usage (counts were locked above; unique(orderId) guards double-apply).
-      if (args.couponCode && finalQuote.couponDiscountPaise > 0 && appliedCoupon) {
+      if (cleanCoupon && finalQuote.couponDiscountPaise > 0 && appliedCoupon) {
         await tx.insert(couponUsage).values({
           id: id(),
           couponId: appliedCoupon.id,
@@ -956,11 +1211,15 @@ export async function createOrderFromValidatedCart(args: {
       }
     });
   } catch (err) {
+    // Never leak PG internals (constraint names, values) to callers.
+    if (err instanceof CartValidationError) throw err;
     // Unique idempotency key race: another request won — return the winner.
-    const msg = err instanceof Error ? err.message : String(err);
-    if (idempotencyKey && (msg.includes("23505") || msg.toLowerCase().includes("duplicate") || msg.toLowerCase().includes("unique"))) {
+    if (idempotencyKey && isUniqueViolation(err)) {
       const winner = (await db.select().from(orders).where(eq(orders.idempotencyKey, idempotencyKey)).limit(1))[0];
       if (winner) {
+        if (winner.restaurantId !== storefront.restaurant.id) {
+          throw new CartValidationError("Duplicate order request. Please retry with a new idempotency key.");
+        }
         return {
           id: winner.id,
           orderNumber: winner.orderNumber,
@@ -976,6 +1235,10 @@ export async function createOrderFromValidatedCart(args: {
           estimatedMinutes: winner.estimatedMinutes ?? selectedOutlet.preparationMinutes + 15,
         };
       }
+      throw new CartValidationError("Order could not be created. Please retry.");
+    }
+    if (isUniqueViolation(err)) {
+      throw new CartValidationError("Order could not be created. Please retry.");
     }
     throw err;
   }
@@ -1003,6 +1266,18 @@ export async function updateOrderStatus(
   const order = (await db.select().from(orders).where(eq(orders.id, orderId)).limit(1))[0];
   if (!order) throw new Error("Order not found.");
 
+  // Idempotent retry: same-state re-delivery (webhook/KDS double-click) is a no-op.
+  if ((order.status as string) === (status as string)) {
+    return { alreadyInState: true as const };
+  }
+
+  // Payment minting guard: PENDING_PAYMENT -> PAYMENT_CONFIRMED must go through
+  // confirmPayment() (razorpay seam) with signature + amount binding. Admin/KDS
+  // paths must never mint PAID without provider verification.
+  if (order.status === "PENDING_PAYMENT" && status === "PAYMENT_CONFIRMED") {
+    throw new Error("Payment confirmation must go through the payment verification flow.");
+  }
+
   // Enforce valid state transition
   const transition = validateTransition(order.status as OrderStatus, status);
 
@@ -1020,20 +1295,45 @@ export async function updateOrderStatus(
   if (status === "DELIVERED") updateData.deliveredAt = new Date();
   if (status === "CANCELLED" || status === "REJECTED") {
     updateData.cancelledAt = new Date();
-    updateData.cancelReason = note;
+    updateData.cancelReason = typeof note === "string" ? note.slice(0, 500) : note;
     updateData.paymentStatus = "CANCELLED";
   }
 
   await db.transaction(async (tx) => {
-    await tx.update(orders).set(updateData).where(eq(orders.id, orderId));
+    // Row lock + lost-update guard: fail if status changed since the pre-read.
+    await tx.execute(sql`SELECT id FROM orders WHERE id = ${orderId} FOR UPDATE`);
+    const fresh = (await tx.select({ status: orders.status }).from(orders).where(eq(orders.id, orderId)).limit(1))[0];
+    if (!fresh) throw new Error("Order not found.");
+    if ((fresh.status as string) !== (order.status as string)) {
+      throw new Error("Order was modified concurrently. Please retry.");
+    }
+    const bumped = await tx.update(orders).set(updateData).where(eq(orders.id, orderId)).returning({ id: orders.id });
+    if (bumped.length === 0) {
+      throw new Error("Order was modified concurrently. Please retry.");
+    }
 
     await tx.insert(orderStatusHistory).values({
       id: id(),
       orderId,
       status,
-      note: note ?? `Status changed to ${status}`,
+      note: (note ?? `Status changed to ${status}`).slice(0, 500),
       actorId: actorId ?? null,
     });
+
+    // Stock restore on cancel/reject for DIRECT (storefront) orders, which
+    // decrement at creation. Manual aggregator orders never decrement, so they
+    // must NOT restore (would mint stock). Single restore: machine prevents
+    // double-cancel (CANCELLED only -> REFUND_PENDING).
+    if ((status === "CANCELLED" || status === "REJECTED") && (order as { orderSource?: string }).orderSource === "DIRECT") {
+      const lines = await tx.select({ menuItemId: orderItems.menuItemId, quantity: orderItems.quantity })
+        .from(orderItems).where(eq(orderItems.orderId, orderId));
+      for (const ln of lines) {
+        if (!ln.menuItemId || typeof ln.quantity !== "number" || ln.quantity <= 0) continue;
+        await tx.update(menuItems)
+          .set({ stock: sql`${menuItems.stock} + ${ln.quantity}` })
+          .where(eq(menuItems.id, ln.menuItemId));
+      }
+    }
 
     // Update customer stats
     if (status === "DELIVERED" && order.customerId) {
@@ -1044,6 +1344,17 @@ export async function updateOrderStatus(
         WHERE id = ${order.customerId}
       `);
     }
+
+    // Audit trail for every status mutation (KDS callers don't log separately).
+    await tx.insert(auditLogs).values({
+      id: id(),
+      actorId: actorId ?? null,
+      action: `Order status changed to ${status}`,
+      targetType: "order",
+      targetId: orderId,
+      afterData: { status, note: typeof note === "string" ? note.slice(0, 500) : null },
+      restaurantId: (order as { restaurantId?: string }).restaurantId ?? null,
+    });
   });
 
   // Fire notification async — never blocks order update
@@ -1167,6 +1478,9 @@ export async function getOrderWithItems(orderId: string) {
  */
 export async function getOrderForTracking(orderNumber: string, trackingToken: string) {
   const db = await requireDb();
+  // Fail closed on malformed lookup keys (router enforces min lengths; DB hardens too).
+  if (typeof orderNumber !== "string" || typeof trackingToken !== "string") return null;
+  if (orderNumber.trim().length < 5 || trackingToken.trim().length < 16) return null;
   const order = (await db.select().from(orders).where(
     and(eq(orders.orderNumber, orderNumber), eq(orders.trackingToken, trackingToken))
   ).limit(1))[0];
@@ -1234,18 +1548,26 @@ export async function getOrderForTracking(orderNumber: string, trackingToken: st
 export async function getOrCreateGuestUser(): Promise<number> {
   const db = await requireDb();
 
-  // Cryptographically random guest identity — not derivable from any PII
-  const guestId = randomInt(100_000_000, 999_999_999);
-  const guestOpenId = `guest_${nanoid(24)}`;
-
-  await db.insert(users).values({
-    id: guestId,
-    openId: guestOpenId,
-    name: null,
-    mobile: null,
-    role: "user",
-  });
-  return guestId;
+  // Cryptographically random guest identity — not derivable from any PII.
+  // Explicit-id inserts can collide (random 900M space or sequence overlap);
+  // retry on unique violation instead of surfacing a 500.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const guestId = randomInt(100_000_000, 999_999_999);
+    const guestOpenId = `guest_${nanoid(24)}`;
+    try {
+      await db.insert(users).values({
+        id: guestId,
+        openId: guestOpenId,
+        name: null,
+        mobile: null,
+        role: "user",
+      });
+      return guestId;
+    } catch (err) {
+      if (!isUniqueViolation(err) || attempt === 2) throw err;
+    }
+  }
+  throw new Error("Could not create guest session. Please retry.");
 }
 
 // =============================================================================
@@ -1300,14 +1622,23 @@ export async function createOtp(phone: string): Promise<{ code: string; expiresA
       sql`${otpVerifications.usedAt} IS NULL`,
     ));
 
-  // Insert new OTP (hash stored, never plaintext)
-  await db.insert(otpVerifications).values({
-    phone: normalizedPhone,
-    code: hashedCode,
-    purpose: "login",
-    expiresAt,
-    attempts: 0,
-  });
+  // Insert new OTP (hash stored, never plaintext). Concurrent double-submit
+  // hits the partial unique (phone,purpose WHERE usedAt IS NULL) — surface as
+  // cooldown instead of a 500 with PG internals.
+  try {
+    await db.insert(otpVerifications).values({
+      phone: normalizedPhone,
+      code: hashedCode,
+      purpose: "login",
+      expiresAt,
+      attempts: 0,
+    });
+  } catch (err) {
+    if (isUniqueViolation(err)) {
+      throw new Error("Please wait 60 seconds before requesting a new code.");
+    }
+    throw err;
+  }
 
   return { code, expiresAt };
 }
@@ -1333,17 +1664,27 @@ export async function verifyOtp(phone: string, code: string): Promise<{
     .orderBy(desc(otpVerifications.createdAt))
     .limit(5);
 
-  // Find matching OTP among recent records (HMAC comparison)
+  // Find matching OTP among recent records (HMAC comparison, timing-safe inside).
   const record = records.find(r => verifyOtpHash(normalizedPhone, purpose, code, r.code));
 
-  if (!record) return null;
+  if (!record) {
+    // Brute-force guard: count failed guesses against the newest active OTP so
+    // the 5-attempt limit actually binds (previously only successes incremented).
+    const latest = records.find(r => !r.usedAt && new Date() <= r.expiresAt);
+    if (latest) {
+      await db.update(otpVerifications)
+        .set({ attempts: sql`${otpVerifications.attempts} + 1` })
+        .where(eq(otpVerifications.id, latest.id));
+    }
+    return null;
+  }
   if (record.usedAt) return null; // already used
   if (new Date() > record.expiresAt) return null; // expired
   if ((record.attempts ?? 0) >= 5) return null; // too many attempts
 
   // --- Fix 6: Atomic attempt increment + single-use consumption ---
-  // Single UPDATE with WHERE guards: usedAt IS NULL AND attempts < 5
-  // If this affects 0 rows, the OTP was already consumed or exhausted.
+  // Single UPDATE with WHERE guards: usedAt IS NULL AND attempts < 5.
+  // .returning() is the rowCount check: 0 rows = concurrently consumed/exhausted.
   const consumed = await db.update(otpVerifications)
     .set({
       usedAt: new Date(),
@@ -1353,11 +1694,9 @@ export async function verifyOtp(phone: string, code: string): Promise<{
       eq(otpVerifications.id, record.id),
       sql`${otpVerifications.usedAt} IS NULL`,
       sql`${otpVerifications.attempts} < 5`,
-    ));
-
-  // If 0 rows updated, concurrent request consumed it — reject
-  // (Drizzle doesn't return rowCount directly, but the update succeeds;
-  //  the subsequent user lookup will handle consistency)
+    ))
+    .returning({ id: otpVerifications.id });
+  if (consumed.length === 0) return null;
 
   // --- SAFETY: No automatic guest-to-verified merging ---
   //
@@ -1383,30 +1722,39 @@ export async function verifyOtp(phone: string, code: string): Promise<{
     return { openId: verifiedOpenId, userId: existingVerified.id, isNewUser: false, phone: normalizedPhone };
   }
 
-  // Create new verified customer — wrap in transaction
-  let userId: number;
-  let profileId: string;
-
-  await db.transaction(async (tx) => {
-    userId = randomInt(100_000_000, 999_999_999);
-    await tx.insert(users).values({
-      id: userId,
-      openId: verifiedOpenId,
-      name: null,
-      mobile: normalizedPhone,
-      role: "user",
-    });
-
-    profileId = `cust_${nanoid(12)}`;
-    await tx.insert(customerProfiles).values({
-      id: profileId,
-      userId,
-      mobileNumber: normalizedPhone, // Only set here — verified via OTP
-    });
-    // NO guest order merge — see safety comment above.
-  });
-
-  return { openId: verifiedOpenId, userId: userId!, isNewUser: true, phone: normalizedPhone };
+  // Create new verified customer. Concurrent verifies for the same phone race
+  // on openId unique — second re-reads the winner instead of 500ing.
+  // NOTE: explicit random ids can collide; retry once, then re-read by openId.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const candidateId = randomInt(100_000_000, 999_999_999);
+    const candidateProfileId = `cust_${nanoid(12)}`;
+    try {
+      await db.transaction(async (tx) => {
+        await tx.insert(users).values({
+          id: candidateId,
+          openId: verifiedOpenId,
+          name: null,
+          mobile: normalizedPhone,
+          role: "user",
+        });
+        await tx.insert(customerProfiles).values({
+          id: candidateProfileId,
+          userId: candidateId,
+          mobileNumber: normalizedPhone, // Only set here — verified via OTP
+        });
+        // NO guest order merge — see safety comment above.
+      });
+      return { openId: verifiedOpenId, userId: candidateId, isNewUser: true, phone: normalizedPhone };
+    } catch (err) {
+      if (!isUniqueViolation(err)) throw err;
+      const winner = (await db.select().from(users).where(eq(users.openId, verifiedOpenId)).limit(1))[0];
+      if (winner) {
+        return { openId: verifiedOpenId, userId: winner.id, isNewUser: false, phone: normalizedPhone };
+      }
+      if (attempt === 1) throw err;
+    }
+  }
+  throw new Error("Could not verify phone. Please retry.");
 }
 
 // =============================================================================
@@ -1499,7 +1847,9 @@ export async function getCustomerList(filters?: { search?: string; restaurantId?
 
   const conditions = [];
   if (filters?.search) {
-    const searchPattern = `%${filters.search}%`;
+    // Escape LIKE wildcards so search is literal (prevents %/_ broadening results).
+    const escaped = String(filters.search).replace(/[\\%_]/g, m => `\\${m}`);
+    const searchPattern = `%${escaped}%`;
     conditions.push(
       or(
         like(users.name, searchPattern),

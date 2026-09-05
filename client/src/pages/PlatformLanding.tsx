@@ -12,11 +12,30 @@ export default function PlatformLanding({
   featuredUrl: string;
 }) {
   const hasFeatured = featuredName.trim().length > 0 && featuredUrl.trim().length > 0;
+  // Same-origin featured links stay in the SPA (no full reload, back button
+  // intact); cross-origin restaurant domains use a plain anchor.
+  const featuredInternal = featuredUrl.startsWith("/");
+  const featuredCta = (
+    <>
+      <UtensilsCrossed className="mr-2 h-5 w-5" aria-hidden="true" />
+      Order from {featuredName}
+      <ArrowRight className="ml-2 h-5 w-5" aria-hidden="true" />
+    </>
+  );
   useEffect(() => {
     const prev = document.title;
     document.title = "MunchPro — Direct ordering for independent kitchens";
+    // Per-host head: the static index.html ships restaurant meta, so the
+    // platform host overwrites it here (restored on unmount for back-nav).
+    const meta = document.querySelector('meta[name="description"]');
+    const prevDesc = meta?.getAttribute("content") ?? null;
+    meta?.setAttribute(
+      "content",
+      "MunchPro gives local kitchens their own direct ordering counter — no marketplace commission, no lost customer list."
+    );
     return () => {
       document.title = prev;
+      if (meta && prevDesc !== null) meta.setAttribute("content", prevDesc);
     };
   }, []);
   return (
@@ -52,11 +71,11 @@ export default function PlatformLanding({
               asChild
               className="min-h-[48px] w-full bg-[#c84630] px-7 text-base font-extrabold hover:bg-[#ad3627] sm:w-auto"
             >
-              <a href={featuredUrl}>
-                <UtensilsCrossed className="mr-2 h-5 w-5" aria-hidden="true" />
-                Order from {featuredName}
-                <ArrowRight className="ml-2 h-5 w-5" aria-hidden="true" />
-              </a>
+              {featuredInternal ? (
+                <Link href={featuredUrl}>{featuredCta}</Link>
+              ) : (
+                <a href={featuredUrl}>{featuredCta}</a>
+              )}
             </Button>
           ) : null}
           <Button

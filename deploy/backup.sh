@@ -34,6 +34,30 @@ docker exec "${CONTAINER_NAME}" pg_dump -U "${DB_USER}" -d "${DB_NAME}" --no-own
 FILESIZE=$(stat -f%z "${BACKUP_FILE}" 2>/dev/null || stat -c%s "${BACKUP_FILE}" 2>/dev/null || echo "0")
 echo "[Backup] Daily backup created: ${BACKUP_FILE} (${FILESIZE} bytes)"
 
+# Uploaded brand/menu images live in a named volume (not the database) —
+# snapshot it alongside, resolving the project-prefixed volume name live.
+IMAGES_VOLUME="$(docker volume ls -q 2>/dev/null | grep -E '(^|_)cloudkitchen_images$' | head -n 1 || true)"
+if [ -n "${IMAGES_VOLUME:-}" ]; then
+  IMAGES_FILE="${BACKUP_DIR}/daily/${DB_NAME}_images_${DATE}.tar.gz"
+  if docker run --rm -v "${IMAGES_VOLUME}:/data:ro" -v "${BACKUP_DIR}/daily:/backup" alpine tar -czf "/backup/$(basename "${IMAGES_FILE}")" -C /data . 2>/dev/null; then
+    echo "[Backup] Images snapshot created: ${IMAGES_FILE}"
+  else
+    echo "[Backup] ⚠️ WARNING: images snapshot failed (uploads not backed up)"
+  fi
+else
+  echo "[Backup] ⚠️ WARNING: images volume not found (uploads not backed up)"
+fi
+
+# Secrets live only in deploy/config.env — without it a restore cannot boot.
+CONFIG_SRC="${CONFIG_SRC:-/opt/cloudkitchen/deploy/config.env}"
+if [ -f "${CONFIG_SRC}" ]; then
+  cp "${CONFIG_SRC}" "${BACKUP_DIR}/daily/config_${DATE}.env"
+  chmod 600 "${BACKUP_DIR}/daily/config_${DATE}.env"
+  echo "[Backup] Config snapshot saved (mode 600)"
+else
+  echo "[Backup] ⚠️ WARNING: ${CONFIG_SRC} not found (secrets not backed up)"
+fi
+
 # Weekly backup (every Sunday)
 if [ $(date +%u) -eq 7 ]; then
   WEEKLY_FILE="${BACKUP_DIR}/weekly/${DB_NAME}_${DATE}.sql.gz"
@@ -48,20 +72,22 @@ if [ $(date +%d) -eq 1 ]; then
   echo "[Backup] Monthly backup created: ${MONTHLY_FILE}"
 fi
 
-# Cleanup old daily backups
+# Cleanup old daily backups (|| true: empty globs fail ls under pipefail+set -e)
 echo "[Backup] Cleaning old backups..."
 cd "${BACKUP_DIR}/daily"
-ls -t ${DB_NAME}_*.sql.gz 2>/dev/null | tail -n +$((DAILY_KEEP + 1)) | xargs -r rm -f
+ls -t ${DB_NAME}_*.sql.gz 2>/dev/null | tail -n +$((DAILY_KEEP + 1)) | xargs -r rm -f || true
+ls -t ${DB_NAME}_images_*.tar.gz 2>/dev/null | tail -n +$((DAILY_KEEP + 1)) | xargs -r rm -f || true
+ls -t config_*.env 2>/dev/null | tail -n +$((DAILY_KEEP + 1)) | xargs -r rm -f || true
 echo "[Backup] Retained last ${DAILY_KEEP} daily backups"
 
 # Cleanup old weekly backups
 cd "${BACKUP_DIR}/weekly"
-ls -t ${DB_NAME}_*.sql.gz 2>/dev/null | tail -n +$((WEEKLY_KEEP + 1)) | xargs -r rm -f
+ls -t ${DB_NAME}_*.sql.gz 2>/dev/null | tail -n +$((WEEKLY_KEEP + 1)) | xargs -r rm -f || true
 echo "[Backup] Retained last ${WEEKLY_KEEP} weekly backups"
 
 # Cleanup old monthly backups
 cd "${BACKUP_DIR}/monthly"
-ls -t ${DB_NAME}_*.sql.gz 2>/dev/null | tail -n +$((MONTHLY_KEEP + 1)) | xargs -r rm -f
+ls -t ${DB_NAME}_*.sql.gz 2>/dev/null | tail -n +$((MONTHLY_KEEP + 1)) | xargs -r rm -f || true
 echo "[Backup] Retained last ${MONTHLY_KEEP} monthly backups"
 
 # Verify backup integrity

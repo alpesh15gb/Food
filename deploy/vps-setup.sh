@@ -70,7 +70,7 @@ if [ ! -f "$ENV_FILE" ]; then
   COOKIE_SECRET=$(generate_hex 32)
   SECRET_KEY=$(generate_hex 32)
   ADMIN_TOKEN="admin-$(generate_hex 20)"
-  OTP_SECRET=$(openssl rand -hex 32 2>/dev/null || generate_hex 64)
+  OTP_SECRET=$(openssl rand -hex 32 2>/dev/null || generate_hex 32)
 
   # NOTE: sed -i.bak (not bare -i) for macOS/BSD + GNU portability; backups removed below.
   sed -i.bak "s|POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=${POSTGRES_PASSWORD}|" "$ENV_FILE"
@@ -184,12 +184,14 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
     }
 
+    # Long cache but NOT immutable: /assets mixes hashed bundles with
+    # unhashed public/ brand files replaced in place on redeploy.
     location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$ {
         proxy_pass http://cloudkitchen;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         expires 30d;
-        add_header Cache-Control "public, immutable";
+        add_header Cache-Control "public";
     }
 
     location /manus-storage/ {
@@ -243,7 +245,7 @@ server {
     location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$ {
         proxy_pass http://cloudkitchen;
         expires 30d;
-        add_header Cache-Control "public, immutable";
+        add_header Cache-Control "public";
     }
 
     location / {
@@ -338,7 +340,8 @@ echo "🔍 Verifying deployment..."
 
 sleep 5
 
-if curl -sf http://127.0.0.1:4300/ >/dev/null 2>&1; then
+# Plain probe endpoint (no tRPC batch params needed).
+if curl -sf http://127.0.0.1:4300/api/healthz >/dev/null 2>&1; then
   echo "✅ App is responding on port 4300"
 else
   echo "⚠️  App still starting..."

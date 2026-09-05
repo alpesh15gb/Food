@@ -64,8 +64,13 @@ export default function DomainsPanel({ restaurantId }: { restaurantId: string })
 
   function handleAdd(e: React.FormEvent) {
     e.preventDefault();
-    const clean = newDomain.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/$/, "");
+    const noProto = newDomain.trim().toLowerCase().replace(/^https?:\/\//, "");
+    const clean = noProto.split("/")[0].split(":")[0].replace(/\.+$/, "");
     if (!clean) return;
+    if (!/^[a-z0-9][a-z0-9.-]*[a-z0-9]$/.test(clean) || clean.length < 4 || clean.length > 253 || !clean.includes(".")) {
+      toast.error("Enter a valid domain name (e.g. order.yourrestaurant.com).");
+      return;
+    }
     addDomain.mutate({ restaurantId, domain: clean });
   }
 
@@ -140,7 +145,7 @@ export default function DomainsPanel({ restaurantId }: { restaurantId: string })
 
       <div className="space-y-3">
         {list.map(domain => (
-          <div key={domain.id} className="bg-white rounded-xl border border-[#e8ddd0] p-4 flex items-center justify-between gap-4">
+          <div key={domain.id} className="bg-white rounded-xl border border-[#e8ddd0] p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
             <div className="flex items-center gap-3 min-w-0">
               {domain.isVerified ? (
                 <ShieldCheck className="w-5 h-5 text-green-600 shrink-0" />
@@ -156,15 +161,17 @@ export default function DomainsPanel({ restaurantId }: { restaurantId: string })
                 </div>
                 <p className="text-xs text-[#6b5c52]">
                   {domain.isVerified
-                    ? `SSL: ${domain.sslStatus} • Verified ${domain.verifiedAt ? new Date(domain.verifiedAt).toLocaleDateString() : ""}`
-                    : `CNAME → ${cnameTarget ?? "cname.yourdomain.com"}`}
+                    ? `SSL: ${domain.sslStatus} • Verified ${domain.verifiedAt && !Number.isNaN(new Date(domain.verifiedAt).getTime()) ? new Date(domain.verifiedAt).toLocaleDateString() : ""}`
+                    : cnameTarget
+                      ? `CNAME → ${cnameTarget}`
+                      : "Add a CNAME record — the target is shown after adding a domain."}
                 </p>
               </div>
             </div>
 
-            <div className="flex items-center gap-1 shrink-0">
+            <div className="flex flex-wrap items-center gap-1 shrink-0">
               {!domain.isVerified && (
-                <Button size="sm" variant="outline" onClick={() => verifyDomain.mutate({ domainId: domain.id })} disabled={verifyDomain.isPending}>
+                <Button size="sm" variant="outline" onClick={() => verifyDomain.mutate({ domainId: domain.id, restaurantId })} disabled={verifyDomain.isPending}>
                   {verifyDomain.isPending ? <LoaderCircle className="w-3 h-3 animate-spin" /> : "Verify"}
                 </Button>
               )}
@@ -178,7 +185,7 @@ export default function DomainsPanel({ restaurantId }: { restaurantId: string })
                   <CheckCircle2 className="w-3 h-3 mr-1" /> Visit
                 </a>
               )}
-              <Button size="sm" variant="ghost" aria-label={`Delete domain ${domain.domain}`} className="text-red-500 hover:text-red-700 hover:bg-red-50" onClick={() => setDeleteId(domain.id)} disabled={removeDomain.isPending}>
+              <Button size="sm" variant="ghost" aria-label={`Delete domain ${domain.domain}`} className="text-red-500 hover:text-red-700 hover:bg-red-50" onClick={() => setDeleteId(domain.id)} disabled={removeDomain.isPending || verifyDomain.isPending || setPrimary.isPending}>
                 <Trash2 className="w-3 h-3" />
               </Button>
             </div>
@@ -198,7 +205,7 @@ export default function DomainsPanel({ restaurantId }: { restaurantId: string })
           <AlertDialogFooter>
             <AlertDialogCancel>Keep domain</AlertDialogCancel>
             <AlertDialogAction
-              onClick={() => { if (deleteId) removeDomain.mutate({ domainId: deleteId }); }}
+              onClick={() => { if (deleteId) removeDomain.mutate({ domainId: deleteId, restaurantId }); }}
               className="bg-red-600 hover:bg-red-700"
             >
               Delete domain
