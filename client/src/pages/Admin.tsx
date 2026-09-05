@@ -696,6 +696,7 @@ function AdminWorkspace({ section, slug }: { section: string; slug: string }) {
             onDelete={handleMenuDelete}
             onUpdateItem={handleMenuUpdateItem}
             onBulkUpdate={handleMenuBulkUpdate}
+            restaurantId={data.restaurant.id}
           />
         ) : section === "categories" ? (
           <CategoriesPanel
@@ -1590,6 +1591,7 @@ function MenuPanel({
   onDelete,
   onUpdateItem,
   onBulkUpdate,
+  restaurantId,
 }: {
   data: any;
   itemForm: any;
@@ -1603,6 +1605,7 @@ function MenuPanel({
   onDelete: (id: string) => void;
   onUpdateItem: (input: any) => void;
   onBulkUpdate: (input: any) => void;
+  restaurantId: string;
 }) {
   const [searchInput, setSearchInput] = useState("");
   const search = useDebouncedValue(searchInput, 200);
@@ -1639,7 +1642,11 @@ function MenuPanel({
     });
   }, [items]);
 
-  const handleImageUpload = async (file: File, target: "create" | "edit") => {
+  const handleImageUpload = async (
+    file: File,
+    target: "create" | "edit",
+    scopeRestaurantId: string,
+  ) => {
     if (file.size > 2 * 1024 * 1024) return toast.error("Image must be under 2 MB.");
     setUploading(true);
     try {
@@ -1648,6 +1655,7 @@ function MenuPanel({
         const base64 = (reader.result as string).split(",")[1];
         try {
           const result = await onUploadImage.mutateAsync({
+            restaurantId: scopeRestaurantId,
             data: base64,
             filename: file.name,
             contentType: file.type as "image/jpeg" | "image/png" | "image/webp",
@@ -1725,7 +1733,7 @@ function MenuPanel({
             ) : (
               <label className="flex h-16 w-16 cursor-pointer items-center justify-center rounded-xl border-2 border-dashed border-white/30 hover:border-white/60">
                 {uploading ? <RefreshCw className="h-5 w-5 animate-spin" /> : <Plus className="h-5 w-5 text-white/50" />}
-                <input type="file" accept="image/jpeg,image/png,image/webp" aria-label="Upload dish photo" className="hidden" onChange={(e) => e.target.files?.[0] && handleImageUpload(e.target.files[0], "create")} />
+                <input type="file" accept="image/jpeg,image/png,image/webp" aria-label="Upload dish photo" className="hidden" onChange={(e) => e.target.files?.[0] && handleImageUpload(e.target.files[0], "create", restaurantId)} />
               </label>
             )}
             <span className="text-xs text-white/50">{imagePreview ? "Image ready" : "Tap to add photo"}</span>
@@ -1864,7 +1872,7 @@ function MenuPanel({
                     ) : (
                       <label className="flex h-14 w-14 shrink-0 cursor-pointer items-center justify-center rounded-lg border-2 border-dashed border-[#d9b89e] hover:border-[#c84630]">
                         <Plus className="h-4 w-4 text-[#a37d64]" />
-                        <input type="file" accept="image/jpeg,image/png,image/webp" aria-label="Upload dish photo" className="hidden" onChange={(e) => e.target.files?.[0] && handleImageUpload(e.target.files[0], "edit")} />
+                        <input type="file" accept="image/jpeg,image/png,image/webp" aria-label="Upload dish photo" className="hidden" onChange={(e) => e.target.files?.[0] && handleImageUpload(e.target.files[0], "edit", restaurantId)} />
                       </label>
                     )}
                     <div className="flex-1 space-y-2">
@@ -2648,6 +2656,7 @@ function RestaurantPanel({
         reader.readAsDataURL(file);
       });
       const result = await uploadLogo.mutateAsync({
+        restaurantId: restaurant.id,
         data: dataUrl.split(",")[1] ?? "",
         kind: "logo",
         contentType: file.type as "image/jpeg" | "image/png" | "image/webp",
@@ -2667,6 +2676,7 @@ function RestaurantPanel({
       return toast.error("Delivery radius must be a number greater than 0.");
     onSave({
       id: restaurant.id,
+      restaurantId: restaurant.id,
       name: form.name,
       cuisineSummary: form.cuisineSummary,
       description: form.description,

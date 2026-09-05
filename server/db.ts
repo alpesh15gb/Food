@@ -305,7 +305,8 @@ export async function updateRestaurant(input: {
   tempClosureMessage?: string | null;
 }) {
   const db = await requireDb();
-  const { deliveryRadiusKm, ...rest } = input;
+  // restaurantId is scope-only (verified by the router); never written.
+  const { deliveryRadiusKm, restaurantId: _scope, ...rest } = input as typeof input & { restaurantId?: string };
   const updateData: Record<string, unknown> = { ...rest };
   if (deliveryRadiusKm !== undefined) {
     updateData.deliveryRadiusKm = String(deliveryRadiusKm);

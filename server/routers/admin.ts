@@ -189,6 +189,7 @@ export const adminRouter = router({
   // =========================================================================
   updateSettings: requirePermission("restaurant:write").input(z.object({
     id: z.string().min(4),
+    restaurantId: z.string().min(4),
     name: z.string().min(2).max(180),
     cuisineSummary: z.string().min(2).max(255),
     description: z.string().max(2000).optional(),
@@ -208,6 +209,10 @@ export const adminRouter = router({
     tempClosureMessage: z.string().max(500).nullish(),
   }))
     .mutation(async ({ ctx, input }) => {
+      // Scope guard: the updated row must be the scoped restaurant itself.
+      if (input.id !== input.restaurantId) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Restaurant scope mismatch." });
+      }
       await updateRestaurant(input);
       await logAudit({
         actorId: ctx.user.id,
@@ -317,6 +322,7 @@ export const adminRouter = router({
     }),
 
   uploadMenuImage: requirePermission("menu:write").input(z.object({
+    restaurantId: z.string().min(4),
     data: z.string().min(1),
     filename: z.string().min(1).max(255),
     contentType: z.enum(["image/jpeg", "image/png", "image/webp"]),
@@ -328,6 +334,7 @@ export const adminRouter = router({
     }),
 
   uploadBrandImage: requirePermission("restaurant:write").input(z.object({
+    restaurantId: z.string().min(4),
     data: z.string().min(1),
     kind: z.enum(["logo", "banner"]),
     contentType: z.enum(["image/jpeg", "image/png", "image/webp"]),
