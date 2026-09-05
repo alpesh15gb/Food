@@ -162,6 +162,10 @@ export default function DeliveryLocationDrawer({
   }, []);
 
   const reset = useCallback(() => {
+    // Invalidate any in-flight GPS callbacks so a stale fix can't
+    // overwrite the fresh state (drawer closed/reopened mid-lookup).
+    gpsAttemptRef.current++;
+    setGpsStage(null);
     setStep("choose_method");
     setGeoState(null);
     setGpsError(null);
@@ -186,12 +190,20 @@ export default function DeliveryLocationDrawer({
     onOpenChange(open);
   }, [onOpenChange, reset]);
 
-  // --- Method A: Use Current Location ---
+  // --- Method A: Use Current Location (two-stage for desktop resilience) ---
+  // Desktops usually have no GPS and often no Wi-Fi positioning, so a single
+  // high-accuracy request just burns 10s and times out. We try precise first
+  // (fast on phones), then automatically fall back to a coarse fix before
+  // giving up and pointing at search / map pin.
+  const [gpsStage, setGpsStage] = useState<"precise" | "approximate" | null>(null);
+  const gpsAttemptRef = useRef(0);
+
   const useCurrentLocation = useCallback(() => {
     setStep("loading");
     setGpsError(null);
     setGeoError(null);
     setVisitedChoice(true);
+    setGpsStage("precise");
 
     if (!navigator.geolocation) {
       setGpsError("Geolocation is not supported by your browser. Please search or place a pin instead.");
@@ -199,48 +211,77 @@ export default function DeliveryLocationDrawer({
       return;
     }
 
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        const { latitude, longitude, accuracy } = position.coords;
-        const level = classifyAccuracy(accuracy);
+    const attemptId = ++gpsAttemptRef.current;
 
-        setGeoState({
-          latitude,
-          longitude,
-          accuracyMeters: accuracy,
-          deviceAccuracyMeters: accuracy,
-          source: "device_gps",
-        });
+    const handlePosition = (position: GeolocationPosition) => {
+      if (attemptId !== gpsAttemptRef.current) return;
+      const { latitude, longitude, accuracy } = position.coords;
+      const level = classifyAccuracy(accuracy);
 
-        if (requiresMapConfirmation(level)) {
-          setCameViaMap(true);
-          setStep("map_confirm");
-        } else {
-          setCameViaMap(false);
-          setStep("address_form");
+      setGeoState({
+        latitude,
+        longitude,
+        accuracyMeters: accuracy,
+        deviceAccuracyMeters: accuracy,
+        source: "device_gps",
+      });
+
+      if (requiresMapConfirmation(level)) {
+        setCameViaMap(true);
+        setStep("map_confirm");
+      } else {
+        setCameViaMap(false);
+        setStep("address_form");
+      }
+
+      reverseGeocode(latitude, longitude).then((result) => {
+        if (attemptId !== gpsAttemptRef.current) return;
+        if (result.area) setArea(result.area);
+        if (result.city) setCity(result.city);
+        if (result.postalCode) setPostalCode(result.postalCode);
+        if (result.street) setStreet(result.street);
+        if (!result.area && !result.city && !result.postalCode) {
+          setGeoError("We found your coordinates but couldn't identify the area. Please fill the address fields manually.");
         }
+      }).catch(() => {
+        if (attemptId !== gpsAttemptRef.current) return;
+        setGeoError("Address lookup failed. Please fill the address fields manually.");
+      });
+    };
 
-        reverseGeocode(latitude, longitude).then((result) => {
-          if (result.area) setArea(result.area);
-          if (result.city) setCity(result.city);
-          if (result.postalCode) setPostalCode(result.postalCode);
-          if (result.street) setStreet(result.street);
-          if (!result.area && !result.city && !result.postalCode) {
-            setGeoError("We found your coordinates but couldn't identify the area. Please fill the address fields manually.");
-          }
-        }).catch(() => {
-          setGeoError("Address lookup failed. Please fill the address fields manually.");
-        });
-      },
+    const attemptCoarse = () => {
+      if (attemptId !== gpsAttemptRef.current) return;
+      setGpsStage("approximate");
+      navigator.geolocation.getCurrentPosition(
+        handlePosition,
+        (error) => {
+          if (attemptId !== gpsAttemptRef.current) return;
+          setGpsStage(null);
+          setGpsError(
+            "Couldn't get a location fix on this device — common on desktops. " +
+            "Search your address below or drop a pin on the map instead."
+          );
+          setStep("choose_method");
+        },
+        { enableHighAccuracy: false, timeout: 12000, maximumAge: 60000 },
+      );
+    };
+
+    navigator.geolocation.getCurrentPosition(
+      handlePosition,
       (error) => {
-        let msg = "Unable to get your location.";
-        if (error.code === 1) msg = "Location permission denied. Please search or place a pin on the map.";
-        else if (error.code === 2) msg = "Location unavailable. Please search or place a pin on the map.";
-        else if (error.code === 3) msg = "Location request timed out. Please try again or place a pin.";
-        setGpsError(msg);
-        setStep("choose_method");
+        if (attemptId !== gpsAttemptRef.current) return;
+        if (error.code === 1) {
+          // Denied: retrying would just re-prompt/fail — go straight to alternatives.
+          setGpsStage(null);
+          setGpsError("Location access is blocked. Allow it in your browser's site settings, or continue with search / map pin below.");
+          setStep("choose_method");
+          return;
+        }
+        // UNAVAILABLE or TIMEOUT on precise fix: one automatic coarse attempt.
+        attemptCoarse();
       },
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 }
+      { enableHighAccuracy: true, timeout: 8000, maximumAge: 30000 },
     );
   }, []);
 
@@ -552,7 +593,11 @@ export default function DeliveryLocationDrawer({
           {step === "loading" && (
             <div className="flex flex-col items-center gap-4 py-8">
               <Loader2 className="h-8 w-8 animate-spin text-[#B95509]" />
-              <p className="text-sm text-[#5F6B3C]">Getting your location...</p>
+              <p className="text-sm text-[#5F6B3C]">
+                {gpsStage === "approximate"
+                  ? "Precise fix timed out — trying approximate location…"
+                  : "Getting your location…"}
+              </p>
             </div>
           )}
 
