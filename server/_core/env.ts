@@ -52,8 +52,8 @@ const otpHmacSecret = requireSecret(
 );
 const localAdminToken = requireSecret(
   "LOCAL_ADMIN_TOKEN",
-  MIN16,
-  "must be at least 16 chars in production."
+  (v) => v.length >= 10,
+  "must be at least 10 chars in production."
 );
 
 export const ENV = {
