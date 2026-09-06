@@ -94,7 +94,18 @@ export const storefrontRouter = router({
     }
   }),
 
-  paymentConfig: publicProcedure.query(() => getRazorpayConfig()),
+  paymentConfig: publicProcedure
+    .input(z.object({ slug: z.string().min(2).optional() }).optional())
+    .query(async ({ input }) => {
+      if (!input?.slug) return getRazorpayConfig();
+      try {
+        const { getRestaurantBySlug } = await import("../db");
+        const restaurant = await getRestaurantBySlug(input.slug);
+        return getRazorpayConfig(restaurant?.id);
+      } catch {
+        return getRazorpayConfig();
+      }
+    }),
 
   // =========================================================================
   // Customer Phone Auth — server-side session via HttpOnly cookie
@@ -316,7 +327,14 @@ export const storefrontRouter = router({
   initiatePayment: publicProcedure
     .input(checkoutInput)
     .mutation(async ({ input }) => {
-      const config = await getRazorpayConfig();
+      let restaurantId: string | undefined;
+      try {
+        const { getRestaurantBySlug } = await import("../db");
+        restaurantId = (await getRestaurantBySlug(input.slug))?.id;
+      } catch {
+        restaurantId = undefined;
+      }
+      const config = await getRazorpayConfig(restaurantId);
       if (!config.enabled) {
         throw new Error("Online payment is not configured yet. Please contact the restaurant.");
       }

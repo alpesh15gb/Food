@@ -181,7 +181,10 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
     { slug: storefrontSlug },
     { enabled: hasSlug },
   );
-  const paymentConfig = trpc.storefront.paymentConfig.useQuery();
+  const paymentConfig = trpc.storefront.paymentConfig.useQuery(
+    hasSlug ? { slug: storefrontSlug } : undefined,
+    { enabled: hasSlug },
+  );
   const initiatePayment = trpc.storefront.initiatePayment.useMutation();
   const verifyPayment = trpc.storefront.verifyPayment.useMutation();
   // Memoized: adaptStorefront builds fresh menu objects, and memoizing keeps
