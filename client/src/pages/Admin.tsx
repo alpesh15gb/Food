@@ -300,7 +300,7 @@ function AdminAccess() {
             )}
             <Button
               type="submit"
-              disabled={localLogin.isPending || token.trim().length < 16}
+              disabled={localLogin.isPending || token.trim().length < 10}
               className="mt-3 h-11 w-full rounded-xl bg-[#B95509] font-extrabold hover:bg-[#9C4A07]"
             >
               {localLogin.isPending ? "Checking access..." : "Open operations"}
