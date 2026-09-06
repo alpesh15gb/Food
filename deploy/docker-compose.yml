@@ -4,6 +4,8 @@ services:
       context: ..
       dockerfile: deploy/Dockerfile
     restart: unless-stopped
+    env_file:
+      - config.env
     environment:
       NODE_ENV: production
       PORT: 4300
