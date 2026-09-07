@@ -33,10 +33,14 @@ request() {
 request / 200
 request /9house 200
 request /admin 200
+request /terms 200
+request /webhooks/health 200
+request /robots.txt 200
+request /sitemap.xml 200
 
 # Brand assets ship from client/public and may legitimately lag VPS content
 # (or be renamed) — warn without failing the release gate.
-for asset in /assets/supperclub-mark.png /assets/supperclub-hero-burger.jpg; do
+for asset in /assets/food/biryani-plate.jpg /assets/food/beverage-1.jpg; do
   code="$(curl -k -sS -o /dev/null -w '%{http_code}' --resolve "${DOMAIN}:443:127.0.0.1" "https://${DOMAIN}${asset}" || true)"
   [ -n "$code" ] || code="000"
   if [ "$code" = "200" ]; then
