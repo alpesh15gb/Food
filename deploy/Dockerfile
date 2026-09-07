@@ -10,6 +10,15 @@ COPY . .
 # devDependencies are present). Build-time checks like the dev-plugin gate
 # read it; without this the image ships dev runtime code.
 ENV NODE_ENV=production
+# Client map key (Vite bakes these into the JS bundle at build time — they
+# CANNOT come from runtime env). Preferred: own Google Cloud key.
+# Legacy Forge proxy pair still honored when the Google key is absent.
+ARG VITE_GOOGLE_MAPS_API_KEY=""
+ARG VITE_FRONTEND_FORGE_API_URL=""
+ARG VITE_FRONTEND_FORGE_API_KEY=""
+ENV VITE_GOOGLE_MAPS_API_KEY=$VITE_GOOGLE_MAPS_API_KEY
+ENV VITE_FRONTEND_FORGE_API_URL=$VITE_FRONTEND_FORGE_API_URL
+ENV VITE_FRONTEND_FORGE_API_KEY=$VITE_FRONTEND_FORGE_API_KEY
 RUN pnpm run build
 
 EXPOSE 4300

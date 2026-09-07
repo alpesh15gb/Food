@@ -76,7 +76,7 @@
 
 /// <reference types="@types/google.maps" />
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { usePersistFn } from "@/hooks/usePersistFn";
 import { cn } from "@/lib/utils";
 
@@ -86,24 +86,53 @@ declare global {
   }
 }
 
-const API_KEY = import.meta.env.VITE_FRONTEND_FORGE_API_KEY;
+// Preferred: your own Google Cloud key (Maps JavaScript API + Places API +
+// Geocoding API), baked at build time via the Dockerfile build-arg. Legacy:
+// the Forge proxy pair (managed-platform only — unset on self-hosted VPS).
+const GOOGLE_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY as string | undefined;
+const FORGE_KEY = import.meta.env.VITE_FRONTEND_FORGE_API_KEY as string | undefined;
 const FORGE_BASE_URL =
   import.meta.env.VITE_FRONTEND_FORGE_API_URL ||
   "https://forge.butterfly-effect.dev";
-const MAPS_PROXY_URL = `${FORGE_BASE_URL}/v1/maps/proxy`;
 
-function loadMapScript() {
-  return new Promise(resolve => {
+function mapsScriptUrl(): string {
+  if (GOOGLE_KEY && GOOGLE_KEY !== "undefined" && GOOGLE_KEY.trim()) {
+    return `https://maps.googleapis.com/maps/api/js?key=${GOOGLE_KEY.trim()}&v=weekly&libraries=marker,places,geocoding,geometry`;
+  }
+  if (FORGE_KEY && FORGE_KEY !== "undefined" && FORGE_KEY.trim()) {
+    return `${FORGE_BASE_URL}/v1/maps/proxy/maps/api/js?key=${FORGE_KEY.trim()}&v=weekly&libraries=marker,places,geocoding,geometry`;
+  }
+  throw new Error("MAPS_KEY_MISSING");
+}
+
+function loadMapScript(): Promise<void> {
+  // Already loaded (drawer remounts, StrictMode, retries).
+  if (window.google?.maps) return Promise.resolve();
+  const existing = document.querySelector<HTMLScriptElement>('script[data-maps-loader="1"]');
+  if (existing) {
+    return new Promise((resolve, reject) => {
+      existing.addEventListener("load", () => resolve(), { once: true });
+      existing.addEventListener("error", () => reject(new Error("MAPS_SCRIPT_ERROR")), { once: true });
+    });
+  }
+  return new Promise((resolve, reject) => {
+    let src: string;
+    try {
+      src = mapsScriptUrl();
+    } catch (err) {
+      reject(err);
+      return;
+    }
     const script = document.createElement("script");
-    script.src = `${MAPS_PROXY_URL}/maps/api/js?key=${API_KEY}&v=weekly&libraries=marker,places,geocoding,geometry`;
+    script.dataset.mapsLoader = "1";
+    script.src = src;
     script.async = true;
     script.crossOrigin = "anonymous";
-    script.onload = () => {
-      resolve(null);
-      script.remove(); // Clean up immediately
-    };
+    script.onload = () => resolve();
     script.onerror = () => {
       console.error("Failed to load Google Maps script");
+      script.remove();
+      reject(new Error("MAPS_SCRIPT_ERROR"));
     };
     document.head.appendChild(script);
   });
@@ -114,6 +143,7 @@ interface MapViewProps {
   initialCenter?: google.maps.LatLngLiteral;
   initialZoom?: number;
   onMapReady?: (map: google.maps.Map) => void;
+  onLoadError?: (message: string) => void;
 }
 
 export function MapView({
@@ -121,14 +151,32 @@ export function MapView({
   initialCenter = { lat: 37.7749, lng: -122.4194 },
   initialZoom = 12,
   onMapReady,
+  onLoadError,
 }: MapViewProps) {
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<google.maps.Map | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const init = usePersistFn(async () => {
-    await loadMapScript();
+    try {
+      await loadMapScript();
+    } catch (err) {
+      const missing = err instanceof Error && err.message === "MAPS_KEY_MISSING";
+      const message = missing
+        ? "Map configuration missing — the restaurant needs to add a Google Maps key."
+        : "Could not load the map. Check your connection (or ad-blocker) and retry.";
+      setLoadError(message);
+      onLoadError?.(message);
+      return;
+    }
     if (!mapContainer.current) {
       console.error("Map container not found");
+      return;
+    }
+    if (!window.google?.maps) {
+      const message = "Could not load the map. Check your connection (or ad-blocker) and retry.";
+      setLoadError(message);
+      onLoadError?.(message);
       return;
     }
     map.current = new window.google.maps.Map(mapContainer.current, {
@@ -154,6 +202,14 @@ export function MapView({
   useEffect(() => {
     init();
   }, [init]);
+
+  if (loadError) {
+    return (
+      <div role="alert" className={cn("grid w-full place-items-center bg-[#f6ecdf] p-6 text-center", className)}>
+        <p className="max-w-xs text-sm font-bold leading-relaxed text-[#9C4A07]">{loadError}</p>
+      </div>
+    );
+  }
 
   return (
     <div ref={mapContainer} className={cn("w-full h-[500px]", className)} />

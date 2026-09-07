@@ -151,6 +151,9 @@ export default function DeliveryLocationDrawer({
   // Map state
   const mapRef = useRef<google.maps.Map | null>(null);
   const idleListenerRef = useRef<google.maps.MapsEventListener | null>(null);
+  // Surfaces Maps JS load failures (missing key, blocked script) inside the
+  // drawer instead of a silent blank map.
+  const [mapsError, setMapsError] = useState<string | null>(null);
   // Explicit Map/Satellite toggle (the default control is tiny and was broken
   // by DEMO_MAP_ID before — this is the discoverable switch for rooftops).
   const [mapType, setMapType] = useState<"roadmap" | "satellite">("roadmap");
@@ -177,6 +180,7 @@ export default function DeliveryLocationDrawer({
     // overwrite the fresh state (drawer closed/reopened mid-lookup).
     gpsAttemptRef.current++;
     setGpsStage(null);
+    setMapsError(null);
     setMapType("roadmap");
     setStep("choose_method");
     setGeoState(null);
@@ -320,8 +324,12 @@ export default function DeliveryLocationDrawer({
       if (results.length === 0) {
         setGeoError("No places found for that search. Try the building name, a nearby landmark, or place the pin on the map.");
       }
-    } catch {
-      setGeoError("Place search failed. Check your connection or place the pin on the map instead.");
+    } catch (err) {
+      if (err instanceof Error && err.message === "MAPS_UNAVAILABLE") {
+        setGeoError("Map search isn't available right now (maps failed to load). Place the pin on the map below, or check your connection and retry.");
+      } else {
+        setGeoError("Place search failed. Check your connection or place the pin on the map instead.");
+      }
     } finally {
       setSearching(false);
     }
@@ -646,6 +654,12 @@ export default function DeliveryLocationDrawer({
 
               {/* Interactive Map with fixed-center pin */}
               <div className="relative overflow-hidden rounded-xl border border-[#D8DFC0]">
+                {mapsError && (
+                  <div role="alert" className="m-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs font-bold text-amber-700">
+                    <AlertTriangle className="mr-1 inline h-3 w-3" />
+                    {mapsError} You can still type the address fields manually below.
+                  </div>
+                )}
                 <div className="absolute left-2 top-2 z-10 flex overflow-hidden rounded-lg border border-[#D8DFC0] bg-white shadow-sm" role="group" aria-label="Map style">
                   {(["roadmap", "satellite"] as const).map((t) => (
                     <button
@@ -674,6 +688,7 @@ export default function DeliveryLocationDrawer({
                     initialCenter={geoState ? { lat: geoState.latitude, lng: geoState.longitude } : biasedCenter}
                     initialZoom={16}
                     onMapReady={handleMapReady}
+                    onLoadError={(message) => setMapsError(message)}
                   />
                 </Suspense>
                 {/* Fixed center pin overlay */}

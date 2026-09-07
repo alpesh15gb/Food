@@ -45,7 +45,10 @@ export async function searchPlaces(
   query: string,
   bias?: { lat: number; lng: number; radiusM?: number },
 ): Promise<PlaceSearchResult[]> {
-  if (!query.trim() || !ensureGoogleMaps()) return [];
+  if (!query.trim()) return [];
+  // Fail loudly (not empty) when Maps never loaded — the drawer shows a
+  // "maps unavailable" message instead of a misleading "no places found".
+  if (!ensureGoogleMaps()) throw new Error("MAPS_UNAVAILABLE");
 
   // NOTE: no `types` filter. `types: ["geocode"]` restricts results to street
   // addresses and silently drops establishments — apartment complexes,
