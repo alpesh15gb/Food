@@ -68,22 +68,24 @@ const statusLabel: Record<string, string> = {
   REFUNDED: "Refunded",
 };
 
+// Five semantic groups — new, active, done, dead, money. One glance tells
+// the operator whether an order needs action, not which of 15 states it's in.
 const statusColor: Record<string, string> = {
-  PENDING_PAYMENT: "bg-amber-50 text-amber-700",
-  PAYMENT_CONFIRMED: "bg-blue-50 text-blue-700",
-  PLACED: "bg-indigo-50 text-indigo-700",
-  RESTAURANT_ACCEPTED: "bg-purple-50 text-purple-700",
-  PREPARING: "bg-orange-50 text-orange-700",
-  READY_FOR_PICKUP: "bg-emerald-50 text-emerald-700",
-  DELIVERY_REQUESTED: "bg-cyan-50 text-cyan-700",
-  RIDER_ASSIGNED: "bg-teal-50 text-teal-700",
-  PICKED_UP: "bg-sky-50 text-sky-700",
-  OUT_FOR_DELIVERY: "bg-blue-50 text-blue-700",
-  DELIVERED: "bg-green-50 text-green-700",
-  CANCELLED: "bg-red-50 text-red-700",
+  PENDING_PAYMENT: "bg-amber-50 text-amber-800",
+  PAYMENT_CONFIRMED: "bg-amber-50 text-amber-800",
+  PLACED: "bg-amber-50 text-amber-800",
+  RESTAURANT_ACCEPTED: "bg-blue-50 text-blue-800",
+  PREPARING: "bg-blue-50 text-blue-800",
+  READY_FOR_PICKUP: "bg-blue-50 text-blue-800",
+  DELIVERY_REQUESTED: "bg-blue-50 text-blue-800",
+  RIDER_ASSIGNED: "bg-blue-50 text-blue-800",
+  PICKED_UP: "bg-blue-50 text-blue-800",
+  OUT_FOR_DELIVERY: "bg-blue-50 text-blue-800",
+  DELIVERED: "bg-green-50 text-green-800",
+  CANCELLED: "bg-stone-100 text-stone-500",
   REJECTED: "bg-red-50 text-red-700",
-  REFUND_PENDING: "bg-yellow-50 text-yellow-700",
-  REFUNDED: "bg-gray-50 text-gray-700",
+  REFUND_PENDING: "bg-yellow-50 text-yellow-800",
+  REFUNDED: "bg-stone-100 text-stone-600",
 };
 
 const ADMIN_SECTIONS = new Set(Object.keys(SECTION_TITLES));
@@ -886,28 +888,24 @@ function OverviewPanel({ data, slug }: { data: any; slug: string }) {
       value: m.todayOrders,
       detail: "All orders started today",
       icon: ClipboardList,
-      tone: "bg-[#E9EFD6] text-[#B95509]",
     },
     {
       label: "Today's sales",
       value: money(m.todaySalesPaise),
       detail: "Captured payments",
       icon: BarChart3,
-      tone: "bg-[#e6f0e5] text-[#47754d]",
     },
     {
       label: "Average order",
       value: money(m.averageOrderValue),
       detail: "Across all paid orders",
       icon: TrendingUp,
-      tone: "bg-[#eee8f6] text-[#695b9c]",
     },
     {
       label: "Available dishes",
       value: `${availableCount}/${(data.items ?? []).length}`,
       detail: "Ready to order",
       icon: UtensilsCrossed,
-      tone: "bg-[#f5ecd8] text-[#9e692a]",
     },
   ];
 
@@ -916,31 +914,26 @@ function OverviewPanel({ data, slug }: { data: any; slug: string }) {
       label: "New",
       value: m.pendingOrders,
       icon: Clock3,
-      color: "text-amber-600",
     },
     {
       label: "Preparing",
       value: m.preparingOrders,
       icon: CookingPot,
-      color: "text-orange-600",
     },
     {
       label: "Open orders",
       value: m.openOrders,
       icon: Package,
-      color: "text-indigo-600",
     },
     {
       label: "Delivered",
       value: m.deliveredOrders,
       icon: CheckCircle2,
-      color: "text-green-600",
     },
     {
       label: "Cancelled",
       value: m.cancelledOrders,
       icon: X,
-      color: "text-red-600",
     },
   ];
 
@@ -952,18 +945,18 @@ function OverviewPanel({ data, slug }: { data: any; slug: string }) {
           <article
             key={card.label}
             style={{ contentVisibility: "auto", containIntrinsicSize: "auto 180px" }}
-            className="rounded-2xl bg-[#fffdf9] p-5 shadow-sm"
+            className="rounded-xl border border-[#e8dccf] bg-white p-5 shadow-sm"
           >
             <span
-              className={`grid h-10 w-10 place-items-center rounded-xl ${card.tone}`}
+              className="grid h-10 w-10 place-items-center rounded-lg bg-[#f3ede4] text-[#8a6f56]"
             >
               <card.icon className="h-5 w-5" />
             </span>
-            <p className="mt-5 text-sm font-bold text-[#7d5e4c]">
+            <p className="mt-4 text-xs font-semibold text-[#8a7a68]">
               {card.label}
             </p>
-            <p className="font-display mt-1 text-3xl">{card.value}</p>
-            <p className="mt-2 text-xs text-[#5F6B3C]">{card.detail}</p>
+            <p className="mt-1 text-3xl font-extrabold tabular-nums text-[#2A3A0C]">{card.value}</p>
+            <p className="mt-1 text-xs text-[#a89880]">{card.detail}</p>
           </article>
         ))}
       </section>
@@ -971,21 +964,21 @@ function OverviewPanel({ data, slug }: { data: any; slug: string }) {
       {/* Status Summary (static display cards; safe to skip off-screen paint) */}
       <section
         style={{ contentVisibility: "auto", containIntrinsicSize: "auto 160px" }}
-        className="rounded-2xl bg-[#fffdf9] p-5 shadow-sm"
+        className="rounded-xl border border-[#e8dccf] bg-white p-5 shadow-sm"
       >
-        <p className="text-[10px] font-extrabold uppercase tracking-[0.16em] text-[#5F6B3C]">
+        <p className="text-[11px] font-bold uppercase tracking-wider text-[#8a7a68]">
           Order pipeline
         </p>
-        <div className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
+        <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
           {statusCards.map((card) => (
             <div
               key={card.label}
-              className="flex items-center gap-3 rounded-xl border border-[#D8DFC0] bg-[#E9EFD6] p-3"
+              className="flex items-center gap-3 rounded-lg bg-[#faf7f2] p-3"
             >
-              <card.icon className={`h-5 w-5 ${card.color}`} />
+              <card.icon className="h-5 w-5 text-[#8a6f56]" />
               <div>
-                <p className="text-lg font-extrabold">{card.value}</p>
-                <p className="text-xs text-[#5F6B3C]">{card.label}</p>
+                <p className="text-lg font-extrabold tabular-nums text-[#2A3A0C]">{card.value}</p>
+                <p className="text-xs text-[#8a7a68]">{card.label}</p>
               </div>
             </div>
           ))}

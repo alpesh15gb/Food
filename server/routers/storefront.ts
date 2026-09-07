@@ -302,19 +302,25 @@ export const storefrontRouter = router({
 
       // Thread restaurant delivery radius into outlet selection.
       const defaultRadiusKm = restaurant.deliveryRadiusKm ? parseFloat(String(restaurant.deliveryRadiusKm)) : 5;
+      // Unconfigured provider must NOT fail closed: fall back to radius-only
+      // ("direct") serviceability so kitchens without Shadowfax can still sell
+      // with manual dispatch. Only consult the provider when creds exist.
+      const { getDeliveryProvider, isDeliveryProviderConfigured } = await import("../integrations/shadowfax");
+      const providerConfigured = await isDeliveryProviderConfigured(restaurant.id).catch(() => false);
       const result = await checkServiceability(
         loc.latitude!,
         loc.longitude!,
         restaurant.id,
         getOutlets,
-        async (pickup, drop) => {
-          const { getDeliveryProvider } = await import("../integrations/shadowfax");
-          const provider = getDeliveryProvider(restaurant.id);
-          if (provider.checkRouteServiceability) {
-            return provider.checkRouteServiceability(pickup, drop);
-          }
-          return provider.checkServiceability("");
-        },
+        providerConfigured
+          ? async (pickup, drop) => {
+              const provider = getDeliveryProvider(restaurant.id);
+              if (provider.checkRouteServiceability) {
+                return provider.checkRouteServiceability(pickup, drop);
+              }
+              return provider.checkServiceability("");
+            }
+          : undefined,
         { defaultRadiusKm: Number.isFinite(defaultRadiusKm) ? defaultRadiusKm : 5 },
       );
 
@@ -340,29 +346,37 @@ export const storefrontRouter = router({
       }
 
       // Issue 18 / H-07: idempotency via orders.idempotencyKey (unique partial index).
-      // Legacy fallback: match orderNumber for rows created before the column existed.
+      // P0 MP-002: lookup ONLY by opaque idempotencyKey. orderNumber is guessable
+      // (ORD-<time36>-<6digits>) and must never disclose trackingToken.
       if (input.idempotencyKey) {
         const { getDb } = await import("../db");
         const db = await getDb();
         if (db) {
           const { orders, payments } = await import("../../drizzle/schema");
-          const { eq, or } = await import("drizzle-orm");
+          const { eq } = await import("drizzle-orm");
+          const { getRestaurantBySlug } = await import("../db");
+          const scopedRestaurant = await getRestaurantBySlug(input.slug).catch(() => null);
           const existing = await db.select({
             id: orders.id,
             orderNumber: orders.orderNumber,
             trackingToken: orders.trackingToken,
             totalPaise: orders.totalPaise,
+            restaurantId: orders.restaurantId,
           })
             .from(orders)
-            .where(or(eq(orders.idempotencyKey, input.idempotencyKey), eq(orders.orderNumber, input.idempotencyKey)))
+            .where(eq(orders.idempotencyKey, input.idempotencyKey))
             .limit(1);
           if (existing[0]) {
+            // Tenant-scoped: a key from another restaurant never leaks its order.
+            if (scopedRestaurant && existing[0].restaurantId !== scopedRestaurant.id) {
+              throw new Error("Duplicate order request. Please retry with a new idempotency key.");
+            }
             // Idempotent return: real trackingToken + provider binding + amount.
             const payment = (await db.select({
               providerOrderId: payments.providerOrderId,
               amountPaise: payments.amountPaise,
             }).from(payments).where(eq(payments.orderId, existing[0].id)).limit(1))[0];
-            const idempotentConfig = await getRazorpayConfig();
+            const idempotentConfig = await getRazorpayConfig(existing[0].restaurantId);
             return {
               orderId: existing[0].id,
               orderNumber: existing[0].orderNumber,
@@ -390,6 +404,20 @@ export const storefrontRouter = router({
         idempotencyKey: input.idempotencyKey,
       });
 
+      // MP-013: free orders (₹0) need no Razorpay — already PLACED server-side.
+      if (localOrder.totalPaise === 0) {
+        return {
+          orderId: localOrder.id,
+          orderNumber: localOrder.orderNumber,
+          trackingToken: localOrder.trackingToken,
+          keyId: "",
+          providerOrderId: "",
+          amountPaise: 0,
+          currency: "INR",
+          freeOrder: true as const,
+        };
+      }
+
       const provider = await createRazorpayPaymentOrder({
         localOrderId: localOrder.id,
         orderNumber: localOrder.orderNumber,
@@ -403,6 +431,97 @@ export const storefrontRouter = router({
         trackingToken: localOrder.trackingToken,
         ...provider,
       };
+    }),
+
+  // MP-011: server-authoritative quote preview (fixes client-estimate drift).
+  // Computes coupon + per-item tax exactly as checkout, without creating an order.
+  quote: publicProcedure
+    .input(z.object({
+      slug: z.string().min(2),
+      lines: z.array(z.object({
+        menuItemId: z.string().min(3),
+        quantity: z.number().int().min(1).max(20),
+        modifierOptionIds: z.array(z.string().min(1)).optional(),
+        selectedVariantId: z.string().optional(),
+      })).min(1).max(50),
+      couponCode: z.string().max(48).optional(),
+    }))
+    .query(async ({ input }) => {
+      const { getStorefront } = await import("../db");
+      const { calculateAuthoritativeQuote, validateCoupon } = await import("../domain/orderPricing");
+      const storefront = await getStorefront(input.slug);
+      if (!storefront) throw new Error("Restaurant not found.");
+      const { getDb } = await import("../db");
+      const db = await getDb();
+      if (!db) throw new Error("Database unavailable.");
+      const { addonGroups, addonOptions, productVariants, coupons } = await import("../../drizzle/schema");
+      const { inArray, eq, and } = await import("drizzle-orm");
+      // Resolve DB-verified variant/modifier prices (same as checkout).
+      const variantIds = input.lines.flatMap(l => l.selectedVariantId ? [l.selectedVariantId] : []);
+      const variantMap = new Map<string, number>();
+      if (variantIds.length) {
+        const rows = await db.select().from(productVariants).where(inArray(productVariants.id, variantIds));
+        for (const r of rows) variantMap.set(r.id, r.pricePaise);
+      }
+      const allOptIds = input.lines.flatMap(l => l.modifierOptionIds ?? []);
+      const optMap = new Map<string, { pricePaise: number; name: string }>();
+      if (allOptIds.length) {
+        const rows = await db.select().from(addonOptions).where(inArray(addonOptions.id, allOptIds));
+        for (const r of rows) optMap.set(r.id, { pricePaise: r.pricePaise, name: r.name });
+      }
+      const catalog = storefront.items.map(i => ({
+        id: i.id, name: i.name, pricePaise: i.pricePaise,
+        offerPricePaise: i.offerPricePaise ?? null, availability: (i as { availability?: string }).availability ?? "AVAILABLE",
+        taxPercent: (i as { taxPercent?: string | null }).taxPercent ?? null,
+        packagingFeePaise: (i as { packagingFeePaise?: number | null }).packagingFeePaise ?? null,
+        stock: (i as { stock?: number | null }).stock ?? null,
+        maxQuantityPerOrder: (i as { maxQuantityPerOrder?: number | null }).maxQuantityPerOrder ?? null,
+      }));
+      const lines = input.lines.map(l => ({
+        menuItemId: l.menuItemId, quantity: l.quantity,
+        variantPricePaise: l.selectedVariantId ? (variantMap.get(l.selectedVariantId) ?? 0) : 0,
+        modifiers: (l.modifierOptionIds ?? []).map(id => ({
+          optionId: id, name: optMap.get(id)?.name ?? id, pricePaise: optMap.get(id)?.pricePaise ?? 0,
+        })),
+      }));
+      const cleanCoupon = input.couponCode?.trim().toUpperCase() || undefined;
+      let couponDiscountPaise = 0;
+      let couponError: string | undefined;
+      if (cleanCoupon) {
+        const row = (await db.select().from(coupons).where(
+          and(eq(coupons.restaurantId, storefront.restaurant.id), eq(coupons.code, cleanCoupon))
+        ).limit(1))[0];
+        if (!row) couponError = `Coupon "${cleanCoupon}" is not valid for this restaurant.`;
+        else {
+          const base = calculateAuthoritativeQuote({
+            lines, catalog,
+            packagingFeePaise: storefront.restaurant.packagingFeePaise,
+            deliveryFeePaise: storefront.restaurant.deliveryFeePaise,
+            taxPercent: parseFloat(String(storefront.restaurant.gstPercentage ?? "5")),
+          });
+          const r = validateCoupon({
+            coupon: {
+              code: row.code, discountType: row.discountType as "flat" | "percent",
+              discountValue: row.discountValue, minOrderPaise: row.minOrderPaise,
+              maxDiscountPaise: row.maxDiscountPaise, isActive: row.isActive,
+              startsAt: row.startsAt, endsAt: row.endsAt,
+              isNewCustomerOnly: row.isNewCustomerOnly,
+              totalUsageLimit: row.totalUsageLimit, perCustomerLimit: row.perCustomerLimit,
+            },
+            cartTotalPaise: base.itemTotalPaise, now: new Date(),
+          });
+          if (!r.valid) couponError = r.error;
+          else couponDiscountPaise = r.discountPaise;
+        }
+      }
+      const quote = calculateAuthoritativeQuote({
+        lines, catalog,
+        packagingFeePaise: storefront.restaurant.packagingFeePaise,
+        deliveryFeePaise: storefront.restaurant.deliveryFeePaise,
+        couponDiscountPaise,
+        taxPercent: parseFloat(String(storefront.restaurant.gstPercentage ?? "5")),
+      });
+      return { ...quote, couponError, couponApplied: couponDiscountPaise > 0 };
     }),
 
   // M-18: Rate limit payment verification to prevent abuse

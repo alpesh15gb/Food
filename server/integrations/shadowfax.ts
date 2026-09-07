@@ -158,6 +158,9 @@ class ShadowfaxProductionAdapter implements DeliveryProvider {
 
   // CONTRACT STATUS: UNVERIFIED — endpoint shape assumed from docs
   async checkRouteServiceability(pickup: { lat: number; lng: number }, drop: { lat: number; lng: number }) {
+    // Fail OPEN to the caller on missing creds (throw) vs checked-no (false):
+    // callers that can't distinguish must treat throw as NOT_CHECKED.
+    await this.getCredentials();
     try {
       const data = await this.request("/v1/serviceability/route", "POST", {
         pickup_lat: pickup.lat,
@@ -243,6 +246,8 @@ class ShadowfaxProductionAdapter implements DeliveryProvider {
   }
 
   async handleWebhook(payload: Record<string, unknown>, signature?: string): Promise<DeliveryStatusUpdate | null> {
+    // NOTE (P0 MP-001): best-effort path over parsed JSON — production MUST use
+    // handleShadowfaxWebhookRaw() via POST /webhooks/shadowfax (raw-body).
     const webhookSecret = process.env.SHADOWFAX_WEBHOOK_SECRET;
     if (!webhookSecret) {
       console.error("[Shadowfax] SHADOWFAX_WEBHOOK_SECRET not configured. Rejecting webhook.");
@@ -257,10 +262,25 @@ class ShadowfaxProductionAdapter implements DeliveryProvider {
       const rawBody = JSON.stringify(payload);
       const expectedSig = createHmac("sha256", webhookSecret).update(rawBody).digest("hex");
       if (expectedSig.length !== signature.length || !timingSafeEqual(Buffer.from(expectedSig), Buffer.from(signature))) {
-        console.warn("[Shadowfax] Webhook signature verification failed");
+        console.warn("[Shadowfax] Webhook signature verification failed (parsed-JSON path — use /webhooks/shadowfax for production)");
         return null;
       }
     }
+
+    return mapShadowfaxPayloadToUpdate(payload);
+  }
+
+  /** P0 MP-001: raw-body verified entry — signature already checked by the route. */
+  async handleWebhookVerified(payload: Record<string, unknown>): Promise<DeliveryStatusUpdate | null> {
+    return mapShadowfaxPayloadToUpdate(payload);
+  }
+}
+
+/**
+ * Shared Shadowfax payload → status mapping. Unknown statuses return null
+ * (never coerced to PENDING).
+ */
+function mapShadowfaxPayloadToUpdate(payload: Record<string, unknown>): DeliveryStatusUpdate | null {
 
     const status = payload.status as string;
     const orderId = payload.order_id as string;
@@ -294,7 +314,6 @@ class ShadowfaxProductionAdapter implements DeliveryProvider {
       note: payload.note as string | undefined,
       rawPayload: payload,
     };
-  }
 }
 
 // =============================================================================
@@ -460,6 +479,30 @@ export function getDeliveryProvider(restaurantId?: string): DeliveryProvider {
   _providerCache.set(cacheKey, provider);
   console.log(`[Delivery] Using ${provider.name} adapter for ${cacheKey}`);
   return provider;
+}
+
+/**
+ * True when Shadowfax can actually be called for this restaurant (env creds or
+ * per-restaurant vault secrets). When false, callers must fall back to
+ * radius-only ("direct") serviceability and manual dispatch — never fail
+ * closed with SHADOWFAX_NOT_SERVICEABLE for an unconfigured provider.
+ */
+export async function isDeliveryProviderConfigured(restaurantId?: string): Promise<boolean> {
+  if (process.env.SHADOWFAX_MOCK === "true" || process.env.DELIVERY_PROVIDER === "mock") return true;
+  if (process.env.SHADOWFAX_API_KEY && process.env.SHADOWFAX_MERCHANT_ID) return true;
+  if (restaurantId) {
+    try {
+      const canonical = await readIntegrationSecret(restaurantId, "shadowfax", "SHADOWFAX_API_KEY");
+      const merchant = await readIntegrationSecret(restaurantId, "shadowfax", "SHADOWFAX_MERCHANT_ID");
+      if (canonical && merchant) return true;
+      const legacyKey = await readIntegrationSecret(restaurantId, "delivery", "SHADOWFAX_API_KEY");
+      const legacyMerchant = await readIntegrationSecret(restaurantId, "delivery", "SHADOWFAX_MERCHANT_ID");
+      if (legacyKey && legacyMerchant) return true;
+    } catch {
+      return false;
+    }
+  }
+  return false;
 }
 
 /**

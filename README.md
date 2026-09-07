@@ -167,13 +167,20 @@ pnpm test
 
 ## Production Deployment
 
-1. Set all environment variables in production
-2. Configure Razorpay LIVE keys via admin panel → Integrations
-3. Configure Shadowfax credentials via admin panel → Integrations
+1. Set all environment variables in production (`JWT_SECRET`, `COOKIE_SECRET`, `SECRET_ENCRYPTION_KEY`, `OTP_HMAC_SECRET`, `LOCAL_ADMIN_TOKEN`, `DATABASE_URL`, `PLATFORM_DOMAIN`).
+2. Configure Razorpay LIVE keys via admin panel → Integrations (vault) or env.
+3. Configure Shadowfax credentials via admin panel → Integrations.
 4. Run `pnpm build && pnpm start`
-5. Set up reverse proxy (nginx/caddy) for HTTPS
-6. Configure Razorpay webhook URL: `https://your-domain.com/api/trpc/storefront.razorpayWebhook`
-7. Configure Shadowfax webhook URL: `https://your-domain.com/api/trpc/storefront.shadowfaxWebhook`
+5. Set up reverse proxy (nginx/caddy) for HTTPS (HSTS already sent by app).
+6. Configure Razorpay webhook URL (RAW-BODY, production): `https://your-domain.com/webhooks/razorpay`
+   with secret in `RAZORPAY_WEBHOOK_SECRET`. Verify at `GET /webhooks/health`.
+   Legacy tRPC `storefront.razorpayWebhook` remains for dashboard test buttons only.
+7. Configure Shadowfax webhook URL (RAW-BODY, production): `https://your-domain.com/webhooks/shadowfax`
+   with secret in `SHADOWFAX_WEBHOOK_SECRET`.
+8. Seed the live menu (admin → Menu Import), set fees/min-order/hours/outlet lat-lng/radius,
+   then prove one sandbox order PENDING_PAYMENT → PAID → PLACED → DELIVERED.
+9. Poll `admin.opsAlerts` from your uptime monitor (P0: paid-but-stuck orders, webhook backlog).
+10. Confirm `/robots.txt`, `/sitemap.xml`, `/terms`, `/privacy`, `/refund`, `/contact` all return 200.
 
 ## License
 

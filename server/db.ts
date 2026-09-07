@@ -60,8 +60,14 @@ function normalizePhone(phone: string | null | undefined): string | null {
   let p = digits;
   if (p.length === 12 && p.startsWith("91")) p = p.slice(2);
   if (p.length === 11 && p.startsWith("0")) p = p.slice(1);
-  if (p.length === 10 && /^[6-9]\d{9}$/.test(p)) return p;
-  return null;
+  if (p.length !== 10 || !/^[6-9]\d{9}$/.test(p)) return null;
+  // MP-006: block obviously fake numbers (repeated/sequential) that pass the
+  // 6-9 check but can never receive a call/SMS: 6666666666, 9876543210, etc.
+  if (/^(\d)\1{9}$/.test(p)) return null;
+  if (p === "9876543210" || p === "1234567890" || p === "0123456789") return null;
+  // Ascending/descending runs of 10 (e.g. 6789012345 is plausible — only block
+  // full 0-9 sequences, not any run, to avoid false positives).
+  return p;
 }
 
 /** Parse restaurant GST rate safely: finite 0-100, else fallback. */
@@ -1029,16 +1035,24 @@ export async function createOrderFromValidatedCart(args: {
       let couponDiscountPaise = 0;
       if (appliedCoupon) {
         await tx.execute(sql`SELECT id FROM coupons WHERE id = ${appliedCoupon.id} FOR UPDATE`);
-        // Cancelled/rejected orders release their coupon burn (usage rows for live
-        // orders only). PENDING_PAYMENT rows still count to prevent oversell.
-        // NOTE: burn-on-create blocks coupon retry with a fresh key after a failed
-        // payment — full fix defers burn to confirmPayment (razorpay seam).
+        // MP-004: coupon burn must not block legit retries after a failed payment.
+        // - Global totalUsageLimit: counts live holds, but stale PENDING_PAYMENT
+        //   (>30 min, abandoned) are excluded so dead holds don't oversell-block.
+        // - Per-customer limit: counts only CONFIRMED orders (PLACED+). A customer's
+        //   own unpaid PENDING never blocks their retry; concurrent double-spend
+        //   (overshoot by 1) is the accepted trade-off vs stranding discounts.
+        // Cancelled/rejected always release the burn.
         const totalUsageCount = Number((await tx.execute(sql`
           SELECT count(*)::int AS count FROM coupon_usage cu
           JOIN orders o ON o.id = cu.order_id
-          WHERE cu.coupon_id = ${appliedCoupon.id} AND o.status NOT IN ('CANCELLED', 'REJECTED')
+          WHERE cu.coupon_id = ${appliedCoupon.id}
+            AND o.status NOT IN ('CANCELLED', 'REJECTED')
+            AND (o.status NOT IN ('PENDING_PAYMENT', 'PAYMENT_CONFIRMED')
+              OR o.created_at > NOW() - INTERVAL '30 minutes')
         `) as unknown as { rows: Array<{ count: number }> }).rows?.[0]?.count ?? 0);
         // Guest limits by verified phone: guests share no customerId, so count by phone.
+        // MP-004: per-customer counts only CONFIRMED orders — own PENDING never
+        // blocks a retry after gateway failure.
         const isGuest = !profile?.mobileNumber;
         let customerUsageCount = 0;
         let customerOrderCount = 0;
@@ -1049,7 +1063,7 @@ export async function createOrderFromValidatedCart(args: {
             SELECT count(*)::int AS count FROM coupon_usage cu
             JOIN orders o ON o.id = cu.order_id
             WHERE cu.coupon_id = ${appliedCoupon.id} AND o.customer_phone = ${phone}
-              AND o.status NOT IN ('CANCELLED', 'REJECTED')
+              AND o.status NOT IN ('CANCELLED', 'REJECTED', 'PENDING_PAYMENT', 'PAYMENT_CONFIRMED')
           `);
           customerUsageCount = Number((usageByPhone as unknown as { rows: Array<{ count: number }> }).rows?.[0]?.count ?? 0);
         } else {
@@ -1057,7 +1071,7 @@ export async function createOrderFromValidatedCart(args: {
             SELECT count(*)::int AS count FROM coupon_usage cu
             JOIN orders o ON o.id = cu.order_id
             WHERE cu.coupon_id = ${appliedCoupon.id} AND cu.customer_id = ${customerId}
-              AND o.status NOT IN ('CANCELLED', 'REJECTED')
+              AND o.status NOT IN ('CANCELLED', 'REJECTED', 'PENDING_PAYMENT', 'PAYMENT_CONFIRMED')
           `) as unknown as { rows: Array<{ count: number }> }).rows?.[0]?.count ?? 0);
           customerOrderCount = Number((await tx.select({ count: sql<number>`count(*)::int` })
             .from(orders).where(eq(orders.customerId, customerId)))[0]?.count ?? 0);
@@ -1102,6 +1116,16 @@ export async function createOrderFromValidatedCart(args: {
         throw new Error(`Minimum order is ₹${Math.ceil(storefront.restaurant.minOrderPaise / 100)}.`);
       }
 
+      // MP-013: free orders (100% discount + free fees) skip Razorpay entirely.
+      // payments.amountPaise has CHECK > 0, so no payment row is created.
+      // Order goes straight PENDING_PAYMENT → PAYMENT_CONFIRMED → PLACED with
+      // paymentStatus PAID (₹0 settled by coupon) and full history for audit.
+      const isFreeOrder = finalQuote.totalPaise === 0;
+      if (!Number.isSafeInteger(finalQuote.totalPaise) || finalQuote.totalPaise < 0) {
+        throw new CartValidationError("Invalid order total.");
+      }
+      const initialStatus = isFreeOrder ? "PLACED" : "PENDING_PAYMENT";
+      const initialPaymentStatus = isFreeOrder ? "PAID" : "PENDING";
       const cleanEmail = args.customerEmail != null && String(args.customerEmail).trim() !== ""
         ? String(args.customerEmail).trim().slice(0, 320)
         : null;
@@ -1113,8 +1137,8 @@ export async function createOrderFromValidatedCart(args: {
         restaurantId: storefront.restaurant.id,
         outletId: selectedOutlet.id,
         customerId,
-        status: "PENDING_PAYMENT",
-        paymentStatus: "PENDING",
+        status: initialStatus,
+        paymentStatus: initialPaymentStatus,
         addressSnapshot,
         customerName,
         customerPhone: phone,
@@ -1180,24 +1204,27 @@ export async function createOrderFromValidatedCart(args: {
         id: id(),
         orderId,
         status: "PENDING_PAYMENT",
-        note: "Order created; awaiting payment.",
+        note: isFreeOrder ? "Free order created (100% discount)." : "Order created; awaiting payment.",
       });
 
-      // Zero-total (fully discounted + free fees) orders have no chargeable payment;
-      // the payments CHECK requires amount > 0, so record a Re 1 placeholder? No —
-      // fail closed with a clear message and let the caller (seam) handle free orders
-      // via a dedicated free-checkout path. Prevents CHECK-violation 500s.
-      if (!Number.isSafeInteger(finalQuote.totalPaise) || finalQuote.totalPaise < 0) {
-        throw new CartValidationError("Invalid order total.");
+      if (isFreeOrder) {
+        // Free order: record machine-gated PLACED history, no payment row.
+        await tx.insert(orderStatusHistory).values({
+          id: id(),
+          orderId,
+          status: "PLACED",
+          note: "Free order confirmed (₹0 settled by coupon).",
+        });
+      } else {
+        if (!Number.isSafeInteger(finalQuote.totalPaise) || finalQuote.totalPaise <= 0) {
+          throw new CartValidationError("Invalid order total.");
+        }
+        await tx.insert(payments).values({
+          id: id(),
+          orderId,
+          amountPaise: finalQuote.totalPaise,
+        });
       }
-      if (finalQuote.totalPaise === 0) {
-        throw new CartValidationError("Order total is zero. Free orders are not supported for online payment.");
-      }
-      await tx.insert(payments).values({
-        id: id(),
-        orderId,
-        amountPaise: finalQuote.totalPaise,
-      });
 
       // Record coupon usage (counts were locked above; unique(orderId) guards double-apply).
       if (cleanCoupon && finalQuote.couponDiscountPaise > 0 && appliedCoupon) {

@@ -1147,6 +1147,32 @@ export const adminRouter = router({
         .limit(input.limit);
     }),
 
+  // MP-008: money-critical ops alerts (poll from uptime monitor / on-call).
+  // Requires audit:read so only operators see cross-order aggregates.
+  opsAlerts: requirePermission("audit:read").input(z.object({
+    restaurantId: z.string().min(4).optional(),
+  }).optional())
+    .query(async () => {
+      const { getOpsAlerts } = await import("../monitoring");
+      return getOpsAlerts();
+    }),
+
+  // MP-010: global-admin role audit — lists users holding platform-wide admin
+  // (they bypass tenant checks). Keep this list to the VPS operator only.
+  globalAdmins: requirePermission("audit:read")
+    .query(async () => {
+      const db = await import("../db").then(m => m.getDb());
+      if (!db) return [];
+      const { users } = await import("../../drizzle/schema");
+      const { eq } = await import("drizzle-orm");
+      const rows = await db.select({
+        id: users.id, openId: users.openId, name: users.name,
+        email: users.email, role: users.role, lastSignedIn: users.lastSignedIn,
+      }).from(users).where(eq(users.role, "admin")).limit(100);
+      // Never return password hashes (not selected above by construction).
+      return rows.map(r => ({ ...r, email: r.email ? r.email.replace(/(^.).*(@.*$)/, "$1***$2") : null }));
+    }),
+
   // =========================================================================
   // Settings — Issue 8: requires settings:write for mutations
   // =========================================================================

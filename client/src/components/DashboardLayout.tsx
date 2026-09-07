@@ -30,7 +30,7 @@ import { startLogin } from "@/const";
 import { useIsMobile } from "@/hooks/useMobile";
 import { trpc } from "@/lib/trpc";
 import { Award, BarChart3, Bell, Box, ChefHat, FileUp, Globe, Grid3X3, Layers, LayoutDashboard, LogOut, Menu, PanelLeft, PlugZap, ReceiptText, RefreshCw, Settings2, ShieldCheck, Store, Tag, TriangleAlert, UtensilsCrossed, Users } from "lucide-react";
-import { CSSProperties, useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { useLocation } from "wouter";
 import { DashboardLayoutSkeleton } from './DashboardLayoutSkeleton';
 import { Button } from "./ui/button";
@@ -183,39 +183,12 @@ export function AdminError({ message, onRetry }: { message: string; onRetry?: ()
 
 const MOBILE_PRIMARY_SECTIONS = ["orders", "menu", "kds"] as const;
 
-const SIDEBAR_WIDTH_KEY = "sidebar-width";
-const DEFAULT_WIDTH = 280;
-const MIN_WIDTH = 200;
-const MAX_WIDTH = 480;
-
-function readSavedSidebarWidth(): number {
-  try {
-    const raw = localStorage.getItem(SIDEBAR_WIDTH_KEY);
-    const n = raw ? parseInt(raw, 10) : NaN;
-    // Corrupt values (NaN, out of range) fall back instead of emitting NaNpx.
-    if (!Number.isFinite(n)) return DEFAULT_WIDTH;
-    return Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, n));
-  } catch {
-    // Storage unavailable (SSR/private mode) — use the default width.
-    return DEFAULT_WIDTH;
-  }
-}
-
 export default function DashboardLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  const [sidebarWidth, setSidebarWidth] = useState(readSavedSidebarWidth);
   const { loading, user } = useAuth();
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(SIDEBAR_WIDTH_KEY, sidebarWidth.toString());
-    } catch {
-      // Quota/private-mode writes must never break the layout.
-    }
-  }, [sidebarWidth]);
 
   if (loading) {
     return <DashboardLayoutSkeleton />
@@ -246,14 +219,8 @@ export default function DashboardLayout({
   }
 
   return (
-    <SidebarProvider
-      style={
-        {
-          "--sidebar-width": `${sidebarWidth}px`,
-        } as CSSProperties
-      }
-    >
-      <DashboardLayoutContent setSidebarWidth={setSidebarWidth}>
+    <SidebarProvider>
+      <DashboardLayoutContent>
         {children}
       </DashboardLayoutContent>
     </SidebarProvider>
@@ -262,20 +229,16 @@ export default function DashboardLayout({
 
 type DashboardLayoutContentProps = {
   children: React.ReactNode;
-  setSidebarWidth: (width: number) => void;
 };
 
 function DashboardLayoutContent({
   children,
-  setSidebarWidth,
 }: DashboardLayoutContentProps) {
   const { user, logout } = useAuth();
   const [location, setLocation] = useLocation();
   const { state, toggleSidebar } = useSidebar();
   const isCollapsed = state === "collapsed";
-  const [isResizing, setIsResizing] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
-  const sidebarRef = useRef<HTMLDivElement>(null);
 
   const { slug, section } = parseAdminLocation(location);
   const base = slug ? `/admin/${slug}` : "/admin";
@@ -307,49 +270,12 @@ function DashboardLayoutContent({
 
   const isMobile = useIsMobile();
 
-  useEffect(() => {
-    if (isCollapsed) {
-      setIsResizing(false);
-    }
-  }, [isCollapsed]);
-
-  useEffect(() => {
-    const handleMouseMove = (e: MouseEvent) => {
-      if (!isResizing) return;
-
-      const sidebarLeft = sidebarRef.current?.getBoundingClientRect().left ?? 0;
-      const newWidth = e.clientX - sidebarLeft;
-      if (newWidth >= MIN_WIDTH && newWidth <= MAX_WIDTH) {
-        setSidebarWidth(newWidth);
-      }
-    };
-
-    const handleMouseUp = () => {
-      setIsResizing(false);
-    };
-
-    if (isResizing) {
-      document.addEventListener("mousemove", handleMouseMove);
-      document.addEventListener("mouseup", handleMouseUp);
-      document.body.style.cursor = "col-resize";
-      document.body.style.userSelect = "none";
-    }
-
-    return () => {
-      document.removeEventListener("mousemove", handleMouseMove);
-      document.removeEventListener("mouseup", handleMouseUp);
-      document.body.style.cursor = "";
-      document.body.style.userSelect = "";
-    };
-  }, [isResizing, setSidebarWidth]);
-
   return (
     <>
-      <div className="relative" ref={sidebarRef}>
+      <div className="relative">
         <Sidebar
           collapsible="icon"
           className="border-r-0"
-          disableTransition={isResizing}
         >
           <SidebarHeader className="h-16 justify-center">
             <div className="flex items-center gap-3 px-2 transition-all w-full">
@@ -360,12 +286,11 @@ function DashboardLayoutContent({
               >
                 <PanelLeft className="h-4 w-4 text-muted-foreground" />
               </button>
-              {!isCollapsed ? <div className="min-w-0"><span className="font-display block text-lg tracking-tight text-[#3f2c20]">Kitchen Admin</span><span className="block text-[9px] font-extrabold uppercase tracking-[0.16em] text-[#a06e53]">Operations desk</span></div> : null}
+              {!isCollapsed ? <div className="min-w-0"><span className="block text-lg font-extrabold tracking-tight text-[#3f2c20]">Kitchen Admin</span><span className="block text-[10px] font-bold uppercase tracking-wider text-[#a06e53]">Operations desk</span></div> : null}
             </div>
           </SidebarHeader>
 
           <SidebarContent className="gap-0 px-1">
-            {!isCollapsed && <div className="mx-2 mt-3 rounded-2xl bg-[#2A3A0C] p-4 text-white"><p className="text-[10px] font-extrabold uppercase tracking-[0.16em] text-[#e9bda2]">Kitchen status</p><p className="font-display mt-2 text-lg">Ready to configure</p><p className="mt-1 text-xs leading-relaxed text-white/65">Add your menu, then switch the kitchen on when you are ready for real orders.</p></div>}
             <SidebarMenu className="px-2 py-4">
               {visibleItems.map(item => {
                 const isActive = isActiveSection(item.section);
@@ -375,7 +300,7 @@ function DashboardLayoutContent({
                       isActive={isActive}
                       onClick={() => setLocation(pathFor(item.section))}
                       tooltip={item.label}
-                      className={`h-11 rounded-xl transition-all font-semibold ${isActive ? "bg-[#E9EFD6] text-[#B95509] hover:bg-[#E9EFD6]" : "text-[#6d5140] hover:bg-[#f8eee6]"}`}
+                      className={`h-10 rounded-lg transition-all font-semibold ${isActive ? "bg-[#f3e3d3] text-[#9C4A07] hover:bg-[#f3e3d3]" : "text-[#6d5140] hover:bg-[#f8eee6]"}`}
                     >
                       <item.icon
                         className={`h-4 w-4 ${isActive ? "text-primary" : ""}`}
@@ -419,20 +344,12 @@ function DashboardLayoutContent({
             </DropdownMenu>
           </SidebarFooter>
         </Sidebar>
-        <div
-          className={`absolute top-0 right-0 w-1 h-full cursor-col-resize hover:bg-primary/20 transition-colors ${isCollapsed ? "hidden" : ""}`}
-          onMouseDown={() => {
-            if (isCollapsed) return;
-            setIsResizing(true);
-          }}
-          style={{ zIndex: 50 }}
-        />
       </div>
 
       <SidebarInset className="min-h-screen bg-[#f7f2eb]">
         {isMobile && (
           <div className="sticky top-0 z-40 flex h-16 items-center justify-between border-b border-[#D8DFC0] bg-[#fffdf9]/95 px-4 backdrop-blur">
-            <div className="min-w-0"><p className="text-[9px] font-extrabold uppercase tracking-[0.16em] text-[#a06e53]">Kitchen Admin</p><span className="font-display block truncate text-xl text-[#3f2c20]">{sectionTitle(section)}</span></div>
+            <div className="min-w-0"><p className="text-[10px] font-bold uppercase tracking-wider text-[#a06e53]">Kitchen Admin</p><span className="block truncate text-lg font-extrabold text-[#3f2c20]">{sectionTitle(section)}</span></div>
             <SidebarTrigger className="h-10 w-10 rounded-xl border border-[#D8DFC0] bg-[#E9EFD6] text-[#B95509]" aria-label="Open operations navigation"><Menu className="h-5 w-5" /></SidebarTrigger>
           </div>
         )}

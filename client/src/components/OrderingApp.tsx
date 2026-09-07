@@ -8,7 +8,7 @@ import { useLocation, useSearch } from "wouter";
 import { toast } from "sonner";
 import {
   ArrowLeft, ArrowRight, Bike, Check, ChevronRight, Clock3, Copy,
-  Flame, MapPin, Minus, PackageCheck,
+  MapPin, Minus, PackageCheck,
   Plus, Search, ShoppingBag, Sparkles, Store,
   TicketPercent, UserRound, Utensils, X,
 } from "lucide-react";
@@ -22,6 +22,7 @@ import { Input } from "@/components/ui/input";
 import { formatINR, type FoodKind } from "@/lib/types";
 import { trpc } from "@/lib/trpc";
 import { usePlatformHost } from "@/lib/platform";
+import { funnel } from "@/lib/funnel";
 
 const PlatformLanding = lazy(() => import("@/pages/PlatformLanding"));
 import {
@@ -54,7 +55,12 @@ function normalizePhone(raw: string): string {
 
 /** Fail fast on non-Indian numbers (server enforces 6–9 start authoritatively). */
 function isPlausibleIndianPhone(raw: string): boolean {
-  return /^[6-9]\d{9}$/.test(normalizePhone(raw));
+  const p = normalizePhone(raw);
+  if (!/^[6-9]\d{9}$/.test(p)) return false;
+  // MP-006: mirror server fake-number blocklist so the user learns instantly.
+  if (/^(\d)\1{9}$/.test(p)) return false;
+  if (p === "9876543210" || p === "1234567890" || p === "0123456789") return false;
+  return true;
 }
 
 /** Server caps a line at 20 units — the client clamps to match, never submits over. */
@@ -113,10 +119,16 @@ function FoodDot({ kind }: { kind: FoodKind }) {
   );
 }
 
-function BrandMark() {
+function BrandMark({ name }: { name?: string }) {
+  const initials = (name ?? "")
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((w) => w[0]?.toUpperCase() ?? "")
+    .join("") || "M";
   return (
     <div className="grid h-10 w-10 place-items-center rounded-xl bg-gradient-to-br from-[#B95509] to-[#E8720C] text-white font-display text-lg font-bold">
-      SG
+      {initials}
     </div>
   );
 }
@@ -204,10 +216,12 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
     if (!restaurant?.name) return;
     const prev = document.title;
     document.title = `${restaurant.name} | Direct Ordering`;
+    // MP-009: funnel — deduped per restaurant per page load.
+    funnel("restaurant_viewed", { slug: storefrontSlug, dedupeKey: `rv:${storefrontSlug}` });
     return () => {
       document.title = prev;
     };
-  }, [restaurant?.name]);
+  }, [restaurant?.name, storefrontSlug]);
 
   useEffect(() => {
     if (!storefront?.theme) return;
@@ -256,6 +270,9 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
   );
 
   const [cart, setCart] = useState<CartLine[]>([]);
+  // MP-012: single-restaurant cart — remember which kitchen the cart belongs to.
+  const [cartSlug, setCartSlug] = useState<string>(() => localStorage.getItem("ck_cart_slug") ?? "");
+  const [slugConflict, setSlugConflict] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   // Restaurant logo fallback: show the monogram when no logo or it fails.
   const [logoBroken, setLogoBroken] = useState(false);
@@ -341,6 +358,25 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
   useEffect(() => {
     idempotencyKeyRef.current = null;
   }, [cart, deliveryAddress, customerPhone, couponCode, deliveryNotes, cutlery]);
+
+  // MP-012: single-restaurant cart guard — switching kitchens with items warns first.
+  useEffect(() => {
+    if (!storefrontSlug || cart.length === 0) return;
+    if (!cartSlug) {
+      setCartSlug(storefrontSlug);
+      localStorage.setItem("ck_cart_slug", storefrontSlug);
+      return;
+    }
+    if (cartSlug !== storefrontSlug) setSlugConflict(storefrontSlug);
+  }, [storefrontSlug, cart.length, cartSlug]);
+
+  // Cart emptied (order placed / removed) releases the kitchen lock.
+  useEffect(() => {
+    if (cart.length === 0 && cartSlug) {
+      setCartSlug("");
+      try { localStorage.removeItem("ck_cart_slug"); } catch { /* ignore */ }
+    }
+  }, [cart.length, cartSlug]);
 
   // Resend-cooldown countdown (driven by the server's retryAfterSeconds).
   useEffect(() => {
@@ -441,6 +477,14 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
       return;
     }
     if (item.availability !== "AVAILABLE") return;
+    // MP-012: stamp the cart to this kitchen on first add.
+    setCartSlug((prev) => {
+      if (!prev) {
+        try { localStorage.setItem("ck_cart_slug", storefrontSlug); } catch { /* ignore */ }
+        return storefrontSlug;
+      }
+      return prev;
+    });
     const lineId = `${item.id}-default`;
     const currentQty = cartQtyRef.current.get(item.id) ?? 0;
     if (currentQty >= MAX_LINE_QTY) {
@@ -467,9 +511,10 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
             },
           ];
     });
+    funnel("add_to_cart", { slug: storefrontSlug });
     if (!opts?.silent) toast.success(`${item.name} added to your order`);
     },
-    [restaurantOpen, closureMessage],
+    [restaurantOpen, closureMessage, storefrontSlug],
   );
 
   // Decrement a simple line from a menu-row stepper (qty → 0 removes it).
@@ -725,12 +770,14 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
     // Serviceability pre-check — server-authoritative, blocks out-of-area orders.
     processingRef.current = true;
     setProcessing(true);
+    funnel("checkout_started", { slug: storefrontSlug });
     try {
       const svcResult = await serviceability.refetch();
       const service = svcResult.data;
       if (!service?.serviceable) {
         stopProcessing();
         const reason = (service as { reason?: string } | undefined)?.reason ?? "";
+        funnel("address_not_serviceable", { slug: storefrontSlug, reason: reason.slice(0, 64) });
         toast.error("Sorry, we can't deliver to this location.", {
           description: reason === "OUTSIDE_DELIVERY_RADIUS"
             ? "Your location is outside our current delivery area."
@@ -796,6 +843,20 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
         return;
       }
 
+      // MP-013: free orders (₹0 after coupon) skip Razorpay — already PLACED.
+      if ((created as { freeOrder?: boolean }).freeOrder) {
+        const freeToken = (created as { trackingToken?: string }).trackingToken;
+        stopProcessing();
+        setCart([]);
+        idempotencyKeyRef.current = null;
+        toast.success("Order confirmed — no payment needed.");
+        navigate(
+          `/${storefrontSlug}/confirmation?order=${created.orderNumber}` +
+          (freeToken ? `&token=${freeToken}` : "")
+        );
+        return;
+      }
+
       // The client total is an estimate: the server repriced everything.
       // Never charge blindly on a mismatch — show the authoritative amount.
       const clientEstimatePaise = Math.round(grandTotal * 100);
@@ -829,6 +890,7 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
 
       const RazorpayConstructor = window.Razorpay;
       if (!RazorpayConstructor) throw new Error("Razorpay not loaded");
+      funnel("payment_started", { slug: storefrontSlug });
       new RazorpayConstructor({
         key: created.keyId,
         amount: created.amountPaise,
@@ -848,11 +910,14 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
             // one-tap accidental reorder of the same items.
             setCart([]);
             idempotencyKeyRef.current = null;
+            funnel("payment_successful", { slug: storefrontSlug });
+            funnel("order_created", { slug: storefrontSlug });
             // Persist the tracking token so confirmation/tracking can authenticate.
             navigate(
               `/${storefrontSlug}/confirmation?order=${created.orderNumber}&token=${created.trackingToken}`
             );
           } catch (error) {
+            funnel("payment_failed", { slug: storefrontSlug, reason: "verify_failed" });
             toast.error(
               error instanceof Error
                 ? error.message
@@ -863,14 +928,19 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
           }
         },
         modal: {
-          ondismiss: () => stopProcessing(),
+          ondismiss: () => {
+            funnel("payment_failed", { slug: storefrontSlug, reason: "dismissed" });
+            stopProcessing();
+          },
         },
       }).open();
     } catch (error) {
       stopProcessing();
-      toast.error(
-        error instanceof Error ? error.message : "We couldn't start payment."
-      );
+      const msg = error instanceof Error ? error.message : "We couldn't start payment.";
+      if (/coupon/i.test(msg)) funnel("coupon_failed", { slug: storefrontSlug, reason: msg.slice(0, 64) });
+      else if (/unavailable/i.test(msg)) funnel("item_unavailable", { slug: storefrontSlug, reason: msg.slice(0, 64) });
+      else funnel("payment_failed", { slug: storefrontSlug, reason: "initiate_failed" });
+      toast.error(msg);
     }
   };
 
@@ -991,70 +1061,47 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
           </div>
         )}
 
-        {/* Hero Banner */}
-        <section className="relative overflow-hidden bg-[#22330A] text-white">
-          {!lowData && restaurant.bannerImage ? (
-            <SmartImage
-              src={restaurant.bannerImage}
-              alt={`${restaurant.name} kitchen`}
-              ratio="16/9"
-              eager
-              critical
-              className="absolute inset-0"
-              imgClassName="opacity-60"
-            />
-          ) : null}
-          <div className="absolute inset-0 bg-gradient-to-r from-[#141F04]/95 via-[#2E420C]/85 to-[#2E420C]/30" />
-          <div className="relative mx-auto flex min-h-[280px] max-w-[1440px] items-end px-4 pb-7 pt-16 sm:px-6 lg:min-h-[320px] lg:px-10 lg:pb-10">
-            <div className="rise-in max-w-xl">
-              <div className="mb-4 flex items-center gap-3">
-                <div className="grid h-14 w-14 place-items-center overflow-hidden rounded-2xl bg-white/10 shadow-lg backdrop-blur">
-                  {restaurant.logo && !logoBroken ? (
-                    <img
-                      src={restaurant.logo}
-                      alt={`${restaurant.name} logo`}
-                      loading="eager"
-                      decoding="async"
-                      className="h-full w-full object-cover"
-                      onError={() => setLogoBroken(true)}
-                    />
-                  ) : (
-                    <BrandMark />
-                  )}
-                </div>
-                <span className="rounded-full border border-white/25 bg-white/10 px-3 py-1 text-xs font-bold tracking-wide backdrop-blur">
-                  Direct from the kitchen
-                </span>
-              </div>
-              <h1 className="font-display text-4xl leading-none sm:text-5xl">
+        {/* Restaurant header — compact card, no tall hero. Banner photos are
+            skipped: the live banner 404s and a 300px photo pushes the menu
+            below the fold on phones. Brand colour carries identity instead. */}
+        <section className="border-b border-[#eadac9] bg-[#fffdf9]">
+          <div className="mx-auto flex max-w-[1440px] items-center gap-3 px-4 py-4 sm:px-6 lg:px-10">
+            <div className="grid h-12 w-12 shrink-0 place-items-center overflow-hidden rounded-2xl bg-[#f3e8dc]">
+              {restaurant.logo && !logoBroken ? (
+                <img
+                  src={restaurant.logo}
+                  alt={`${restaurant.name} logo`}
+                  loading="eager"
+                  decoding="async"
+                  className="h-full w-full object-cover"
+                  onError={() => setLogoBroken(true)}
+                />
+              ) : (
+                <BrandMark name={restaurant.name} />
+              )}
+            </div>
+            <div className="min-w-0 flex-1">
+              <h1 className="truncate text-xl font-extrabold leading-tight text-[#2A3A0C]">
                 {restaurant.name}
               </h1>
-              <p className="mt-3 text-sm text-white/75">
-                {restaurant.cuisines.join(" • ")}
-              </p>
-              {restaurant.description && (
-                <p className="mt-2 max-w-md text-xs text-white/55 leading-relaxed">
-                  {restaurant.description}
-                </p>
-              )}
-              <div className="mt-5 flex flex-wrap gap-2 text-xs font-semibold">
-                <MetaPill
-                  icon={<Clock3 className="h-3.5 w-3.5" />}
-                  text={restaurant.eta}
-                />
+              <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs font-semibold text-[#5F6B3C]">
+                <span className="inline-flex items-center gap-1">
+                  <Clock3 className="h-3 w-3 shrink-0" aria-hidden="true" />
+                  {restaurant.eta}
+                </span>
                 {restaurant.deliveryFee > 0 && (
-                  <MetaPill
-                    icon={<Bike className="h-3.5 w-3.5" />}
-                    text={`Delivery ₹${restaurant.deliveryFee}`}
-                  />
+                  <span className="inline-flex items-center gap-1">
+                    <Bike className="h-3 w-3 shrink-0" aria-hidden="true" />
+                    {formatINR(restaurant.deliveryFee)} delivery
+                  </span>
                 )}
                 {restaurant.minOrder > 0 && (
-                  <MetaPill
-                    icon={<ShoppingBag className="h-3.5 w-3.5" />}
-                    text={`Min ₹${restaurant.minOrder}`}
-                  />
+                  <span className="inline-flex items-center gap-1">
+                    <ShoppingBag className="h-3 w-3 shrink-0" aria-hidden="true" />
+                    Min {formatINR(restaurant.minOrder)}
+                  </span>
                 )}
-              </div>
+              </p>
             </div>
           </div>
         </section>
@@ -1073,17 +1120,17 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
               </span>
             </div>
           )}
-          <section className="relative -mt-1 border-x border-b border-[#eadac9] bg-[#fffdf9] px-4 py-3 shadow-sm sm:px-5 lg:rounded-b-2xl">
+          <section className="mt-4 rounded-xl border border-[#e5d9cb] bg-white px-4 py-3 shadow-sm sm:px-5">
             <button
               onClick={() => setLocationOpen(true)}
               className="flex w-full items-center justify-between gap-3 text-left"
             >
               <div className="flex min-w-0 items-center gap-3">
-                <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-[#E9EFD6] text-[#B95509]">
+                <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-[#f3e8dc] text-[#B95509]">
                   <MapPin className="h-4 w-4" />
                 </span>
                 <div className="min-w-0">
-                  <p className="text-xs font-extrabold uppercase tracking-[0.14em] text-[#5F6B3C]">
+                  <p className="text-[11px] font-bold uppercase tracking-wider text-[#857262]">
                     {deliveryAddress?.confirmed ? "Delivering to" : "Set delivery location"}
                   </p>
                   {deliveryAddress?.confirmed ? (
@@ -1136,8 +1183,9 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
 
             {/* Main Menu Content */}
             <section className="min-w-0">
-              {/* Search + category rail (sticky on mobile, static on desktop) */}
-              <div className="sticky top-[76px] z-20 -mx-4 bg-[#fffaf3]/95 px-4 pb-2 pt-4 backdrop-blur sm:-mx-6 sm:px-6 lg:static lg:mx-0 lg:bg-transparent lg:px-0 lg:pt-0">
+              {/* Search + category rail (sticky on mobile, static on desktop).
+                  Tightened so sticky chrome stays under ~180px with the header. */}
+              <div className="sticky top-16 z-20 -mx-4 bg-[#fffaf3]/95 px-4 pb-2 pt-3 backdrop-blur sm:-mx-6 sm:px-6 lg:static lg:mx-0 lg:bg-transparent lg:px-0 lg:pt-0">
                 <div className="flex gap-2">
                   <div className="relative flex-1">
                     <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-[#5F6B3C]" />
@@ -1149,8 +1197,8 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
                       type="search"
                       value={query}
                       onChange={(event) => setQuery(event.target.value)}
-                      placeholder="Search dishes, cuisines, or categories"
-                      className="h-12 rounded-2xl border-[#D8DFC0] bg-white pl-11 pr-12 text-sm shadow-sm placeholder:text-[#ac8b73]"
+                      placeholder="Search dishes"
+                      className="h-11 rounded-xl border-[#D8DFC0] bg-white pl-11 pr-12 text-sm shadow-sm placeholder:text-[#ac8b73]"
                     />
                     {query && (
                       <button
@@ -1166,7 +1214,7 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
                 </div>
 
                 {/* Mobile Category Rail — scroll-spy chips */}
-                <div role="group" aria-label="Menu categories" className="scrollbar-hide mt-3 flex gap-2 overflow-x-auto pb-1 lg:hidden">
+                <div role="group" aria-label="Menu categories" className="scrollbar-hide mt-2 flex gap-2 overflow-x-auto pb-1 lg:hidden">
                   {categories.map((category) => {
                     const isActive = activeCategory === category.name;
                     return (
@@ -1269,6 +1317,7 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
                 onIncrement={incrementSilent}
                 onDecrement={decrementSimple}
                 onSpyCategory={setActiveCategory}
+                onClearSearch={clearSearch}
               />
             </section>
 
@@ -1298,6 +1347,20 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
             </aside>
           </div>
         </div>
+        <footer className="mx-auto max-w-[1440px] px-4 pb-10 sm:px-6 lg:px-10">
+          <nav aria-label="Legal" className="flex flex-wrap items-center justify-center gap-x-1 gap-y-1 border-t border-[#eadac9] pt-5 text-xs font-bold text-[#856653]">
+            <a href="/terms" className="min-h-[44px] px-3 py-3 hover:text-[#B95509]">Terms</a>
+            <span aria-hidden="true">·</span>
+            <a href="/privacy" className="min-h-[44px] px-3 py-3 hover:text-[#B95509]">Privacy</a>
+            <span aria-hidden="true">·</span>
+            <a href="/refund" className="min-h-[44px] px-3 py-3 hover:text-[#B95509]">Refunds & Cancellation</a>
+            <span aria-hidden="true">·</span>
+            <a href="/contact" className="min-h-[44px] px-3 py-3 hover:text-[#B95509]">Contact</a>
+          </nav>
+          <p className="mt-1 text-center text-[11px] leading-relaxed text-[#ac8b73]">
+            Prices include GST as shown at payment. Keep your confirmation link private — it carries your order token.
+          </p>
+        </footer>
       </main>
 
       {/* Mobile Cart CTA */}
@@ -1308,6 +1371,48 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
           onCart={() => navigate(`/${storefrontSlug}/cart`)}
         />
       )}
+
+      {/* MP-012: single-restaurant cart — switching kitchens warns before replace. */}
+      <Dialog open={slugConflict !== null} onOpenChange={(open) => { if (!open) setSlugConflict(null); }}>
+        <DialogContent className="max-w-sm rounded-2xl">
+          <DialogHeader>
+            <DialogTitle>Start a new order?</DialogTitle>
+            <DialogDescription>
+              Your cart has items from another kitchen. Each order is prepared by one kitchen only.
+              Starting here will clear your current cart.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex gap-2 pt-2">
+            <Button
+              variant="outline"
+              className="h-12 flex-1 rounded-xl"
+              onClick={() => {
+                // Stay: go back to the cart's kitchen.
+                const back = cartSlug ? `/${cartSlug}` : "/";
+                setSlugConflict(null);
+                navigate(back);
+              }}
+            >
+              Keep my cart
+            </Button>
+            <Button
+              className="h-12 flex-1 rounded-xl bg-[#B95509] hover:bg-[#9C4A07]"
+              onClick={() => {
+                setCart([]);
+                idempotencyKeyRef.current = null;
+                if (slugConflict) {
+                  setCartSlug(slugConflict);
+                  try { localStorage.setItem("ck_cart_slug", slugConflict); } catch { /* ignore */ }
+                }
+                setSlugConflict(null);
+                toast.info("Started a fresh cart for this kitchen.");
+              }}
+            >
+              Start fresh
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Customization Drawer */}
       <CustomizationDrawer
@@ -1582,16 +1687,16 @@ function TopBar({
 }) {
   return (
     <header className="sticky top-0 z-40 border-b border-[#eadbce] bg-[#fffaf3]/95 backdrop-blur">
-      <div className="mx-auto flex h-[76px] max-w-[1440px] items-center justify-between gap-2 px-4 sm:px-6 lg:px-10">
+      <div className="mx-auto flex h-16 max-w-[1440px] items-center justify-between gap-2 px-4 sm:px-6 lg:px-10">
         <button
           onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
           aria-label={`${restaurantName} — back to top`}
           title={restaurantName}
           className="flex min-w-0 items-center gap-2.5 text-left"
         >
-          <BrandMark />
+          <BrandMark name={restaurantName} />
           <span className="min-w-0">
-            <span className="font-display block truncate text-xl leading-tight text-[#2A3A0C]">
+            <span className="block truncate text-lg font-extrabold leading-tight text-[#2A3A0C]">
               {restaurantName}
             </span>
             {/* Single compact meta row — fixed height so it never shifts layout */}
@@ -1647,15 +1752,6 @@ function TopBar({
         </nav>
       </div>
     </header>
-  );
-}
-
-function MetaPill({ icon, text }: { icon: React.ReactNode; text: string }) {
-  return (
-    <span className="inline-flex items-center gap-1.5 rounded-full border border-white/20 bg-white/10 px-3 py-2 backdrop-blur">
-      {icon}
-      {text}
-    </span>
   );
 }
 
@@ -1729,17 +1825,17 @@ const CollectionCard = memo(function CollectionCard({
   item: StorefrontMenuItem;
 }) {
   return (
-    <div className="menu-cv flex w-[220px] shrink-0 snap-start gap-3 rounded-2xl border border-[#D8DFC0] bg-[#fffdf9] p-3 shadow-sm">
+    <div className="flex w-[220px] shrink-0 snap-start gap-3 rounded-xl border border-[#e5d9cb] bg-white p-3 shadow-sm">
       <SmartImage
         src={item.image}
         alt={item.name}
         ratio="1/1"
         fallbackLabel={item.name}
-        className="h-20 w-20 shrink-0 rounded-xl"
+        className="h-20 w-20 shrink-0 rounded-lg"
       />
       <div className="flex min-w-0 flex-1 flex-col justify-between">
         <div className="min-w-0">
-          <p className="truncate text-xs font-extrabold text-[#2A3A0C]">
+          <p className="truncate text-xs font-bold text-[#2A3A0C]">
             {item.name}
           </p>
           <p className="mt-0.5 text-xs font-bold tabular-nums text-[#B95509]">
@@ -1749,9 +1845,9 @@ const CollectionCard = memo(function CollectionCard({
         <button
           onClick={() => onAdd(item)}
           disabled={disabled}
-          className="mt-1 min-h-[44px] w-full rounded-lg border border-[#B95509] bg-white px-2 py-1 text-xs font-extrabold text-[#B95509] hover:bg-[#B95509] hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+          className="mt-1 min-h-[44px] w-full rounded-lg border border-[#d8c3ab] bg-white px-2 py-1 text-xs font-bold text-[#B95509] hover:bg-[#B95509] hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {disabled ? "Closed" : "ADD"}
+          {disabled ? "Closed" : item.customizable ? "ADD +" : "ADD"}
         </button>
       </div>
     </div>
@@ -1769,6 +1865,7 @@ const MenuStream = memo(function MenuStream({
   onIncrement,
   onDecrement,
   onSpyCategory,
+  onClearSearch,
 }: {
   items: StorefrontMenuItem[];
   categories: Array<{ id: string; name: string }>;
@@ -1780,6 +1877,7 @@ const MenuStream = memo(function MenuStream({
   onIncrement: (item: StorefrontMenuItem) => void;
   onDecrement: (item: StorefrontMenuItem) => void;
   onSpyCategory: (name: string) => void;
+  onClearSearch?: () => void;
 }) {
   const searching = query.trim().length > 0;
 
@@ -1831,16 +1929,22 @@ const MenuStream = memo(function MenuStream({
   if (searching) {
     if (items.length === 0)
       return (
-        <div className="ticket-edge mt-5 bg-[#fffdf8] p-9 text-center shadow-sm">
+        <div className="rounded-2xl border border-[#e5d9cb] mt-5 bg-[#fffdf8] p-9 text-center shadow-sm">
           <div className="mx-auto grid h-14 w-14 place-items-center rounded-full bg-[#E9EFD6] text-[#B95509]">
             <Utensils className="h-6 w-6" />
           </div>
           <h2 className="font-display mt-4 text-2xl">
-            No dishes found
+            No dishes for “{query.trim()}”
           </h2>
           <p className="mt-2 text-sm text-[#856855]">
-            Try a different search, or browse the categories below.
+            Check spelling (e.g. “piza” → “pizza”), try a shorter word like “veg” or “rice”,
+            or browse the categories below.
           </p>
+          {onClearSearch && (
+            <Button onClick={onClearSearch} variant="outline" className="mt-5 h-12 rounded-xl border-[#D8DFC0] px-6 font-extrabold">
+              Clear search
+            </Button>
+          )}
         </div>
       );
 
@@ -1848,14 +1952,14 @@ const MenuStream = memo(function MenuStream({
       <div className="space-y-3 pb-3">
         <div className="mb-4 flex items-end justify-between">
           <div>
-            <p className="text-xs font-extrabold uppercase tracking-[0.16em] text-[#5F6B3C]">
-              Fresh from the kitchen
+            <p className="text-xs font-bold uppercase tracking-wider text-[#857262]">
+              Search results
             </p>
-            <h2 className="font-display mt-1 text-3xl text-[#2A3A0C]">
+            <h2 className="mt-1 text-xl font-extrabold text-[#2A3A0C]">
               What we found
             </h2>
           </div>
-          <span role="status" aria-live="polite" className="text-xs font-bold tabular-nums text-[#5F6B3C]">
+          <span role="status" aria-live="polite" className="text-xs font-semibold tabular-nums text-[#857262]">
             {items.length} dish{items.length !== 1 ? "es" : ""}
           </span>
         </div>
@@ -1869,7 +1973,7 @@ const MenuStream = memo(function MenuStream({
   // state — otherwise the page below the rail is silently blank.
   if (!searching && categories.length === 0) {
     return (
-      <div className="ticket-edge mt-5 bg-[#fffdf8] p-9 text-center shadow-sm">
+      <div className="rounded-2xl border border-[#e5d9cb] mt-5 bg-[#fffdf8] p-9 text-center shadow-sm">
         <div className="mx-auto grid h-14 w-14 place-items-center rounded-full bg-[#E9EFD6] text-[#B95509]">
           <Utensils className="h-6 w-6" />
         </div>
@@ -1895,10 +1999,10 @@ const MenuStream = memo(function MenuStream({
             className="section-anchor"
           >
             <div className="mb-3 flex items-end justify-between">
-              <h2 className="font-display text-2xl text-[#2A3A0C]">
+              <h2 className="text-lg font-extrabold text-[#2A3A0C]">
                 {category.name}
               </h2>
-              <span className="text-xs font-bold tabular-nums text-[#5F6B3C]">
+              <span className="text-xs font-semibold tabular-nums text-[#8a7a68]">
                 {catItems.length} dish{catItems.length !== 1 ? "es" : ""}
               </span>
             </div>
@@ -1942,7 +2046,7 @@ const MenuCard = memo(function MenuCard({
 
   return (
     <article
-      className={`menu-cv flex gap-3 rounded-2xl border border-[#D8DFC0] bg-[#fffdf9] p-3 shadow-[0_6px_18px_rgba(89,55,31,0.05)] sm:p-4 ${
+      className={`menu-cv flex gap-3 rounded-xl border border-[#e5d9cb] bg-white p-3 shadow-sm sm:p-3.5 ${
         unavailable ? "opacity-70" : ""
       }`}
     >
@@ -1950,61 +2054,44 @@ const MenuCard = memo(function MenuCard({
         <div className="flex items-center gap-1.5">
           <FoodDot kind={item.kind} />
           {item.isBestseller && (
-            <span className="rounded-full bg-[#f7e6ca] px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-[0.08em] text-[#9c5a21]">
+            <span className="rounded-full bg-[#f7e6ca] px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[#9c5a21]">
               Bestseller
             </span>
           )}
-          {item.tag && item.tag !== "Bestseller" && (
-            <span className="max-w-28 truncate rounded-full bg-[#e8f5e9] px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-[0.08em] text-[#2e7d32]">
-              {item.tag}
-            </span>
-          )}
-          {item.spiceLevel != null && item.spiceLevel > 0 && (
-            <span
-              className="inline-flex items-center gap-0.5 text-[#B95509]"
-              role="img"
-              aria-label={`Spice level ${Math.min(item.spiceLevel, 5)} of 5`}
-              title={`Spice level: ${Math.min(item.spiceLevel, 5)}/5`}
-            >
-              <Flame className="h-3.5 w-3.5" aria-hidden="true" />
-            </span>
-          )}
         </div>
-        <h3 className="font-display mt-1.5 text-[17px] leading-snug text-[#2A3A0C]">
+        <h3 className="mt-1 text-[15px] font-bold leading-snug text-[#2A3A0C]">
           {item.name}
         </h3>
-        <p className="mt-0.5 flex items-baseline gap-2 text-sm font-extrabold tabular-nums text-[#2A3A0C]">
+        <p className="mt-0.5 flex items-baseline gap-2 text-sm font-bold tabular-nums text-[#2A3A0C]">
           {formatINR(item.price)}
           {hasDiscount && (
-            <span className="text-xs font-bold text-[#999] line-through">
+            <span className="text-xs font-semibold text-[#a89880] line-through">
               {formatINR(item.originalPrice!)}
             </span>
           )}
         </p>
-        <p className="clamp-2 mt-1 line-clamp-2 text-xs leading-relaxed text-[#886a57]">
+        <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-[#857262]">
           {item.description}
         </p>
-        <p className="mt-1.5 text-[11px] font-bold text-[#9d7b64]">
-          {unavailable
-            ? (disabled ? "Kitchen closed" : item.availableNote || "Unavailable right now")
-            : item.customizable
-              ? "Customisable"
-              : item.isBestseller
-                ? "Loved by regulars"
-                : "Prepared fresh"}
-        </p>
+        {(unavailable || item.customizable) && (
+          <p className="mt-1 text-[11px] font-semibold text-[#9d7b64]">
+            {unavailable
+              ? (disabled ? "Kitchen closed" : item.availableNote || "Unavailable right now")
+              : "Customisable — tap to choose options"}
+          </p>
+        )}
       </div>
-      <div className="w-[120px] shrink-0 sm:w-[144px]">
+      <div className="w-[104px] shrink-0 sm:w-[120px]">
         <div className="relative">
           <SmartImage
             src={item.image}
             alt={item.name}
             ratio="1/1"
             fallbackLabel={item.name}
-            className="rounded-xl"
+            className="rounded-lg"
           />
           {unavailable && (
-            <div className="absolute inset-0 grid place-items-center rounded-xl bg-[#3a251b]/45 px-2 text-center text-xs font-extrabold text-white">
+            <div className="absolute inset-0 grid place-items-center rounded-lg bg-[#3a251b]/45 px-2 text-center text-xs font-bold text-white">
               {disabled
                 ? "Kitchen closed"
                 : item.availability === "SOLD_OUT"
@@ -2015,23 +2102,23 @@ const MenuCard = memo(function MenuCard({
         </div>
         <div className="relative z-10 -mt-5 flex justify-center px-2">
           {showStepper ? (
-            <div className="flex h-11 min-h-[44px] items-center rounded-xl border border-[#E9EFD6] bg-white text-[#B95509] shadow-[0_8px_20px_rgba(185,85,9,0.28)]">
+            <div className="flex h-10 min-h-[44px] items-center rounded-lg border border-[#e0d3c2] bg-white text-[#B95509] shadow-sm">
               <button
                 type="button"
                 aria-label={`Remove one ${item.name} from your order`}
                 onClick={() => onDecrement?.(item)}
-                className="grid h-full w-11 place-items-center rounded-l-xl hover:bg-[#E9EFD6]"
+                className="grid h-full w-10 place-items-center rounded-l-lg hover:bg-[#faf3ea]"
               >
                 <Minus className="h-3.5 w-3.5" aria-hidden="true" />
               </button>
-              <span aria-live="polite" aria-atomic="true" className="min-w-5 text-center text-sm font-extrabold tabular-nums">
+              <span aria-live="polite" aria-atomic="true" className="min-w-5 text-center text-sm font-bold tabular-nums">
                 {cartQty}
               </span>
               <button
                 type="button"
                 aria-label={`Add one more ${item.name} to your order`}
                 onClick={() => onIncrement?.(item)}
-                className="grid h-full w-11 place-items-center rounded-r-xl hover:bg-[#E9EFD6]"
+                className="grid h-full w-10 place-items-center rounded-r-lg hover:bg-[#faf3ea]"
               >
                 <Plus className="h-3.5 w-3.5" aria-hidden="true" />
               </button>
@@ -2044,13 +2131,15 @@ const MenuCard = memo(function MenuCard({
               aria-label={
                 unavailable ? `${item.name} unavailable` : `Add ${item.name} to your order`
               }
-              className="h-11 min-h-[44px] min-w-[104px] rounded-xl border border-[#E9EFD6] bg-white px-6 text-[13px] font-extrabold tracking-wide text-[#B95509] shadow-[0_8px_20px_rgba(185,85,9,0.28)] hover:bg-[#B95509] hover:text-white disabled:cursor-not-allowed disabled:border-[#9AA07E] disabled:text-[#9d8d80] disabled:shadow-none"
+              className="h-10 min-h-[44px] min-w-[88px] rounded-lg border border-[#d8c3ab] bg-white px-4 text-[13px] font-bold tracking-wide text-[#B95509] shadow-sm hover:bg-[#B95509] hover:text-white disabled:cursor-not-allowed disabled:border-[#e0d3c2] disabled:text-[#b3a48f] disabled:shadow-none"
             >
               {item.availability !== "AVAILABLE"
                 ? "Sold out"
                 : disabled
                   ? "Closed"
-                  : "ADD"}
+                  : item.customizable
+                    ? "ADD +"
+                    : "ADD"}
             </button>
           )}
         </div>
@@ -2072,7 +2161,7 @@ function MobileCartBar({
     <button
       onClick={onCart}
       aria-label={`View cart, ${quantity} item${quantity !== 1 ? "s" : ""}, total ${formatINR(total)}`}
-      className="ticket-edge safe-bottom fixed left-4 right-4 z-40 flex min-h-[44px] items-center justify-between px-5 py-3.5 text-left text-white shadow-[0_18px_45px_rgba(54,35,24,0.25)] lg:hidden bg-[#2A3A0C]"
+      className="safe-bottom fixed left-4 right-4 z-40 flex min-h-[56px] items-center justify-between rounded-2xl bg-[#2A3A0C] px-5 py-3 text-left text-white shadow-lg lg:hidden"
     >
       <span aria-live="polite" aria-atomic="true">
         <span className="block text-xs font-semibold text-white/70">
@@ -2120,15 +2209,15 @@ function CartTicket({
   const belowMinimum = (restaurant?.minOrder ?? 0) > 0 && total < restaurant.minOrder;
   const checkoutDisabled = processing || belowMinimum || checkoutBlocked;
   return (
-    <div className="ticket-edge sticky top-24 overflow-hidden bg-[#fffdf8] shadow-[0_15px_35px_rgba(84,48,26,0.1)]">
-      <div className="paper-grain border-b border-[#D8DFC0] p-5">
+    <div className="sticky top-24 overflow-hidden rounded-2xl border border-[#e5d9cb] bg-white shadow-sm">
+      <div className="border-b border-[#eee2d3] p-5">
         <div className="flex items-center justify-between">
           <div>
-            <p className="text-xs font-extrabold uppercase tracking-[0.15em] text-[#5F6B3C]">
+            <p className="text-xs font-bold uppercase tracking-wider text-[#857262]">
               Your order
             </p>
-            <h2 className="font-display mt-1 text-2xl">
-              {cart.length ? `${cart.length} tasty picks` : "Your cart is empty"}
+            <h2 className="mt-1 text-xl font-extrabold">
+              {cart.length ? `${cart.length} item${cart.length !== 1 ? "s" : ""}` : "Your cart is empty"}
             </h2>
           </div>
           <ShoppingBag className="h-5 w-5 text-[#B95509]" />
@@ -2166,30 +2255,30 @@ function CartTicket({
                 />
               </div>
             ))}
-            <div className="dotted-rule pt-4 space-y-2">
-              <div className="flex justify-between text-xs text-[#5F6B3C]">
+            <div className="space-y-2 border-t border-[#eee2d3] pt-4">
+              <div className="flex justify-between text-xs text-[#6b5f52]">
                 <span>Item total</span>
-                <span>{formatINR(itemTotal)}</span>
+                <span className="tabular-nums">{formatINR(itemTotal)}</span>
               </div>
-              <div className="flex justify-between text-xs text-[#5F6B3C]">
+              <div className="flex justify-between text-xs text-[#6b5f52]">
                 <span>Packaging</span>
-                <span>{formatINR(packaging)}</span>
+                <span className="tabular-nums">{formatINR(packaging)}</span>
               </div>
-              <div className="flex justify-between text-xs text-[#5F6B3C]">
+              <div className="flex justify-between text-xs text-[#6b5f52]">
                 <span>Delivery</span>
-                <span>{formatINR(delivery)}</span>
+                <span className="tabular-nums">{formatINR(delivery)}</span>
               </div>
-              <div className="flex justify-between text-xs text-[#5F6B3C]">
+              <div className="flex justify-between text-xs text-[#6b5f52]">
                 <span>Taxes</span>
-                <span>{formatINR(taxes)}</span>
+                <span className="tabular-nums">{formatINR(taxes)}</span>
               </div>
-              <div className="dotted-rule pt-3 flex justify-between text-base font-extrabold">
+              <div className="flex justify-between border-t border-[#eee2d3] pt-3 text-base font-extrabold text-[#2A3A0C]">
                 <span>{estimated ? "Estimated total" : "To pay"}</span>
-                <span>{formatINR(total)}</span>
+                <span className="tabular-nums">{formatINR(total)}</span>
               </div>
               {estimated && (
-                <p className="text-xs text-[#5F6B3C]">
-                  Final amount is confirmed by the kitchen at payment.
+                <p className="text-xs text-[#857262]">
+                  Estimate before coupons — kitchen confirms the exact payable (incl. discounts & GST) at payment.
                 </p>
               )}
             </div>
@@ -2579,7 +2668,7 @@ function ServiceSetupScreen({
           </div>
         )}
         <div className="mx-auto grid max-w-5xl gap-5 px-4 py-6 sm:px-6 md:grid-cols-[1fr_360px]">
-          <section className="ticket-edge bg-[#fffdf9] p-5 shadow-sm">
+          <section className="rounded-2xl border border-[#e5d9cb] bg-[#fffdf9] p-5 shadow-sm">
             <div className="mb-5 flex items-center justify-between">
               <p className="text-sm font-extrabold text-[#4c3424]">
                 {cart.length} item{cart.length !== 1 ? "s" : ""} from your order
@@ -2989,7 +3078,7 @@ function OrderStatusView({
 
   return (
     <main className="grid min-h-screen place-items-center bg-[#fffaf3] px-4 py-10">
-      <section aria-live="polite" className="ticket-edge w-full max-w-lg bg-[#fffdf9] p-8 text-center shadow-sm">
+      <section aria-live="polite" className="rounded-2xl border border-[#e5d9cb] w-full max-w-lg bg-[#fffdf9] p-8 text-center shadow-sm">
         {!hasCredentials ? (
           <>
             <div className="mx-auto grid h-16 w-16 place-items-center rounded-full bg-[#E9EFD6] text-[#B95509]">
@@ -3185,7 +3274,7 @@ function MenuSkeleton() {
     <main aria-busy="true" aria-label="Loading menu" className="min-h-screen bg-[#fffaf3] pb-28">
       <div className="mx-auto max-w-[1440px] animate-pulse px-4 sm:px-6 lg:px-10">
         {/* Slim header */}
-        <div className="flex h-[76px] items-center gap-2.5">
+        <div className="flex h-16 items-center gap-2.5">
           <div className="h-10 w-10 rounded-xl bg-[#E9EFD6]" />
           <div className="space-y-2">
             <div className="h-5 w-40 rounded bg-[#E9EFD6]" />

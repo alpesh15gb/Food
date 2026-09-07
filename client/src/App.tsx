@@ -13,6 +13,10 @@ import Home from "./pages/Home";
 // don't pay for Admin/Signup JS on first load.
 const Admin = lazy(() => import("./pages/Admin"));
 const SignupPage = lazy(() => import("./pages/Signup"));
+const Terms = lazy(() => import("./pages/Legal").then(m => ({ default: m.Terms })));
+const Privacy = lazy(() => import("./pages/Legal").then(m => ({ default: m.Privacy })));
+const Refund = lazy(() => import("./pages/Legal").then(m => ({ default: m.Refund })));
+const Contact = lazy(() => import("./pages/Legal").then(m => ({ default: m.Contact })));
 
 function RouteFallback() {
   return (
@@ -55,6 +59,10 @@ function Router() {
       <LocationNormalizer />
       <Switch>
         <Route path="/signup" component={SignupPage} />
+        <Route path="/terms" component={Terms} />
+        <Route path="/privacy" component={Privacy} />
+        <Route path="/refund" component={Refund} />
+        <Route path="/contact" component={Contact} />
         <Route path="/admin" component={Admin} />
         <Route path="/admin/:restaurantSlug" component={Admin} />
         <Route path="/admin/:restaurantSlug/:section" component={Admin} />

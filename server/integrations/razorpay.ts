@@ -352,6 +352,11 @@ export async function confirmPayment(input: {
  * Issue 7: Handle Razorpay webhook with HMAC verification.
  * Issue 6: Uses confirmPayment() for idempotent processing.
  * Issue 13: Failed payments keep order at PENDING_PAYMENT for retry.
+ *
+ * P0 MP-001: the tRPC path below verifies HMAC over JSON.stringify (best-effort
+ * only — see NOTE). Production MUST use handleRazorpayWebhookRaw() via the
+ * Express raw-body routes in server/integrations/webhookRoutes.ts, which verify
+ * HMAC over the exact bytes Razorpay signed.
  */
 export async function handleRazorpayWebhook(
   event: string,
@@ -372,16 +377,40 @@ export async function handleRazorpayWebhook(
     return { processed: false, error: "Missing webhook signature." };
   }
   {
-    // NOTE: HMAC must be computed over the raw request body bytes, not JSON.stringify(payload).
-    // The tRPC webhook path receives parsed JSON, so signature verification here is
-    // best-effort. Prefer an Express raw-body webhook route that verifies before parsing.
+    // NOTE (P0 MP-001): HMAC must be computed over the raw request body bytes,
+    // not JSON.stringify(payload). The tRPC webhook path receives parsed JSON,
+    // so signature verification here is best-effort and WILL reject real
+    // Razorpay webhooks. Use POST /webhooks/razorpay (raw-body) in production.
+    // Kept for backwards-compat with existing dashboard test buttons only.
     const rawBody = JSON.stringify(payload);
     const expectedSig = createHmac("sha256", webhookSecret).update(rawBody).digest("hex");
     if (expectedSig.length !== signature.length || !timingSafeEqual(Buffer.from(expectedSig), Buffer.from(signature))) {
-      console.warn("[Razorpay] Webhook signature verification failed");
+      console.warn("[Razorpay] Webhook signature verification failed (tRPC best-effort path — use /webhooks/razorpay for production)");
       return { processed: false, error: "Invalid webhook signature." };
     }
   }
+
+  return processRazorpayWebhookEvent(event, payload);
+}
+
+/**
+ * P0 MP-001: production webhook entry — HMAC already verified over raw bytes
+ * by the Express route. Goes straight to idempotent event processing.
+ */
+export async function handleRazorpayWebhookRaw(args: {
+  event: string;
+  payload: Record<string, unknown>;
+}): Promise<{ processed: boolean; error?: string }> {
+  return processRazorpayWebhookEvent(args.event, args.payload);
+}
+
+/** Shared idempotent event processor (DB dedup + state transitions). */
+async function processRazorpayWebhookEvent(
+  event: string,
+  payload: Record<string, unknown>,
+): Promise<{ processed: boolean; error?: string }> {
+  const db = await getDb();
+  if (!db) throw new Error("The database connection is not available.");
 
   // Idempotency: prefer Razorpay webhook event id (payload.id) as externalId.
   const innerPayload = payload as Record<string, any>;
