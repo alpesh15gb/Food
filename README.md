@@ -175,8 +175,12 @@ pnpm test
 6. Configure Razorpay webhook URL (RAW-BODY, production): `https://your-domain.com/webhooks/razorpay`
    with secret in `RAZORPAY_WEBHOOK_SECRET`. Verify at `GET /webhooks/health`.
    Legacy tRPC `storefront.razorpayWebhook` remains for dashboard test buttons only.
-7. Configure Shadowfax webhook URL (RAW-BODY, production): `https://your-domain.com/webhooks/shadowfax`
-   with secret in `SHADOWFAX_WEBHOOK_SECRET`.
+7. Configure Shadowfax webhook URL: `https://your-domain.com/webhooks/shadowfax`.
+   Shadowfax must send YOUR secret in the `Authorization` header
+   (`SHADOWFAX_WEBHOOK_SECRET`) — there is no HMAC scheme. Keep
+   `SHADOWFAX_ENABLED=false` until Shadowfax confirms this Unified API
+   account is valid for restaurant-to-customer deliveries; staging base URL:
+   `https://dale.staging.shadowfax.in/api` via `SHADOWFAX_API_BASE_URL`.
 8. Seed the live menu (admin → Menu Import), set fees/min-order/hours/outlet lat-lng/radius,
    then prove one sandbox order PENDING_PAYMENT → PAID → PLACED → DELIVERED.
 9. Poll `admin.opsAlerts` from your uptime monitor (P0: paid-but-stuck orders, webhook backlog).

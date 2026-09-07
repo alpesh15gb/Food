@@ -78,7 +78,9 @@ export const refundStatusEnum = pgEnum("refund_status", ["PENDING", "PROCESSED",
 // until a dedicated enum-migration is approved.
 export const deliveryStatusEnum = pgEnum("delivery_status", [
   "PENDING", "QUOTED", "REQUESTED", "ASSIGNED", "RIDER_ASSIGNED",
-  "PICKED_UP", "OUT_FOR_DELIVERY", "DELIVERED", "CANCELLED", "FAILED",
+  "RIDER_GOING_TO_PICKUP", "PICKED_UP", "IN_TRANSIT", "OUT_FOR_DELIVERY",
+  "DELIVERED", "CANCELLED", "FAILED",
+  "CANCELLATION_PENDING", "RETURNING_TO_RESTAURANT", "RETURNED", "DELIVERY_EXCEPTION",
 ]);
 
 export const importJobStatusEnum = pgEnum("import_job_status", ["PENDING", "PROCESSING", "COMPLETED", "FAILED"]);
@@ -618,6 +620,13 @@ export const deliveries = pgTable("deliveries", {
   orderId: varchar("order_id", { length: 36 }).notNull().references(() => orders.id, { onDelete: "cascade" }),
   provider: varchar("provider", { length: 64 }).notNull().default("shadowfax"),
   providerDeliveryId: varchar("provider_delivery_id", { length: 120 }),
+  // Shadowfax Unified API AWB (e.g. SF610198449AAA). Stored separately from
+  // our order id AND from the legacy providerDeliveryId column; new
+  // Shadowfax rows mirror the AWB into both so existing lookups keep working.
+  providerAwb: varchar("provider_awb", { length: 120 }),
+  // Raw provider status text (e.g. recd_at_fwd_hub) alongside the normalized
+  // `status`. Hub/bag noise stays here, never in customer-facing timelines.
+  providerStatus: varchar("provider_status", { length: 120 }),
   trackingId: varchar("tracking_id", { length: 120 }),
   // P0: stays varchar for compat; CHECK below constrains to deliveryStatusEnum
   // values. Migrate to deliveryStatusEnum column in a future breaking migration.
@@ -631,6 +640,14 @@ export const deliveries = pgTable("deliveries", {
   estimatedDelivery: timestamp("estimated_delivery"),
   actualPickup: timestamp("actual_pickup"),
   actualDelivery: timestamp("actual_delivery"),
+  // Milestone timestamps for support timelines (webhook-driven).
+  dispatchedAt: timestamp("dispatched_at"),
+  pickedUpAt: timestamp("picked_up_at"),
+  outForDeliveryAt: timestamp("out_for_delivery_at"),
+  deliveredAt: timestamp("delivered_at"),
+  cancelledAt: timestamp("cancelled_at"),
+  lastWebhookAt: timestamp("last_webhook_at"),
+  lastSyncedAt: timestamp("last_synced_at"),
   trackingUrl: varchar("tracking_url", { length: 500 }),
   providerPayload: jsonb("provider_payload").$type<Record<string, unknown>>(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
@@ -641,7 +658,10 @@ export const deliveries = pgTable("deliveries", {
   // excluded so retries/replacements can be recorded.
   uniqueIndex("delivery_order_live_unique_idx").on(t.orderId).where(sql`${t.status} NOT IN ('CANCELLED', 'FAILED')`),
   uniqueIndex("delivery_provider_unique_idx").on(t.providerDeliveryId).where(sql`${t.providerDeliveryId} IS NOT NULL`),
-  check("delivery_status_allowed_chk", sql`${t.status} IN ('PENDING','QUOTED','REQUESTED','ASSIGNED','RIDER_ASSIGNED','PICKED_UP','OUT_FOR_DELIVERY','DELIVERED','CANCELLED','FAILED')`),
+  // Shadowfax AWB lookup (webhook primary key) + provider/status scans.
+  uniqueIndex("delivery_awb_unique_idx").on(t.providerAwb).where(sql`${t.providerAwb} IS NOT NULL`),
+  index("delivery_provider_status_idx").on(t.provider, t.status),
+  check("delivery_status_allowed_chk", sql`${t.status} IN ('PENDING','QUOTED','REQUESTED','ASSIGNED','RIDER_ASSIGNED','RIDER_GOING_TO_PICKUP','PICKED_UP','IN_TRANSIT','OUT_FOR_DELIVERY','DELIVERED','CANCELLED','FAILED','CANCELLATION_PENDING','RETURNING_TO_RESTAURANT','RETURNED','DELIVERY_EXCEPTION')`),
   check("delivery_quoted_charge_nonneg_chk", sql`${t.quotedChargePaise} IS NULL OR ${t.quotedChargePaise} >= 0`),
   check("delivery_final_charge_nonneg_chk", sql`${t.finalChargePaise} IS NULL OR ${t.finalChargePaise} >= 0`),
 ]);

@@ -78,6 +78,28 @@ export const ENV = {
   shadowfaxApiKey: process.env.SHADOWFAX_API_KEY ?? "",
   shadowfaxMerchantId: process.env.SHADOWFAX_MERCHANT_ID ?? "",
   shadowfaxWebhookSecret: process.env.SHADOWFAX_WEBHOOK_SECRET ?? "",
+  // --- Shadowfax Unified API (Forward Integration spec) ---
+  // Canonical Token-auth config. SHADOWFAX_API_BASE_URL wins; legacy
+  // SHADOWFAX_API_URL is a backwards-compatible fallback (do not use for
+  // new deployments). See server/integrations/shadowfax.ts header.
+  shadowfaxEnabled: process.env.SHADOWFAX_ENABLED === "true",
+  shadowfaxToken: process.env.SHADOWFAX_TOKEN ?? "",
+  shadowfaxApiBaseUrl: (
+    process.env.SHADOWFAX_API_BASE_URL
+    ?? process.env.SHADOWFAX_API_URL
+    ?? "https://dale.shadowfax.in/api"
+  ).replace(/\/+$/, ""),
+  shadowfaxEnvironment: (() => {
+    const raw = (process.env.SHADOWFAX_ENVIRONMENT ?? "production").trim().toLowerCase();
+    return raw === "staging" ? "staging" as const : "production" as const;
+  })(),
+  // When to create the Shadowfax shipment: after restaurant acceptance or
+  // only when the order is ready for pickup. Anything else falls back to
+  // READY_FOR_PICKUP (previous behavior).
+  deliveryDispatchTrigger: (() => {
+    const raw = (process.env.DELIVERY_DISPATCH_TRIGGER ?? "READY_FOR_PICKUP").trim().toUpperCase();
+    return raw === "RESTAURANT_ACCEPTED" ? "RESTAURANT_ACCEPTED" as const : "READY_FOR_PICKUP" as const;
+  })(),
   assetBaseUrl: process.env.ASSET_BASE_URL ?? "/assets",
   businessTimezone: process.env.BUSINESS_TIMEZONE ?? "Asia/Kolkata",
   defaultDeliveryRadiusKm: parseDeliveryRadius(),

@@ -49,10 +49,12 @@ const orderStatus = z.enum([
   "REFUND_PENDING", "REFUNDED",
 ]);
 
-// Issue 17: Whitelist of allowed integration secret keys per provider
+// Issue 17: Whitelist of allowed integration secret keys per provider.
+// Shadowfax Unified API uses ONLY the token + our callback secret — there is
+// deliberately no MERCHANT_ID / CLIENT_CODE (spec section 1).
 const INTEGRATION_KEY_WHITELIST: Record<string, string[]> = {
   razorpay: ["RAZORPAY_KEY_ID", "RAZORPAY_KEY_SECRET", "RAZORPAY_WEBHOOK_SECRET"],
-  shadowfax: ["SHADOWFAX_API_KEY", "SHADOWFAX_MERCHANT_ID", "SHADOWFAX_WEBHOOK_SECRET"],
+  shadowfax: ["SHADOWFAX_TOKEN", "SHADOWFAX_WEBHOOK_SECRET"],
   otp: ["OTP_PROVIDER_API_KEY"],
 };
 
@@ -160,13 +162,50 @@ export const adminRouter = router({
 
   // H-13: Verify order belongs to caller's tenant (entity-scoped, so
   // member-owners work on any host, not just custom domains).
+  // Includes the latest Shadowfax delivery summary (AWB/status/tracking)
+  // for the support view — additive, null when no provider delivery exists.
   orderDetail: protectedProcedure
     .input(z.object({ orderId: z.string().min(4) }))
     .query(async ({ ctx, input }) => {
       const result = await getOrderWithItems(input.orderId);
       if (!result) return null;
       await checkTenantAccess(ctx.user, result.restaurantId);
-      return result;
+      try {
+        const db = await getDb();
+        if (db) {
+          const { eq: eqD, desc: descD } = await import("drizzle-orm");
+          const row = (await db.select().from(deliveries)
+            .where(eqD(deliveries.orderId, input.orderId))
+            .orderBy(descD(deliveries.createdAt)).limit(1))[0];
+          if (row) {
+            const history = await db.select({
+              status: deliveryStatusHistory.status,
+              note: deliveryStatusHistory.note,
+              createdAt: deliveryStatusHistory.createdAt,
+            }).from(deliveryStatusHistory)
+              .where(eqD(deliveryStatusHistory.deliveryId, row.id))
+              .orderBy(descD(deliveryStatusHistory.createdAt)).limit(20);
+            return {
+              ...result,
+              delivery: {
+                provider: row.provider,
+                awbNumber: (row as { providerAwb?: string | null }).providerAwb ?? row.providerDeliveryId,
+                providerStatus: (row as { providerStatus?: string | null }).providerStatus ?? null,
+                status: row.status,
+                trackingUrl: row.trackingUrl,
+                riderName: row.riderName,
+                riderPhone: row.riderPhone ? String(row.riderPhone).replace(/(\d{2})\d+(\d{2})/, "$1****$2") : null,
+                lastWebhookAt: (row as { lastWebhookAt?: Date | null }).lastWebhookAt ?? null,
+                lastSyncedAt: (row as { lastSyncedAt?: Date | null }).lastSyncedAt ?? null,
+                history,
+              },
+            };
+          }
+        }
+      } catch {
+        // Delivery summary is best-effort; never break order detail.
+      }
+      return { ...result, delivery: null };
     }),
 
   // H-14: Verify order belongs to caller's tenant before status change.
@@ -790,10 +829,29 @@ export const adminRouter = router({
   // =========================================================================
   // Delivery Integration — Issue 12: manual delivery fallback
   // =========================================================================
-  checkDeliveryServiceability: adminProcedure.input(z.object({ pincode: z.string().regex(/^\\d{6}$/) }))
+  checkDeliveryServiceability: adminProcedure.input(z.object({
+    pickupPincode: z.string().regex(/^\d{6}$/),
+    deliveryPincode: z.string().regex(/^\d{6}$/),
+    restaurantId: z.string().min(4).optional(),
+  }))
     .query(async ({ input }) => {
-      const provider = getDeliveryProvider();
-      return provider.checkServiceability(input.pincode);
+      const { getDeliveryProvider, isDeliveryProviderConfigured } = await import("../integrations/shadowfax");
+      const configured = input.restaurantId
+        ? await isDeliveryProviderConfigured(input.restaurantId).catch(() => false)
+        : false;
+      if (!configured) {
+        return {
+          provider: "SHADOWFAX",
+          serviceable: false as const,
+          reason: "NOT_CONFIGURED" as const,
+          message: "Shadowfax is not enabled/configured. Set SHADOWFAX_ENABLED=true and SHADOWFAX_TOKEN.",
+        };
+      }
+      const provider = getDeliveryProvider(input.restaurantId);
+      return provider.checkPincodeServiceability({
+        pickupPincode: input.pickupPincode,
+        deliveryPincode: input.deliveryPincode,
+      });
     }),
 
   // Issue 12: Manual delivery dispatch — for when Shadowfax is unavailable
@@ -830,7 +888,9 @@ export const adminRouter = router({
       return result;
     }),
 
-  // --- Shadowfax dispatch: wire createDelivery with idempotency ---
+  // --- Shadowfax Unified API dispatch (spec sections 5-13) ---
+  // Creates ONE marketplace shipment per order: ENABLED gate → trigger gate →
+  // paid gate → serviceability → idempotent insert → provider create → AWB.
   shadowfaxDispatch: requirePermission("orders:write").input(z.object({
     orderId: z.string().min(4),
     restaurantId: z.string().min(4).optional(),
@@ -846,8 +906,40 @@ export const adminRouter = router({
       if (ctx.restaurantId && order.restaurantId !== ctx.restaurantId) {
         throw new TRPCError({ code: "FORBIDDEN", message: "Order not found for this restaurant." });
       }
-      if (order.status !== "READY_FOR_PICKUP") {
-        throw new Error(`Order must be READY_FOR_PICKUP to dispatch. Current status: ${order.status}`);
+
+      const {
+        getDeliveryProvider,
+        isDeliveryProviderConfigured,
+        mapOrderFinancialsToShadowfax,
+        buildShadowfaxCreatePayload,
+        validatePincode,
+        validateIndianPhone,
+        resolveIndianState,
+        ShadowfaxError,
+      } = await import("../integrations/shadowfax");
+
+      // 2. Feature gate: stays OFF until Shadowfax confirms Unified API
+      // validity for restaurant-to-customer deliveries (spec section 2).
+      if (!(await isDeliveryProviderConfigured(order.restaurantId).catch(() => false))) {
+        throw new Error("Shadowfax dispatch is disabled. Set SHADOWFAX_ENABLED=true and SHADOWFAX_TOKEN, and confirm API validity with Shadowfax first.");
+      }
+
+      // 3. Dispatch-trigger gate (DELIVERY_DISPATCH_TRIGGER).
+      const { ENV } = await import("../_core/env");
+      const trigger = ENV.deliveryDispatchTrigger;
+      const allowedStatuses = trigger === "RESTAURANT_ACCEPTED"
+        ? ["RESTAURANT_ACCEPTED", "PREPARING", "READY_FOR_PICKUP"]
+        : ["READY_FOR_PICKUP", "DELIVERY_REQUESTED"];
+      if (!allowedStatuses.includes(order.status)) {
+        throw new Error(`Order must be ${allowedStatuses.join(" / ")} to dispatch (trigger=${trigger}). Current status: ${order.status}`);
+      }
+
+      // 4. Paid gate: provider only moves paid (or Rs 0-settled) orders.
+      if (order.paymentStatus !== "PAID") {
+        throw new Error(`Order must be paid before Shadowfax dispatch. Payment status: ${order.paymentStatus}`);
+      }
+      if (order.totalPaise <= 0) {
+        throw new Error("Zero-total orders cannot be dispatched to Shadowfax.");
       }
 
       // 2. Check for existing live delivery (idempotency guard; live unique index on orderId).
@@ -856,32 +948,42 @@ export const adminRouter = router({
         throw new Error("Delivery already dispatched or in progress for this order.");
       }
 
-      // 3. Load outlet for pickup coordinates
+      // 3. Load outlet + restaurant for pickup/RTS parties.
       const outlet = (await db.select().from(outlets).where(eq(outlets.id, order.outletId)).limit(1))[0];
       if (!outlet) throw new Error("Outlet not found.");
+      const restaurant = (await db.select().from(restaurants).where(eq(restaurants.id, order.restaurantId)).limit(1))[0];
+      if (!restaurant) throw new Error("Restaurant not found.");
 
-      const { validateGeoLocation } = await import("../domain/locationService");
-      const pickupLoc = validateGeoLocation({ latitude: outlet.latitude, longitude: outlet.longitude });
-      if (!pickupLoc.valid) throw new Error("Outlet pickup coordinates are not configured. Please set outlet lat/lng.");
+      const addrSnapshot = order.addressSnapshot as Record<string, unknown>;
+      const dropPincode = validatePincode(addrSnapshot.postalCode);
+      if (!dropPincode) throw new Error("A valid 6-digit delivery pincode is required for dispatch.");
+      const outletPincode = validatePincode(outlet.postalCode);
+      if (!outletPincode) {
+        throw new Error("Outlet pincode is missing. Set a valid 6-digit pincode on the outlet before Shadowfax dispatch.");
+      }
+      const dropPhone = validateIndianPhone(order.customerPhone);
+      if (!dropPhone) throw new Error("A valid 10-digit customer phone is required for dispatch.");
+      const pickupPhone = validateIndianPhone(String(outlet.phone ?? restaurant.contactPhone ?? ""));
+      if (!pickupPhone) {
+        throw new Error("Outlet/restaurant contact phone is invalid. Fix it before Shadowfax dispatch.");
+      }
 
-      // 4. Validate drop coordinates + phone/pincode from immutable order snapshot
-      const addrSnapshot = order.addressSnapshot as Record<string, string>;
-      const dropLoc = validateGeoLocation({ latitude: addrSnapshot.latitude, longitude: addrSnapshot.longitude });
-      if (!dropLoc.valid) throw new Error("Order delivery coordinates are missing. Cannot dispatch without precise location.");
-      const dropPhone = String(order.customerPhone ?? "").replace(/\D/g, "").slice(-10);
-      if (!/^[6-9]\d{9}$/.test(dropPhone)) {
-        throw new Error("A valid 10-digit customer phone is required for dispatch.");
-      }
-      if (!/^\d{6}$/.test(String(addrSnapshot.postalCode ?? ""))) {
-        throw new Error("A valid 6-digit delivery pincode is required for dispatch.");
-      }
-      const pickupPhone = String(outlet.phone ?? "").replace(/\D/g, "").slice(-10);
-      if (outlet.phone && !/^[6-9]\d{9}$/.test(pickupPhone)) {
-        throw new Error("Outlet phone is invalid. Please fix outlet contact before dispatch.");
+      // 4. Provider serviceability: BOTH sides (spec section 6).
+      const provider = getDeliveryProvider(order.restaurantId);
+      try {
+        const svc = await provider.checkPincodeServiceability({ pickupPincode: outletPincode, deliveryPincode: dropPincode });
+        if (!svc.serviceable) {
+          const side = !svc.pickupServiceable ? "pickup" : "delivery";
+          throw new Error(`Shadowfax does not serve this ${side} pincode.`);
+        }
+      } catch (err) {
+        if (err instanceof ShadowfaxError) throw new Error(`Shadowfax serviceability check failed: ${err.message}`);
+        throw err;
       }
 
       // 5. Create delivery record BEFORE external API call (idempotency).
-      // Status REQUESTED satisfies the deliveries CHECK constraint.
+      // Status REQUESTED satisfies the deliveries CHECK constraint; the live
+      // unique index on orderId backs the concurrent-dispatch guard.
       const deliveryId = nanoid(18);
       try {
         await db.transaction(async (tx) => {
@@ -906,114 +1008,187 @@ export const adminRouter = router({
         throw err;
       }
 
-      // 6. Call Shadowfax API — pass restaurantId for per-tenant isolation
-      const provider = getDeliveryProvider(order.restaurantId);
-      const restaurant = (await db.select().from(restaurants).where(eq(restaurants.id, order.restaurantId)).limit(1))[0];
+      // 6. Build Unified parties + financials + items from authoritative rows.
+      const pickupState = resolveIndianState(outlet.city, undefined);
+      if (!pickupState) {
+        throw new Error(`Cannot resolve state for outlet city "${outlet.city}". Add it to the state lookup before dispatch.`);
+      }
+      const customerState = resolveIndianState(addrSnapshot.city, pickupState) ?? pickupState;
+      const flatHouse = String(addrSnapshot.flatHouse ?? "").trim();
+      if (!flatHouse) throw new Error("Customer house/flat is required for Shadowfax dispatch.");
+      const line1 = [flatHouse, String(addrSnapshot.building ?? "").trim()].filter(Boolean).join(", ");
+      const line2 = [String(addrSnapshot.street ?? "").trim(), String(addrSnapshot.area ?? "").trim()].filter(Boolean).join(", ");
+      const customerName = String(order.customerName ?? addrSnapshot.name ?? "Customer").trim() || "Customer";
+      const uniqueCode = `REST_${order.restaurantId}`;
+      const outletAddr1 = String(outlet.address ?? "").trim();
+      if (!outletAddr1) throw new Error("Outlet address is required for Shadowfax dispatch.");
+
       const { orderItems } = await import("../../drizzle/schema");
       const lineItems = await db.select().from(orderItems).where(eq(orderItems.orderId, order.id));
+      if (lineItems.length === 0) throw new Error("Order has no items to dispatch.");
+      const sfItems = lineItems.flatMap((li) => {
+        const qty = li.quantity;
+        const base = [{
+          skuId: li.menuItemId ?? li.itemNameSnapshot,
+          skuName: li.itemNameSnapshot,
+          category: "Food",
+          price: Math.round((li.unitPricePaise / 100) * 100) / 100,
+          quantity: qty,
+        }];
+        // Modifier upcharges are NOT folded into unitPricePaise — emit them
+        // as explicit lines so product_value stays exact.
+        const mods = (li.selectedModifiers ?? []) as Array<{ optionId?: string; optionName?: string; pricePaise?: number }>;
+        for (const m of mods) {
+          if (typeof m.pricePaise === "number" && m.pricePaise > 0) {
+            base.push({
+              skuId: String(m.optionId ?? m.optionName ?? "addon").slice(0, 64),
+              skuName: `Addon: ${String(m.optionName ?? "extra").slice(0, 170)}`,
+              category: "Food",
+              price: Math.round((m.pricePaise / 100) * 100) / 100,
+              quantity: qty,
+            });
+          }
+        }
+        return base;
+      });
 
-      let result;
+      const gstPct = (() => {
+        const n = parseFloat(String(restaurant.gstPercentage ?? "0"));
+        return Number.isFinite(n) && n >= 0 && n <= 100 ? n : 0;
+      })();
+      const financials = mapOrderFinancialsToShadowfax({
+        itemTotalPaise: order.itemTotalPaise,
+        couponDiscountPaise: order.couponDiscountPaise ?? 0,
+        gstPercent: gstPct,
+        totalPaise: order.totalPaise,
+        paymentMode: "Prepaid",
+      });
+
+      const createInput = {
+        clientOrderId: order.orderNumber,
+        paymentMode: "Prepaid" as const,
+        productValue: financials.productValue,
+        totalAmount: financials.totalAmount,
+        codAmount: 0,
+        customer: {
+          name: customerName.slice(0, 120),
+          contact: dropPhone,
+          addressLine1: line1.slice(0, 200),
+          addressLine2: line2.slice(0, 200) || undefined,
+          city: String(addrSnapshot.city ?? "").trim(),
+          state: customerState,
+          pincode: dropPincode,
+          latitude: typeof addrSnapshot.latitude === "number" ? addrSnapshot.latitude : undefined,
+          longitude: typeof addrSnapshot.longitude === "number" ? addrSnapshot.longitude : undefined,
+        },
+        pickup: {
+          name: outlet.name.slice(0, 120),
+          contact: pickupPhone,
+          addressLine1: outletAddr1.slice(0, 200),
+          addressLine2: String(outlet.city ?? "").trim() || undefined,
+          city: String(outlet.city ?? "").trim(),
+          state: pickupState,
+          pincode: outletPincode,
+          latitude: outlet.latitudeNum != null ? Number(outlet.latitudeNum) : undefined,
+          longitude: outlet.longitudeNum != null ? Number(outlet.longitudeNum) : undefined,
+          uniqueCode,
+        },
+        rts: {
+          name: outlet.name.slice(0, 120),
+          contact: pickupPhone,
+          addressLine1: outletAddr1.slice(0, 200),
+          addressLine2: String(outlet.city ?? "").trim() || undefined,
+          city: String(outlet.city ?? "").trim(),
+          state: pickupState,
+          pincode: outletPincode,
+          latitude: outlet.latitudeNum != null ? Number(outlet.latitudeNum) : undefined,
+          longitude: outlet.longitudeNum != null ? Number(outlet.longitudeNum) : undefined,
+          uniqueCode,
+        },
+        items: sfItems,
+      };
+      // Local validation BEFORE any HTTP (spec section 9).
+      buildShadowfaxCreatePayload(createInput);
+
+      const failDispatch = async (note: string, errorDetail?: string) => {
+        await db.update(deliveries).set({
+          status: "FAILED",
+          providerPayload: { error: errorDetail ?? note },
+        }).where(eq(deliveries.id, deliveryId));
+        await db.insert(deliveryStatusHistory).values({
+          id: nanoid(18),
+          deliveryId,
+          status: "FAILED",
+          note,
+        });
+      };
+
+      // 7. Provider create — single attempt. Retries must re-enter this
+      // procedure so duplicate/AWB guards run first (never blind-retry POST).
+      let created;
       try {
-        result = await provider.createDelivery({
-          orderId: order.id,
-          orderNumber: order.orderNumber,
-          restaurantName: restaurant?.name ?? "Kitchen",
-          pickupAddress: {
-            name: outlet.name,
-            phone: outlet.phone ?? restaurant?.contactPhone ?? "",
-            address: outlet.address,
-            city: outlet.city,
-            pincode: outlet.postalCode ?? "",
-            latitude: pickupLoc.latitude,
-            longitude: pickupLoc.longitude,
-          },
-          dropAddress: {
-            name: order.customerName ?? "Customer",
-            phone: order.customerPhone ?? "",
-            address: [addrSnapshot.flatHouse, addrSnapshot.building, addrSnapshot.street, addrSnapshot.area].filter(Boolean).join(", "),
-            city: addrSnapshot.city ?? "",
-            pincode: addrSnapshot.postalCode ?? "",
-            latitude: dropLoc.latitude,
-            longitude: dropLoc.longitude,
-          },
-          items: lineItems.map(li => ({ name: li.itemNameSnapshot, quantity: li.quantity })),
-          totalAmountPaise: order.totalPaise,
-          estimatedPreparationMinutes: outlet.preparationMinutes ?? restaurant?.preparationMinutes ?? 25,
-          specialInstructions: order.specialInstructions ?? order.deliveryNotes ?? undefined,
-        });
+        created = await provider.createDelivery(createInput);
       } catch (error) {
-        // External API failed — mark delivery as FAILED
-        await db.update(deliveries).set({
-          status: "FAILED",
-          providerPayload: { error: error instanceof Error ? error.message : "Unknown error" },
-        }).where(eq(deliveries.id, deliveryId));
-        await db.insert(deliveryStatusHistory).values({
-          id: nanoid(18),
-          deliveryId,
-          status: "FAILED",
-          note: `Provider API call failed: ${error instanceof Error ? error.message : "Unknown error"}`,
-        });
-        throw new Error(`Shadowfax dispatch failed: ${error instanceof Error ? error.message : "Unknown error"}`);
+        const detail = error instanceof Error ? `${error.name}: ${error.message}` : undefined;
+        await failDispatch("Shadowfax dispatch failed: provider error.", detail);
+        // Provider internals stay server-side; callers get normalized text.
+        throw new Error("Delivery is currently unavailable for this address.");
+      }
+      if (!created.success || !created.awbNumber) {
+        await failDispatch(`Shadowfax dispatch failed: ${created.error ?? "provider rejected order."}`);
+        throw new Error("Delivery is currently unavailable for this address.");
       }
 
-      if (!result.success) {
-        // Provider returned failure — mark delivery as FAILED
-        await db.update(deliveries).set({
-          status: "FAILED",
-          providerPayload: { error: result.error },
-        }).where(eq(deliveries.id, deliveryId));
-        await db.insert(deliveryStatusHistory).values({
-          id: nanoid(18),
-          deliveryId,
-          status: "FAILED",
-          note: `Provider rejected: ${result.error}`,
-        });
-        throw new Error(`Shadowfax dispatch failed: ${result.error}`);
+      // 8. Store AWB (+ legacy mirror), best-effort tracking URL for the
+      // customer Track action (spec section 22; webhooks stay authoritative).
+      let trackingUrl: string | null = null;
+      try {
+        const tracked = await provider.trackDelivery(created.awbNumber);
+        if (tracked.success && tracked.trackingUrl) trackingUrl = tracked.trackingUrl;
+      } catch {
+        // Non-fatal: reconciles later via webhook/bulk-track.
       }
-
-      // 7. Update delivery record with provider response
       await db.transaction(async (tx) => {
         await tx.update(deliveries).set({
-          providerDeliveryId: result.deliveryId ?? null,
-          trackingId: result.trackingId ?? null,
-          status: "PENDING",
-          quotedChargePaise: result.quotedChargePaise ?? null,
-          estimatedPickup: result.estimatedPickup ?? null,
-          estimatedDelivery: result.estimatedDelivery ?? null,
-          trackingUrl: result.trackingUrl ?? null,
-          providerPayload: result.rawPayload ?? null,
+          providerAwb: created.awbNumber,
+          providerDeliveryId: created.awbNumber,
+          providerStatus: typeof created.status === "string" ? created.status : "new",
+          status: "REQUESTED",
+          trackingUrl,
+          dispatchedAt: new Date(),
+          lastSyncedAt: new Date(),
+          providerPayload: created.rawPayload ?? null,
         }).where(eq(deliveries.id, deliveryId));
-
         await tx.insert(deliveryStatusHistory).values({
           id: nanoid(18),
           deliveryId,
-          status: "PENDING",
-          note: "Shadowfax delivery created successfully.",
+          status: "REQUESTED",
+          note: `Shadowfax shipment created. AWB: ${created.awbNumber}${created.duplicateRecovered ? " (recovered existing shipment)" : ""}.`,
+          rawPayload: created.rawPayload ?? undefined,
         });
       });
 
-      // Machine-gated order transition via the canonical helper (validates + history).
+      // 9. Machine-gated order transition via the canonical helper.
       const { updateOrderStatus } = await import("../db");
-      await updateOrderStatus(order.id, "DELIVERY_REQUESTED", ctx.user.id, `Shadowfax delivery dispatched. Tracking: ${result.trackingId ?? "N/A"}.`);
+      await updateOrderStatus(order.id, "DELIVERY_REQUESTED", ctx.user.id, `Shadowfax shipment created. AWB: ${created.awbNumber}.`);
 
-      // 7. Audit
+      // 10. Audit
       await logAudit({
         actorId: ctx.user.id,
         actorName: ctx.user.name ?? undefined,
         action: "Shadowfax delivery dispatched",
         targetType: "delivery",
         targetId: order.id,
-        afterData: { providerDeliveryId: result.deliveryId, trackingId: result.trackingId },
+        afterData: { awbNumber: created.awbNumber, duplicateRecovered: created.duplicateRecovered ?? false },
         restaurantId: order.restaurantId ?? ctx.restaurantId ?? undefined,
       });
 
       return {
         success: true,
         deliveryId,
-        providerDeliveryId: result.deliveryId,
-        trackingId: result.trackingId,
-        trackingUrl: result.trackingUrl,
-        estimatedDelivery: result.estimatedDelivery,
+        awbNumber: created.awbNumber,
+        trackingUrl,
+        duplicateRecovered: created.duplicateRecovered ?? false,
       };
     }),
 
@@ -1032,11 +1207,14 @@ export const adminRouter = router({
       const delivery = (await db.select().from(deliveries).where(eq(deliveries.orderId, input.orderId)).limit(1))[0];
       if (!delivery) return { delivery: null };
       // Live provider verification (best-effort; DB row is source of truth).
+      // Uses the Unified track API keyed by AWB (spec section 22).
       let live: unknown = null;
-      if (delivery.providerDeliveryId && delivery.provider !== "manual") {
+      const awb = (delivery as { providerAwb?: string | null }).providerAwb ?? delivery.providerDeliveryId;
+      if (awb && delivery.provider !== "manual") {
         try {
           const provider = getDeliveryProvider(order.restaurantId);
-          live = await provider.getDelivery(delivery.providerDeliveryId);
+          live = await provider.trackDelivery(awb);
+          await db.update(deliveries).set({ lastSyncedAt: new Date() }).where(eq(deliveries.id, delivery.id));
         } catch {
           live = null;
         }
@@ -1065,13 +1243,39 @@ export const adminRouter = router({
       if (["DELIVERED", "CANCELLED", "FAILED"].includes(delivery.status ?? "")) {
         throw new TRPCError({ code: "BAD_REQUEST", message: `Delivery is already ${delivery.status}.` });
       }
-      if (delivery.provider !== "manual" && delivery.providerDeliveryId) {
+      if (delivery.provider !== "manual") {
+        // Unified cancel keyed by stored AWB (spec section 25). 200 →
+        // CANCELLED, 304 (queued) → CANCELLATION_PENDING — never assume.
+        const awb = (delivery as { providerAwb?: string | null }).providerAwb ?? delivery.providerDeliveryId;
         const provider = getDeliveryProvider(order.restaurantId);
-        const res = await provider.cancelDelivery(delivery.providerDeliveryId, input.reason);
-        if (!res.success) {
+        const res = await provider.cancelDelivery({ awbNumber: awb ?? undefined, reason: input.reason });
+        if (!res.success || res.outcome === "FAILED") {
           throw new TRPCError({ code: "BAD_REQUEST", message: res.error ?? "Provider cancel failed." });
         }
+        const nextStatus = res.outcome === "CANCELLED" ? "CANCELLED" : "CANCELLATION_PENDING";
+        await db.transaction(async (tx) => {
+          await tx.update(deliveries).set({ status: nextStatus }).where(eq(deliveries.id, delivery.id));
+          await tx.insert(deliveryStatusHistory).values({
+            id: nanoid(18),
+            deliveryId: delivery.id,
+            status: nextStatus,
+            note: res.outcome === "CANCELLED"
+              ? (input.reason ?? "Delivery cancelled by admin.")
+              : "Cancellation queued with Shadowfax (pending provider confirmation).",
+          });
+        });
+        await logAudit({
+          actorId: ctx.user.id,
+          actorName: ctx.user.name ?? undefined,
+          action: res.outcome === "CANCELLED" ? "Delivery cancelled" : "Delivery cancellation queued",
+          targetType: "delivery",
+          targetId: order.id,
+          afterData: { deliveryId: delivery.id, awbNumber: awb, outcome: res.outcome, reason: input.reason ?? null },
+          restaurantId: order.restaurantId,
+        });
+        return { success: true, outcome: res.outcome } as const;
       }
+      // Manual (internal-rider) deliveries have no provider to call.
       await db.transaction(async (tx) => {
         await tx.update(deliveries).set({ status: "CANCELLED" }).where(eq(deliveries.id, delivery.id));
         await tx.insert(deliveryStatusHistory).values({
@@ -1090,7 +1294,79 @@ export const adminRouter = router({
         afterData: { deliveryId: delivery.id, reason: input.reason ?? null },
         restaurantId: order.restaurantId,
       });
-      return { success: true } as const;
+      return { success: true, outcome: "CANCELLED" } as const;
+    }),
+
+  // Bulk reconciliation for active Shadowfax deliveries (spec section 24).
+  // Webhooks stay authoritative; this only refreshes stale rows via bulk
+  // track (<=50 AWBs/request) without overriding newer webhook state.
+  reconcileDeliveries: requirePermission("orders:write").input(z.object({
+    restaurantId: z.string().min(4),
+    limit: z.number().int().min(1).max(50).default(20),
+  }))
+    .mutation(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database not available." });
+      if (ctx.restaurantId && input.restaurantId !== ctx.restaurantId) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Report not found for this restaurant." });
+      }
+      const { getDeliveryProvider, mapShadowfaxStatusToDeliveryStatus } = await import("../integrations/shadowfax");
+      const { and: andOp, inArray: inArr, sql: sqlOp } = await import("drizzle-orm");
+      const staleCutoff = new Date(Date.now() - 15 * 60 * 1000);
+      const rows = await db.select().from(deliveries)
+        .where(andOp(
+          eq(deliveries.provider, "shadowfax"),
+          inArr(deliveries.status, ["REQUESTED", "RIDER_ASSIGNED", "RIDER_GOING_TO_PICKUP", "PICKED_UP", "IN_TRANSIT", "OUT_FOR_DELIVERY", "CANCELLATION_PENDING"]),
+          sqlOp`${deliveries.lastSyncedAt} IS NULL OR ${deliveries.lastSyncedAt} < ${staleCutoff}`,
+        ))
+        .limit(input.limit);
+      // Tenant scope: join via orders (deliveries carry no restaurantId).
+      const scoped: typeof rows = [];
+      for (const r of rows) {
+        const ord = (await db.select({ restaurantId: orders.restaurantId }).from(orders).where(eq(orders.id, r.orderId)).limit(1))[0];
+        if (ord && ord.restaurantId === input.restaurantId) scoped.push(r);
+      }
+      const awbs = scoped.map((r) => (r as { providerAwb?: string | null }).providerAwb ?? r.providerDeliveryId).filter((a): a is string => Boolean(a));
+      if (awbs.length === 0) return { checked: 0, updated: 0 };
+      const provider = getDeliveryProvider(input.restaurantId);
+      const results = await provider.bulkTrackDeliveries(awbs);
+      let updated = 0;
+      for (const res of results) {
+        if (!res.success || !res.status) continue;
+        const row = scoped.find((r) => ((r as { providerAwb?: string | null }).providerAwb ?? r.providerDeliveryId) === res.awbNumber);
+        if (!row) continue;
+        // Never override a newer webhook event: only advance when the tracked
+        // provider status maps differently AND row is older than 15 min sync.
+        const mapped = mapShadowfaxStatusToDeliveryStatus(res.status);
+        if (mapped !== row.status && (mapped === "DELIVERED" || mapped === "CANCELLED" || mapped === "RETURNED" || mapped === "OUT_FOR_DELIVERY" || mapped === "PICKED_UP")) {
+          await db.update(deliveries).set({
+            status: mapped,
+            providerStatus: res.status,
+            lastSyncedAt: new Date(),
+            trackingUrl: res.trackingUrl ?? row.trackingUrl,
+            providerPayload: res.rawPayload ?? undefined,
+          }).where(eq(deliveries.id, row.id));
+          await db.insert(deliveryStatusHistory).values({
+            id: nanoid(18),
+            deliveryId: row.id,
+            status: mapped,
+            note: `Reconciled via bulk track: ${res.status}.`,
+            rawPayload: res.rawPayload ?? undefined,
+          });
+          updated++;
+        } else {
+          await db.update(deliveries).set({ lastSyncedAt: new Date() }).where(eq(deliveries.id, row.id));
+        }
+      }
+      await logAudit({
+        actorId: ctx.user.id,
+        actorName: ctx.user.name ?? undefined,
+        action: `Delivery reconciliation: ${updated}/${awbs.length} updated`,
+        targetType: "restaurant",
+        targetId: input.restaurantId,
+        restaurantId: input.restaurantId,
+      });
+      return { checked: awbs.length, updated };
     }),
 
   // =========================================================================

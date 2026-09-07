@@ -1,26 +1,28 @@
 /**
- * Production webhook routes with RAW-BODY HMAC verification (P0 MP-001).
+ * Webhook routes.
  *
- * Mount BEFORE express.json() — the HMAC must cover the exact bytes the
- * provider signed. tRPC routes (`storefront.razorpayWebhook`) only see parsed
- * JSON and can never verify correctly; they remain for backwards-compat test
- * buttons and log a warning directing operators to these routes.
+ * Mount BEFORE express.json().
+ * - Razorpay NEEDS the raw body (HMAC covers exact provider bytes). tRPC
+ *   routes only see parsed JSON and can never verify; they remain for
+ *   backwards-compat test buttons.
+ * - Shadowfax Unified API has NO signature scheme (per spec): auth is OUR
+ *   configured secret in the Authorization header, compared constant-time.
+ *   If unset, webhooks are accepted with a loud warning (dev posture only —
+ *   production must set SHADOWFAX_WEBHOOK_SECRET).
  *
  *   POST /webhooks/razorpay   — header x-razorpay-signature
- *   POST /webhooks/shadowfax  — headers x-shadowfax-signature / x-sf-* / x-webhook-signature
+ *   POST /webhooks/shadowfax  — header Authorization: <SHADOWFAX_WEBHOOK_SECRET>
  *   GET  /webhooks/health     — liveness for provider dashboards (no secrets)
  */
 import type { Express, Request, Response } from "express";
 import express from "express";
 import {
   getRazorpaySignatureFromHeaders,
-  getShadowfaxSignatureFromHeaders,
   parseRawJsonBody,
   verifyRazorpayRawSignature,
-  verifyShadowfaxRawSignature,
+  isValidShadowfaxCallbackSecret,
 } from "./webhookVerify";
 import { handleRazorpayWebhookRaw } from "./razorpay";
-import { getDeliveryProvider } from "./shadowfax";
 
 const RAW_LIMIT = "1mb";
 
@@ -78,102 +80,48 @@ export function registerWebhookRoutes(app: Express) {
     }
   );
 
-  // --- Shadowfax (raw body) -------------------------------------------------
+  // --- Shadowfax Unified API (spec sections 16-19) ---------------------------
+  // Auth: OUR secret in Authorization header (constant-time compare).
+  // Lookup: awb_number first, client_order_id fallback. Dedupe:
+  // provider + awb + event + timestamp. Always HTTP 200 after validation.
   app.post(
     "/webhooks/shadowfax",
     express.raw({ type: "*/*", limit: RAW_LIMIT }),
     async (req: Request, res: Response) => {
+      const received = (extra?: Record<string, unknown>) =>
+        res.status(200).json({ received: true, ...extra });
       const raw = req.body as Buffer;
       if (!Buffer.isBuffer(raw)) return jsonError(res, 400, "Raw body required.");
-      if (!process.env.SHADOWFAX_WEBHOOK_SECRET) {
-        console.error("[Webhook] SHADOWFAX_WEBHOOK_SECRET not configured. Rejecting.");
-        return jsonError(res, 503, "Webhook secret not configured.");
+
+      const configuredSecret = process.env.SHADOWFAX_WEBHOOK_SECRET ?? "";
+      if (configuredSecret) {
+        const presented = (req.headers.authorization as string | undefined)
+          ?? (req.query.secret as string | undefined);
+        if (!isValidShadowfaxCallbackSecret(presented, configuredSecret)) {
+          console.warn("[Webhook][metric=webhook_invalid_auth] shadowfax callback rejected (bad secret).");
+          return res.status(401).json({ received: false, error: "Invalid webhook authentication." });
+        }
+      } else {
+        console.warn("[Webhook] SHADOWFAX_WEBHOOK_SECRET unset — Shadowfax webhook authentication DISABLED. Set it in production.");
       }
-      const signature =
-        getShadowfaxSignatureFromHeaders(req.headers as Record<string, unknown>) ??
-        (req.query.signature as string | undefined);
-      if (!signature) return jsonError(res, 401, "Missing webhook signature.");
-      if (!verifyShadowfaxRawSignature(raw, signature)) {
-        console.warn("[Webhook] Shadowfax raw signature mismatch.");
-        return jsonError(res, 401, "Invalid webhook signature.");
-      }
+
       const parsed = parseRawJsonBody(raw);
       if (!parsed.ok) return jsonError(res, 400, parsed.error);
-      if (!parsed.json || typeof parsed.json !== "object") return jsonError(res, 400, "Invalid payload.");
-      const payload = parsed.json as Record<string, unknown>;
-      try {
-        // Reuse the storefront transaction logic by delegating to the default
-        // provider's verified mapper, then persist via the same path as tRPC.
-        // To avoid duplicating the DB transaction, forward to the existing
-        // tRPC-equivalent persistence inline (mirror of storefront.shadowfaxWebhook
-        // core, minus signature — already verified).
-        const { getDb } = await import("../db");
-        const db = await getDb();
-        if (!db) return jsonError(res, 503, "Database unavailable.");
-        const bootstrap = getDeliveryProvider();
-        const verified = bootstrap as unknown as { handleWebhookVerified?: (p: Record<string, unknown>) => Promise<import("./shadowfax").DeliveryStatusUpdate | null> };
-        const update = verified.handleWebhookVerified
-          ? await verified.handleWebhookVerified(payload)
-          : await bootstrap.handleWebhook(payload, "__raw_verified__").catch(() => null);
-        if (!update) return res.status(200).json({ ok: true, processed: false });
-        const { deliveries, deliveryStatusHistory, orders, orderStatusHistory, webhookEvents } =
-          await import("../../drizzle/schema");
-        const { eq, and } = await import("drizzle-orm");
-        const { nanoid } = await import("nanoid");
-        const { mapDeliveryStatusToOrderStatus } = await import("./shadowfax");
+      console.log("[Webhook][metric=webhook_received] provider=shadowfax");
 
-        const delivery = (await db.select().from(deliveries)
-          .where(eq(deliveries.providerDeliveryId, update.deliveryId))
-          .limit(1))[0];
-        if (!delivery) {
-          return res.status(200).json({ ok: true, processed: false, error: "Unknown delivery." });
-        }
-        const order = (await db.select().from(orders).where(eq(orders.id, delivery.orderId)).limit(1))[0];
-        const eventExternalId = `${update.deliveryId}:${update.status}:${update.timestamp.toISOString()}`;
-        try {
-          await db.insert(webhookEvents).values({
-            id: nanoid(18),
-            provider: "shadowfax",
-            eventType: `delivery.${update.status.toLowerCase()}`,
-            externalId: eventExternalId,
-            payload,
-            processed: false,
-          });
-        } catch {
-          return res.status(200).json({ ok: true, processed: true, duplicate: true });
-        }
-        await db.transaction(async (tx) => {
-          await tx.update(deliveries).set({
-            status: update.status,
-            riderName: update.riderName ?? undefined,
-            riderPhone: update.riderPhone ?? undefined,
-            riderLocation: update.riderLocation ?? undefined,
-            providerPayload: update.rawPayload ?? undefined,
-          }).where(eq(deliveries.id, delivery.id));
-          await tx.insert(deliveryStatusHistory).values({
-            id: nanoid(18),
-            deliveryId: delivery.id,
-            status: update.status,
-            note: update.note ?? `Provider status: ${update.status}`,
-            rawPayload: update.rawPayload ?? undefined,
-          });
-          const mapped = mapDeliveryStatusToOrderStatus(update.status);
-          if (mapped && order && (["DELIVERY_REQUESTED", "RIDER_ASSIGNED", "PICKED_UP", "OUT_FOR_DELIVERY"] as string[]).includes(order.status)) {
-            await tx.update(orders).set({ status: mapped as typeof order.status }).where(eq(orders.id, order.id));
-            await tx.insert(orderStatusHistory).values({
-              id: nanoid(18),
-              orderId: order.id,
-              status: mapped as typeof order.status,
-              note: `Delivery update: ${update.status}${update.riderName ? ` (rider ${update.riderName})` : ""}`,
-            });
-          }
-          await tx.update(webhookEvents).set({ processed: true })
-            .where(and(eq(webhookEvents.provider, "shadowfax"), eq(webhookEvents.externalId, eventExternalId)));
-        });
-        return res.status(200).json({ ok: true, processed: true });
+      const { normalizeShadowfaxWebhook } = await import("./shadowfax");
+      const { persistShadowfaxWebhookEvent } = await import("./shadowfaxWebhook");
+      const update = normalizeShadowfaxWebhook(parsed.json);
+      if (!update) {
+        console.warn("[Webhook] Shadowfax callback without awb_number — acknowledged.");
+        return received({ processed: false });
+      }
+      try {
+        const result = await persistShadowfaxWebhookEvent(update, parsed.json as Record<string, unknown>);
+        return received(result);
       } catch (err) {
         console.error("[Webhook] Shadowfax processing failed:", err);
-        return res.status(200).json({ ok: false, processed: false, error: "Processing failed." });
+        return received({ processed: false, error: "Processing failed." });
       }
     }
   );

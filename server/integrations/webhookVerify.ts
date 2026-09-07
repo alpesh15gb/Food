@@ -31,12 +31,6 @@ export function verifyRazorpayRawSignature(rawBody: Buffer, signature: string | 
   return verifyHmacHexSignature({ rawBody, signature, secret });
 }
 
-export function verifyShadowfaxRawSignature(rawBody: Buffer, signature: string | undefined): boolean {
-  const secret = process.env.SHADOWFAX_WEBHOOK_SECRET ?? "";
-  if (!secret || !signature) return false;
-  return verifyHmacHexSignature({ rawBody, signature, secret });
-}
-
 export function parseRawJsonBody(raw: Buffer): { ok: true; json: unknown } | { ok: false; error: string } {
   try {
     if (!raw || raw.length === 0) return { ok: false, error: "Empty webhook body." };
@@ -69,4 +63,26 @@ export function getShadowfaxSignatureFromHeaders(headers: Record<string, unknown
     if (v) return v;
   }
   return undefined;
+}
+
+/**
+ * Shadowfax Unified API webhook auth (spec section 17): the callback carries
+ * OUR configured secret in the Authorization header. Compared in
+ * constant time. This is intentionally NOT HMAC — the spec defines no
+ * signature scheme, and inventing X-Shadowfax-Signature HMAC is forbidden.
+ * Accepts the bare secret or a `Token <secret>`-prefixed form.
+ */
+export function isValidShadowfaxCallbackSecret(
+  authorizationHeader: string | undefined,
+  expectedSecret: string,
+): boolean {
+  if (!expectedSecret || !authorizationHeader) return false;
+  const provided = authorizationHeader.trim().replace(/^(Token|Bearer)\s+/i, "").trim();
+  if (!provided || provided.length < 8) return false;
+  try {
+    if (expectedSecret.length !== provided.length) return false;
+    return timingSafeEqual(Buffer.from(expectedSecret, "utf8"), Buffer.from(provided, "utf8"));
+  } catch {
+    return false;
+  }
 }

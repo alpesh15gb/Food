@@ -386,11 +386,16 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
   }, [resendCooldown]);
 
   // Coordinate-based serviceability (server-authoritative) — gates checkout.
+  // Postal code rides along so the provider pincode-pair check runs when
+  // Shadowfax is enabled; radius-only otherwise.
   const serviceability = trpc.storefront.checkServiceability.useQuery(
     {
       slug: storefrontSlug,
       latitude: deliveryAddress?.latitude ?? 0,
       longitude: deliveryAddress?.longitude ?? 0,
+      postalCode: deliveryAddress?.confirmed && /^\d{6}$/.test(deliveryAddress.postalCode ?? "")
+        ? deliveryAddress.postalCode
+        : undefined,
     },
     { enabled: hasSlug && !!deliveryAddress?.confirmed },
   );

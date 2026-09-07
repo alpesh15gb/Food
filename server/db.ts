@@ -1401,11 +1401,28 @@ export async function updateOrderStatus(
   }
 }
 
+/**
+ * Delivery-milestone customer notification (Shadowfax webhooks, spec §35).
+ * Uses the same templates + per-restaurant opt-out as order notifications.
+ * Call ONLY for first-seen milestones — webhook dedupe gates retries, and
+ * the caller gates repeats — so customers never get double texts.
+ */
+export async function sendDeliveryMilestoneNotification(
+  orderId: string,
+  milestone: "out_for_delivery" | "delivered",
+): Promise<void> {
+  const db = await requireDb();
+  const order = (await db.select().from(orders).where(eq(orders.id, orderId)).limit(1))[0];
+  if (!order?.customerPhone) return;
+  await fireAndForgetNotification(milestone, order).catch((err) => {
+    console.error(`[notification] Failed to send ${milestone} for order ${orderId}:`, err);
+  });
+}
+
 async function fireAndForgetNotification(
   type: string,
   order: typeof orders.$inferSelect
-) {
-  if (!order.customerPhone) return;
+) {  if (!order.customerPhone) return;
 
   const { buildNotificationMessage } = await import("./integrations/whatsapp");
 

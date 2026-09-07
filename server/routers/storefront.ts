@@ -11,7 +11,6 @@ import {
   confirmPayment,
   handleRazorpayWebhook,
 } from "../integrations/razorpay";
-import { getDeliveryProvider } from "../integrations/shadowfax";
 
 // --- Issue 4: Strict address validation ---
 const addressSchema = z.object({
@@ -22,7 +21,7 @@ const addressSchema = z.object({
   landmark: z.string().max(180).optional(),
   area: z.string().min(1).max(180),
   city: z.string().min(1).max(120),
-  postalCode: z.string().regex(/^\\d{6}$/),
+  postalCode: z.string().regex(/^\d{6}$/),
   // Required: precise delivery coordinates
   latitude: z.number().min(-90).max(90),
   longitude: z.number().min(-180).max(180),
@@ -276,6 +275,9 @@ export const storefrontRouter = router({
       slug: z.string().min(2),
       latitude: z.number().min(-90).max(90),
       longitude: z.number().min(-180).max(180),
+      // Customer pincode enables the Shadowfax pincode-pair check (spec §6).
+      // Absent → radius-only result with provider NOT_CHECKED.
+      postalCode: z.string().regex(/^\d{6}$/).optional(),
     }))
     .query(async ({ input }) => {
       const { checkServiceability, validateGeoLocation } = await import("../domain/locationService");
@@ -302,23 +304,43 @@ export const storefrontRouter = router({
 
       // Thread restaurant delivery radius into outlet selection.
       const defaultRadiusKm = restaurant.deliveryRadiusKm ? parseFloat(String(restaurant.deliveryRadiusKm)) : 5;
-      // Unconfigured provider must NOT fail closed: fall back to radius-only
-      // ("direct") serviceability so kitchens without Shadowfax can still sell
-      // with manual dispatch. Only consult the provider when creds exist.
+      // Shadowfax Unified API has NO route/lat-lng serviceability endpoint
+      // (spec §6, §41) — provider checks are pincode-pair based. Radius
+      // selection runs first; the provider then verifies outlet pincode
+      // (seller_pickup) + customer pincode (customer_delivery) when both are
+      // known and the provider is enabled. Otherwise radius-only (NOT_CHECKED).
       const { getDeliveryProvider, isDeliveryProviderConfigured } = await import("../integrations/shadowfax");
       const providerConfigured = await isDeliveryProviderConfigured(restaurant.id).catch(() => false);
+      // Pre-select the nearest outlet so the provider pair-check can use its
+      // pincode (radius gate still runs authoritatively inside the service).
+      let outletPincode: string | null = null;
+      if (providerConfigured && input.postalCode) {
+        try {
+          const { selectBestOutlet } = await import("../domain/locationService");
+          const allOutlets = await getOutlets(restaurant.id) as Array<{ postalCode?: unknown; [k: string]: unknown }>;
+          const sel = selectBestOutlet(
+            allOutlets as never,
+            loc.latitude!, loc.longitude!,
+            Number.isFinite(defaultRadiusKm) ? defaultRadiusKm : 5,
+          );
+          const pin = sel ? String((sel.outlet as { postalCode?: unknown }).postalCode ?? "") : "";
+          outletPincode = /^\d{6}$/.test(pin) ? pin : null;
+        } catch {
+          outletPincode = null;
+        }
+      }
       const result = await checkServiceability(
         loc.latitude!,
         loc.longitude!,
         restaurant.id,
         getOutlets,
-        providerConfigured
-          ? async (pickup, drop) => {
+        providerConfigured && input.postalCode && outletPincode
+          ? async () => {
               const provider = getDeliveryProvider(restaurant.id);
-              if (provider.checkRouteServiceability) {
-                return provider.checkRouteServiceability(pickup, drop);
-              }
-              return provider.checkServiceability("");
+              const pair = await (provider as unknown as {
+                checkPincodeServiceability: (i: { pickupPincode: string; deliveryPincode: string }) => Promise<{ serviceable: boolean }>;
+              }).checkPincodeServiceability({ pickupPincode: outletPincode as string, deliveryPincode: input.postalCode! });
+              return { serviceable: pair.serviceable, estimatedMinutes: undefined };
             }
           : undefined,
         { defaultRadiusKm: Number.isFinite(defaultRadiusKm) ? defaultRadiusKm : 5 },
@@ -562,110 +584,22 @@ export const storefrontRouter = router({
   shadowfaxWebhook: publicProcedure
     .input(z.object({
       payload: z.record(z.string(), z.unknown()),
-      signature: z.string().optional(),
+      // Deprecated tRPC path: pass the configured callback secret explicitly.
+      // Prefer POST /webhooks/shadowfax (Authorization header). Kept for
+      // dashboard test buttons only.
+      secret: z.string().optional(),
     }))
     .mutation(async ({ input }) => {
-      const { getDb } = await import("../db");
-      const db = await getDb();
-      if (!db) throw new Error("Database unavailable.");
-      const { deliveries, deliveryStatusHistory, orders, orderStatusHistory, webhookEvents } = await import("../../drizzle/schema");
-      const { eq, and } = await import("drizzle-orm");
-      const { nanoid } = await import("nanoid");
-      const { mapDeliveryStatusToOrderStatus } = await import("../integrations/shadowfax");
-
-      // Verify via provider first (HMAC checked inside handleWebhook).
-      // Provider is resolved per-tenant after we locate the delivery row below;
-      // start with the default provider for signature verification.
-      const bootstrapProvider = getDeliveryProvider();
-      const update = await bootstrapProvider.handleWebhook(input.payload, input.signature);
-      if (!update) {
-        return { ok: true, processed: false };
+      const { normalizeShadowfaxWebhook } = await import("../integrations/shadowfax");
+      const { isValidShadowfaxCallbackSecret } = await import("../integrations/webhookVerify");
+      const { persistShadowfaxWebhookEvent } = await import("../integrations/shadowfaxWebhook");
+      const configuredSecret = process.env.SHADOWFAX_WEBHOOK_SECRET ?? "";
+      if (configuredSecret && !isValidShadowfaxCallbackSecret(input.secret, configuredSecret)) {
+        throw new Error("Invalid webhook authentication.");
       }
-
-      // Lookup delivery by providerDeliveryId (canonical webhook key).
-      const delivery = (await db.select().from(deliveries)
-        .where(eq(deliveries.providerDeliveryId, update.deliveryId))
-        .limit(1))[0];
-      if (!delivery) {
-        // Unknown delivery — record event for observability, acknowledge to stop retries.
-        const rawId = String((input.payload as Record<string, unknown>).order_id ?? update.deliveryId ?? "unknown");
-        try {
-          await db.insert(webhookEvents).values({
-            id: nanoid(18),
-            provider: "shadowfax",
-            eventType: "delivery.status.unknown",
-            externalId: rawId,
-            payload: input.payload,
-            processed: true,
-            processingError: "Delivery not found for providerDeliveryId.",
-          });
-        } catch {
-          // Ignore duplicate webhook event (23505) — already recorded.
-        }
-        return { ok: true, processed: false };
-      }
-
-      // Re-verify via the tenant's provider instance (vault credentials).
-      const order = (await db.select().from(orders).where(eq(orders.id, delivery.orderId)).limit(1))[0];
-      if (order) {
-        const tenantProvider = getDeliveryProvider(order.restaurantId);
-        if (tenantProvider.getDelivery && delivery.providerDeliveryId) {
-          try {
-            await tenantProvider.getDelivery(delivery.providerDeliveryId);
-          } catch {
-            // Provider verification failed — still process the webhook payload
-            // (signature already verified); verification failure is noted below.
-          }
-        }
-      }
-
-      const eventExternalId = `${update.deliveryId}:${update.status}:${update.timestamp.toISOString()}`;
-      try {
-        await db.insert(webhookEvents).values({
-          id: nanoid(18),
-          provider: "shadowfax",
-          eventType: `delivery.${update.status.toLowerCase()}`,
-          externalId: eventExternalId,
-          payload: input.payload,
-          processed: false,
-        });
-      } catch {
-        return { ok: true, processed: true, duplicate: true as const };
-      }
-
-      await db.transaction(async (tx) => {
-        await tx.update(deliveries).set({
-          status: update.status,
-          riderName: update.riderName ?? undefined,
-          riderPhone: update.riderPhone ?? undefined,
-          riderLocation: update.riderLocation ?? undefined,
-          providerPayload: update.rawPayload ?? undefined,
-        }).where(eq(deliveries.id, delivery.id));
-
-        await tx.insert(deliveryStatusHistory).values({
-          id: nanoid(18),
-          deliveryId: delivery.id,
-          status: update.status,
-          note: update.note ?? `Provider status: ${update.status}`,
-          rawPayload: update.rawPayload ?? undefined,
-        });
-
-        const mappedOrderStatus = mapDeliveryStatusToOrderStatus(update.status);
-        if (mappedOrderStatus && order && (order.status === "DELIVERY_REQUESTED" || order.status === "RIDER_ASSIGNED" || order.status === "PICKED_UP" || order.status === "OUT_FOR_DELIVERY")) {
-          await tx.update(orders).set({ status: mappedOrderStatus as typeof order.status }).where(eq(orders.id, order.id));
-          await tx.insert(orderStatusHistory).values({
-            id: nanoid(18),
-            orderId: order.id,
-            status: mappedOrderStatus as typeof order.status,
-            note: `Delivery update: ${update.status}${update.riderName ? ` (rider ${update.riderName})` : ""}`,
-          });
-        }
-
-        await tx.update(webhookEvents).set({ processed: true })
-          .where(and(eq(webhookEvents.provider, "shadowfax"), eq(webhookEvents.externalId, eventExternalId)));
-      });
-
-      return { ok: true, processed: true };
+      const update = normalizeShadowfaxWebhook(input.payload);
+      if (!update) return { ok: true, processed: false };
+      return persistShadowfaxWebhookEvent(update, input.payload);
     }),
 
   // =========================================================================
