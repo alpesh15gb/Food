@@ -1,9 +1,10 @@
-ALTER TYPE "public"."delivery_status" ADD VALUE 'RIDER_GOING_TO_PICKUP' BEFORE 'PICKED_UP';--> statement-breakpoint
-ALTER TYPE "public"."delivery_status" ADD VALUE 'IN_TRANSIT' BEFORE 'OUT_FOR_DELIVERY';--> statement-breakpoint
-ALTER TYPE "public"."delivery_status" ADD VALUE 'CANCELLATION_PENDING';--> statement-breakpoint
-ALTER TYPE "public"."delivery_status" ADD VALUE 'RETURNING_TO_RESTAURANT';--> statement-breakpoint
-ALTER TYPE "public"."delivery_status" ADD VALUE 'RETURNED';--> statement-breakpoint
-ALTER TYPE "public"."delivery_status" ADD VALUE 'DELIVERY_EXCEPTION';--> statement-breakpoint
+-- NOTE: drizzle-kit originally generated six ALTER TYPE delivery_status ADD
+-- VALUE statements here. They were removed because (a) no column uses the
+-- delivery_status enum (status columns are varchar + CHECK by design), and
+-- (b) ADD VALUE cannot run inside the transaction drizzle wraps migrations
+-- in, which aborted the entire migration run. The CHECK below is the real
+-- constraint; the TS-level pgEnum in schema.ts stays as documentation.
+--> statement-breakpoint
 ALTER TABLE "deliveries" DROP CONSTRAINT "delivery_status_allowed_chk";--> statement-breakpoint
 ALTER TABLE "deliveries" ADD COLUMN "provider_awb" varchar(120);--> statement-breakpoint
 CREATE UNIQUE INDEX "delivery_awb_unique_idx" ON "deliveries" USING btree ("provider_awb") WHERE "deliveries"."provider_awb" IS NOT NULL;--> statement-breakpoint
