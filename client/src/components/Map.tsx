@@ -134,11 +134,17 @@ export function MapView({
     map.current = new window.google.maps.Map(mapContainer.current, {
       zoom: initialZoom,
       center: initialCenter,
+      // NOTE: never set mapId to "DEMO_MAP_ID" — Google's demo map ID is
+      // roadmap-only and silently disables satellite tiles. No mapId means
+      // the default raster map with full Map + Satellite type support.
       mapTypeControl: true,
+      mapTypeControlOptions: {
+        style: window.google.maps.MapTypeControlStyle.HORIZONTAL_BAR,
+        position: window.google.maps.ControlPosition.TOP_RIGHT,
+      },
       fullscreenControl: true,
       zoomControl: true,
-      streetViewControl: true,
-      mapId: "DEMO_MAP_ID",
+      streetViewControl: false,
     });
     if (onMapReady) {
       onMapReady(map.current);

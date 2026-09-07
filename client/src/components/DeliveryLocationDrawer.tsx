@@ -151,6 +151,17 @@ export default function DeliveryLocationDrawer({
   // Map state
   const mapRef = useRef<google.maps.Map | null>(null);
   const idleListenerRef = useRef<google.maps.MapsEventListener | null>(null);
+  // Explicit Map/Satellite toggle (the default control is tiny and was broken
+  // by DEMO_MAP_ID before — this is the discoverable switch for rooftops).
+  const [mapType, setMapType] = useState<"roadmap" | "satellite">("roadmap");
+  const setBasemap = useCallback((next: "roadmap" | "satellite") => {
+    setMapType(next);
+    try {
+      mapRef.current?.setMapTypeId(next === "satellite" ? "satellite" : "roadmap");
+    } catch {
+      // map not ready yet — state applies on next render via key below
+    }
+  }, []);
 
   // Search state
   const [searchQuery, setSearchQuery] = useState("");
@@ -166,6 +177,7 @@ export default function DeliveryLocationDrawer({
     // overwrite the fresh state (drawer closed/reopened mid-lookup).
     gpsAttemptRef.current++;
     setGpsStage(null);
+    setMapType("roadmap");
     setStep("choose_method");
     setGeoState(null);
     setGpsError(null);
@@ -299,17 +311,21 @@ export default function DeliveryLocationDrawer({
       // Ignore placeholder outlet cities ("To be configured") — biasing with
       // them poisons the query and returns zero results.
       const biased = cityBias && cityBias !== "To be configured" ? `${value}, ${cityBias}` : value;
-      const results = await searchPlaces(biased);
+      // Location-bias around the outlet so nearby apartments rank first.
+      const bias = initialCenter && Number.isFinite(initialCenter.lat) && Number.isFinite(initialCenter.lng)
+        ? { lat: initialCenter.lat, lng: initialCenter.lng }
+        : undefined;
+      const results = await searchPlaces(biased, bias);
       setSearchResults(results);
       if (results.length === 0) {
-        setGeoError("No places found for that search. Try a nearby landmark or place the pin on the map.");
+        setGeoError("No places found for that search. Try the building name, a nearby landmark, or place the pin on the map.");
       }
     } catch {
       setGeoError("Place search failed. Check your connection or place the pin on the map instead.");
     } finally {
       setSearching(false);
     }
-  }, [searchQuery, cityBias]);
+  }, [searchQuery, cityBias, initialCenter]);
 
   const handleSearchInput = useCallback((value: string) => {
     setSearchQuery(value);
@@ -630,6 +646,19 @@ export default function DeliveryLocationDrawer({
 
               {/* Interactive Map with fixed-center pin */}
               <div className="relative overflow-hidden rounded-xl border border-[#D8DFC0]">
+                <div className="absolute left-2 top-2 z-10 flex overflow-hidden rounded-lg border border-[#D8DFC0] bg-white shadow-sm" role="group" aria-label="Map style">
+                  {(["roadmap", "satellite"] as const).map((t) => (
+                    <button
+                      key={t}
+                      type="button"
+                      onClick={() => setBasemap(t)}
+                      aria-pressed={mapType === t}
+                      className={`min-h-[44px] px-3 text-xs font-bold capitalize ${mapType === t ? "bg-[#2A3A0C] text-white" : "text-[#5F6B3C] hover:bg-[#f3ede4]"}`}
+                    >
+                      {t === "roadmap" ? "Map" : "Satellite"}
+                    </button>
+                  ))}
+                </div>
                 <Suspense
                   fallback={
                     <div className="grid h-[300px] place-items-center bg-[#f6ecdf] text-sm font-bold text-[#5F6B3C]">
