@@ -13,7 +13,7 @@ import {
   Package, AlertCircle, RefreshCw, Search,
 } from "lucide-react";
 import { useAuth } from "@/_core/hooks/useAuth";
-import DashboardLayout from "@/components/DashboardLayout";
+import DashboardLayout, { adminPath } from "@/components/DashboardLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { trpc } from "@/lib/trpc";
@@ -72,7 +72,7 @@ const ADMIN_SECTIONS = new Set(["import","menu","orders","categories","coupons",
 
 export default function Admin() {
   const { user, loading } = useAuth();
-  const [location] = useLocation();
+  const [location, setLocation] = useLocation();
   const parts = location.split("/").filter(Boolean); // ["admin", ...]
   let restaurantSlug: string | undefined;
   let section: string;
@@ -86,9 +86,37 @@ export default function Admin() {
     section = parts[1] ?? "overview";
   }
 
+  // Auto-resolve slug when visiting /admin without one
+  const restaurants = trpc.admin.restaurants.useQuery(undefined, {
+    enabled: !restaurantSlug && !loading && !!user && user.role === "admin",
+    retry: false,
+  });
+  useEffect(() => {
+    if (!restaurantSlug && restaurants.isSuccess) {
+      const list = (restaurants.data ?? []) as Array<{ slug?: string }>;
+      if (list.length > 0 && list[0].slug) {
+        setLocation(adminPath(list[0].slug, section));
+      }
+    }
+  }, [restaurantSlug, restaurants.data, restaurants.isSuccess, section, setLocation]);
+
   if (loading)
     return <div className="min-h-screen bg-[#F8F9FA]" />;
   if (!user || user.role !== "admin") return <AdminAccess />;
+
+  // Still resolving slug — show loading
+  if (!restaurantSlug) {
+    if (restaurants.isLoading) return <div className="min-h-screen bg-[#F8F9FA]" />;
+    return (
+      <DashboardLayout>
+        <main className="grid min-h-[70vh] place-items-center">
+          <p className="rounded-xl bg-red-50 px-4 py-3 text-sm font-bold text-red-700">
+            No restaurant found. Please create one first.
+          </p>
+        </main>
+      </DashboardLayout>
+    );
+  }
 
   return (
     <DashboardLayout>

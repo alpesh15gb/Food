@@ -32,10 +32,22 @@ import CheckoutScreen from "./CheckoutScreen";
 
 export default function OrderingApp({ slug, trackingNumber }: { slug?: string; trackingNumber?: string }) {
   const [, navigate] = useLocation();
-  const storefrontSlug = slug || "";
+  const pathSlug = slug || "";
+  const hasPathSlug = pathSlug.length >= 2;
+
+  // Resolve default slug for root domain visits (e.g. 9housekitchen.in/)
+  const hostSlugQuery = trpc.storefront.defaultSlug.useQuery(undefined, {
+    enabled: !hasPathSlug,
+  });
+  const hostSlug = !hasPathSlug ? (hostSlugQuery.data?.slug ?? "") : "";
+  const storefrontSlug = hasPathSlug ? pathSlug : hostSlug;
+  const hasSlug = storefrontSlug.length >= 2;
 
   // --- Data fetching ---
-  const storefrontQuery = trpc.storefront.get.useQuery({ slug: storefrontSlug });
+  const storefrontQuery = trpc.storefront.get.useQuery(
+    { slug: storefrontSlug },
+    { enabled: hasSlug }
+  );
   const paymentConfig = trpc.storefront.paymentConfig.useQuery();
   const initiatePayment = trpc.storefront.initiatePayment.useMutation();
   const verifyPayment = trpc.storefront.verifyPayment.useMutation();
@@ -478,8 +490,8 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
     );
   }
 
-  // --- Loading state ---
-  if (storefrontQuery.isLoading || !restaurant) return <MenuSkeleton />;
+  // --- Loading state (includes waiting for defaultSlug resolution) ---
+  if (!hasSlug || storefrontQuery.isLoading || !restaurant) return <MenuSkeleton />;
 
   const goMenu = () => navigate(`/${storefrontSlug}`);
 
