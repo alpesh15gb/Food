@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { motion, useReducedMotion } from "framer-motion";
 import { Check, Leaf } from "lucide-react";
 
 type HeroBannerProps = {
@@ -20,13 +21,39 @@ type HeroBannerProps = {
   menuCount?: number;
 };
 
+const WORD_MS = 2800;
+const STRIKE_HOLD_MS = 800;
+
 export default function HeroBanner({ restaurant, firstItemImage, thumbs = [], menuCount = 0 }: HeroBannerProps) {
-  const [imgFailed, setImgFailed] = useState(false);
-  const heroImage = (!imgFailed && (restaurant.bannerImage || firstItemImage)) || "";
-  const accent = restaurant.cuisines[0] ?? restaurant.name;
+  const [failedSrc, setFailedSrc] = useState<string | null>(null);
+  const heroImage =
+    ([restaurant.bannerImage, firstItemImage].filter(Boolean) as string[]).find(
+      src => src !== failedSrc
+    ) ?? "";
+  const words = restaurant.cuisines.length ? restaurant.cuisines : [restaurant.name];
+  const reduceMotion = useReducedMotion();
+  const cycling = words.length > 1 && !reduceMotion;
+  const [wordIndex, setWordIndex] = useState(0);
+  const [struck, setStruck] = useState(false);
+  const swapTimer = useRef<number | undefined>(undefined);
   const eyebrow = restaurant.cuisines.length
     ? restaurant.cuisines.slice(0, 3).join(" • ")
     : "Family kitchen";
+
+  useEffect(() => {
+    if (!cycling) return;
+    const id = window.setInterval(() => {
+      setStruck(true);
+      swapTimer.current = window.setTimeout(() => {
+        setWordIndex(i => (i + 1) % words.length);
+        setStruck(false);
+      }, STRIKE_HOLD_MS);
+    }, WORD_MS);
+    return () => {
+      window.clearInterval(id);
+      window.clearTimeout(swapTimer.current);
+    };
+  }, [cycling, words.length]);
 
   return (
     <section className="sf-hero-bg relative overflow-hidden">
@@ -47,7 +74,29 @@ export default function HeroBanner({ restaurant, firstItemImage, thumbs = [], me
             >
               The original taste
               <br />
-              of <span style={{ color: "var(--sf-primary)" }}>{accent}.</span>
+              of{" "}
+              <span className="relative inline-block" style={{ color: "var(--sf-primary)" }}>
+                <motion.span
+                  key={wordIndex}
+                  className="inline-block"
+                  initial={cycling ? { opacity: 0, y: 14 } : false}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.45, ease: [0.23, 1, 0.32, 1] }}
+                >
+                  {words[wordIndex]}
+                </motion.span>
+                .
+                {cycling && (
+                  <motion.span
+                    aria-hidden="true"
+                    className="absolute left-0 top-1/2 h-[3px] w-full origin-left -translate-y-1/2 rounded-full sm:h-[4px]"
+                    style={{ background: "var(--sf-text)" }}
+                    initial={{ scaleX: 0 }}
+                    animate={{ scaleX: struck ? 1 : 0 }}
+                    transition={{ duration: 0.4, ease: [0.65, 0, 0.35, 1] }}
+                  />
+                )}
+              </span>
             </h1>
 
             <p
@@ -127,7 +176,7 @@ export default function HeroBanner({ restaurant, firstItemImage, thumbs = [], me
                   src={heroImage}
                   alt={restaurant.name}
                   className="h-full w-full rounded-full object-cover"
-                  onError={() => setImgFailed(true)}
+                  onError={() => setFailedSrc(heroImage)}
                 />
               ) : (
                 <div
