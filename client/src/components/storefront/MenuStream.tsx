@@ -26,7 +26,7 @@ export default function MenuStream({
         >
           <Utensils className="h-6 w-6" />
         </div>
-        <h2 className="sf-heading mt-4 text-xl" style={{ color: "var(--sf-text)" }}>
+        <h2 className="sf-serif mt-4 text-xl" style={{ color: "var(--sf-text)" }}>
           The menu is being prepared
         </h2>
         <p className="mt-2 text-sm" style={{ color: "var(--sf-text-secondary)" }}>
@@ -49,24 +49,7 @@ export default function MenuStream({
 
   return (
     <div className="pb-3">
-      {!query && activeCategory !== "All" && (
-        <div className="mb-4 flex items-end justify-between">
-          <h2 className="sf-heading text-lg sm:text-xl" style={{ color: "var(--sf-text)" }}>
-            {activeCategory}
-          </h2>
-          <span className="text-xs font-semibold" style={{ color: "var(--sf-text-muted)" }}>
-            {display.length} dish{display.length !== 1 ? "es" : ""}
-          </span>
-        </div>
-      )}
-      {query && (
-        <div className="mb-4">
-          <h2 className="sf-heading text-lg" style={{ color: "var(--sf-text)" }}>
-            Results for "{query}"
-          </h2>
-        </div>
-      )}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
         {display.map((item) => (
           <MenuCard
             key={item.id}

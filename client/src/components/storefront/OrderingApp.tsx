@@ -14,15 +14,14 @@ import DeliveryLocationDrawer, {
   type DeliveryLocation,
 } from "@/components/DeliveryLocationDrawer";
 
-import type { CartLine, Filter } from "./types";
+import type { CartLine } from "./types";
 import MenuSkeleton from "./MenuSkeleton";
 import TopBar from "./TopBar";
 import HeroBanner from "./HeroBanner";
 import DeliveryBar from "./DeliveryBar";
 import OffersStrip from "./OffersStrip";
 import SearchAndFilters from "./SearchAndFilters";
-import CategorySidebar from "./CategorySidebar";
-import CollectionCarousel from "./CollectionCarousel";
+import PopularCarousel from "./PopularCarousel";
 import MenuStream from "./MenuStream";
 import CartSidebar from "./CartSidebar";
 import MobileCartBar from "./MobileCartBar";
@@ -58,7 +57,6 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
   const restaurant = storefront?.restaurant;
   const categories = storefront?.categories ?? [];
   const liveMenu = storefront?.menu ?? [];
-  const collections = storefront?.collections ?? [];
   const offers = storefront?.offers ?? [];
 
   // --- Dynamic theming ---
@@ -101,8 +99,8 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
 
   // --- State ---
   const [cart, setCart] = useState<CartLine[]>([]);
+  const [cartOpen, setCartOpen] = useState(false);
   const [query, setQuery] = useState("");
-  const [filter, setFilter] = useState<Filter>("all");
   const [activeCategory, setActiveCategory] = useState("All");
   const [selected, setSelected] = useState<MenuItem | null>(null);
   const [customQty, setCustomQty] = useState(1);
@@ -157,20 +155,21 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
     () =>
       liveMenu.filter((item) => {
         const needle = query.toLowerCase().trim();
-        const matchesSearch =
+        return (
           !needle ||
           [item.name, item.description, item.category, item.tag]
             .join(" ")
             .toLowerCase()
-            .includes(needle);
-        const matchesFilter =
-          filter === "all" ||
-          filter === item.kind ||
-          (filter === "bestseller" && item.isBestseller);
-        return matchesSearch && matchesFilter;
+            .includes(needle)
+        );
       }),
-    [liveMenu, query, filter]
+    [liveMenu, query]
   );
+
+  const popularItems = useMemo(() => {
+    const bestsellers = liveMenu.filter((item) => item.isBestseller);
+    return (bestsellers.length ? bestsellers : liveMenu).slice(0, 8);
+  }, [liveMenu]);
 
   // --- Cart handlers ---
   const changeQty = (id: string, quantity: number) =>
@@ -520,14 +519,16 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
   // --- Menu screen ---
   return (
     <div className="storefront">
-      <main className="min-h-screen pb-28 lg:pb-10" style={{ background: "var(--sf-bg)" }}>
+      <main className="min-h-screen pb-28 lg:pb-16" style={{ background: "var(--sf-bg)" }}>
         {/* Header */}
         <TopBar
           restaurantName={restaurant.name}
           restaurantLogo={restaurant.logo || undefined}
           itemCount={totalQuantity}
-          onCart={() => {}}
+          onCart={() => setCartOpen(true)}
           onAccount={() => setAuthOpen(true)}
+          query={query}
+          onQueryChange={setQuery}
         />
 
         {/* Hero Banner */}
@@ -538,83 +539,93 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
             bannerImage: restaurant.bannerImage || undefined,
           }}
           firstItemImage={liveMenu[0]?.image}
+          thumbs={[liveMenu[0]?.image, liveMenu[1]?.image].filter(Boolean) as string[]}
+          menuCount={liveMenu.length}
         />
 
-        {/* Delivery Address Bar */}
-        <div className="mt-3">
+        {/* Delivery Address Bar + Offers */}
+        <div className="mx-auto max-w-[1440px] px-4 sm:px-6 lg:px-10">
           <DeliveryBar
             deliveryAddress={deliveryAddress}
             onOpen={() => setLocationOpen(true)}
           />
+          <OffersStrip offers={offers} />
         </div>
 
-        {/* Offers Strip */}
-        <OffersStrip offers={offers} />
+        {/* Popular right now */}
+        <div className="mt-10">
+          <PopularCarousel items={popularItems} onAdd={openItem} />
+        </div>
 
-        {/* Main Content Grid */}
-        <div className="mx-auto mt-5 max-w-[1440px] px-4 sm:px-6 lg:grid lg:grid-cols-[170px_minmax(0,1fr)_350px] lg:gap-8 lg:px-10">
-          {/* Desktop Category Sidebar */}
-          <CategorySidebar
-            categories={categories}
+        {/* Menu header + category pills */}
+        <SearchAndFilters
+          categories={categories}
+          activeCategory={activeCategory}
+          onCategoryChange={setActiveCategory}
+          subtitle={restaurant.description || restaurant.cuisines.join(", ")}
+        />
+
+        {/* Menu grid */}
+        <div className="mx-auto max-w-[1100px] px-4 pb-10 sm:px-6 lg:px-10">
+          {query && (
+            <div className="mb-4 flex items-center justify-between">
+              <p className="text-sm font-bold" style={{ color: "var(--sf-text)" }}>
+                Results for{" "}
+                <span style={{ color: "var(--sf-primary)" }}>"{query}"</span>
+              </p>
+              <button
+                onClick={() => setQuery("")}
+                className="text-xs font-bold hover:underline"
+                style={{ color: "var(--sf-text-muted)" }}
+              >
+                Clear
+              </button>
+            </div>
+          )}
+          <MenuStream
+            items={results}
             activeCategory={activeCategory}
-            onSelect={setActiveCategory}
+            query={query}
+            onAdd={openItem}
+            cartQuantities={cartQuantities}
+            onQuantityChange={changeItemQty}
           />
+        </div>
+      </main>
 
-          {/* Main Menu Content */}
-          <section className="min-w-0">
-            {/* Search & Filters */}
-            <SearchAndFilters
-              query={query}
-              onQueryChange={setQuery}
-              categories={categories}
-              activeCategory={activeCategory}
-              onCategoryChange={setActiveCategory}
-              filter={filter}
-              onFilterChange={setFilter}
-            />
+      {/* Mobile Cart CTA */}
+      <MobileCartBar
+        quantity={totalQuantity}
+        total={grandTotal}
+        onClick={() => setCartOpen(true)}
+      />
 
-            {/* Search Results indicator */}
-            {query && (
-              <div className="mb-4 flex items-center justify-between">
-                <p className="text-sm font-bold" style={{ color: "var(--sf-text)" }}>
-                  Results for{" "}
-                  <span style={{ color: "var(--sf-primary)" }}>
-                    "{query}"
-                  </span>
-                </p>
-                <button
-                  onClick={() => setQuery("")}
-                  className="text-xs font-bold hover:underline"
-                  style={{ color: "var(--sf-text-muted)" }}
-                >
-                  Clear
-                </button>
-              </div>
-            )}
-
-            {/* Collections (when no search active) */}
-            {!query &&
-              collections.length > 0 &&
-              activeCategory === categories[0]?.name && (
-                <CollectionCarousel
-                  collections={collections}
-                  onAdd={openItem}
-                />
-              )}
-
-            {/* Menu Stream */}
-            <MenuStream
-              items={results}
-              activeCategory={activeCategory}
-              query={query}
-              onAdd={openItem}
-              cartQuantities={cartQuantities}
-              onQuantityChange={changeItemQty}
-            />
-          </section>
-
-          {/* Desktop Cart Sidebar */}
-          <aside className="hidden lg:block">
+      {/* Cart slide-over */}
+      {cartOpen && (
+        <div className="fixed inset-0 z-50">
+          <button
+            className="absolute inset-0"
+            style={{ background: "var(--sf-overlay)" }}
+            aria-label="Close cart"
+            onClick={() => setCartOpen(false)}
+          />
+          <div
+            className="absolute inset-y-0 right-0 w-full max-w-[400px] overflow-y-auto p-4"
+            style={{ background: "var(--sf-bg-subtle)" }}
+          >
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="sf-serif text-xl font-bold" style={{ color: "var(--sf-text)" }}>
+                Your order
+              </h2>
+              <button
+                onClick={() => setCartOpen(false)}
+                className="grid h-9 w-9 place-items-center rounded-full hover:bg-white/10"
+                style={{ color: "var(--sf-text-secondary)" }}
+                aria-label="Close cart"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
             <CartSidebar
               cart={cart}
               total={grandTotal}
@@ -627,16 +638,9 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
               processing={processing}
               restaurant={restaurant}
             />
-          </aside>
+          </div>
         </div>
-      </main>
-
-      {/* Mobile Cart CTA */}
-      <MobileCartBar
-        quantity={totalQuantity}
-        total={grandTotal}
-        onClick={() => {}}
-      />
+      )}
 
       {/* Customization Drawer */}
       <CustomizationDrawer

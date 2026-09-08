@@ -85,33 +85,34 @@
    =================================================================== */
 
 .storefront {
-  --sf-bg: #1A1A1A;
-  --sf-bg-subtle: #242424;
-  --sf-surface: #2C2C2C;
-  --sf-text: #F0F0F0;
-  --sf-text-secondary: #A0A0A0;
-  --sf-text-muted: #6B6B6B;
-  --sf-border: rgba(255, 255, 255, 0.12);
-  --sf-border-subtle: rgba(255, 255, 255, 0.06);
+  --sf-bg: #34312E;
+  --sf-bg-subtle: #3E3A36;
+  --sf-surface: #46423E;
+  --sf-text: #F4F1ED;
+  --sf-text-secondary: #B7B1AA;
+  --sf-text-muted: #8C8680;
+  --sf-border: rgba(255, 255, 255, 0.14);
+  --sf-border-subtle: rgba(255, 255, 255, 0.07);
   --sf-primary: var(--color-primary, #E67E22);
   --sf-primary-hover: color-mix(in srgb, var(--sf-primary) 85%, white);
-  --sf-primary-soft: color-mix(in srgb, var(--sf-primary) 12%, #1A1A1A);
+  --sf-primary-soft: color-mix(in srgb, var(--sf-primary) 14%, #34312E);
   --sf-green: #27AE60;
-  --sf-green-soft: rgba(39, 174, 96, 0.12);
+  --sf-green-soft: rgba(39, 174, 96, 0.16);
   --sf-gold: #F1C40F;
-  --sf-gold-soft: rgba(241, 196, 15, 0.12);
+  --sf-gold-soft: rgba(241, 196, 15, 0.14);
   --sf-red: #E74C3C;
   --sf-overlay: rgba(0, 0, 0, 0.7);
   --sf-font-heading: 'Inter', 'Manrope', system-ui, sans-serif;
   --sf-font-body: 'Manrope', 'Inter', system-ui, sans-serif;
+  --sf-font-serif: var(--font-display, 'Playfair Display'), Georgia, serif;
   --sf-radius-card: 16px;
   --sf-radius-pill: 20px;
   --sf-radius-btn: 12px;
   --sf-radius-full: 9999px;
-  --sf-shadow-card: 0 2px 12px rgba(0, 0, 0, 0.3);
-  --sf-shadow-elevated: 0 8px 30px rgba(0, 0, 0, 0.4);
+  --sf-shadow-card: 0 2px 12px rgba(0, 0, 0, 0.25);
+  --sf-shadow-elevated: 0 8px 30px rgba(0, 0, 0, 0.35);
   --sf-shadow-fab: 0 6px 20px rgba(230, 126, 34, 0.35);
-  --sf-shadow-float: 0 12px 40px rgba(0, 0, 0, 0.5);
+  --sf-shadow-float: 0 24px 60px rgba(0, 0, 0, 0.45);
 
   font-family: var(--sf-font-body);
   color: var(--sf-text);
@@ -150,7 +151,7 @@
     background: var(--sf-surface);
     border-radius: var(--sf-radius-card);
     box-shadow: var(--sf-shadow-card);
-    border: none;
+    border: 1px solid var(--sf-border-subtle);
   }
 
   .sf-pill {
@@ -192,7 +193,7 @@
   }
 
   .sf-shimmer {
-    background: linear-gradient(90deg, #2C2C2C 25%, #3A3A3A 50%, #2C2C2C 75%);
+    background: linear-gradient(90deg, #3E3A36 25%, #4A4642 50%, #3E3A36 75%);
     background-size: 200% 100%;
     animation: sf-shimmer 1.5s infinite;
   }
@@ -200,7 +201,26 @@
   .sf-header-blur {
     backdrop-filter: blur(12px) saturate(180%);
     -webkit-backdrop-filter: blur(12px) saturate(180%);
-    background: rgba(26, 26, 26, 0.85);
+    background: rgba(42, 39, 36, 0.82);
+  }
+
+  .sf-serif {
+    font-family: var(--sf-font-serif);
+  }
+
+  .sf-hero-bg {
+    background:
+      radial-gradient(120% 90% at 50% 0%, #4A4642 0%, rgba(74, 70, 66, 0) 70%),
+      radial-gradient(90% 60% at 85% 40%, rgba(255, 255, 255, 0.05) 0%, rgba(255, 255, 255, 0) 60%),
+      var(--sf-bg);
+  }
+
+  .sf-menu-glow {
+    background: radial-gradient(
+      900px 420px at 50% 0%,
+      color-mix(in srgb, var(--sf-primary) 24%, transparent),
+      transparent 70%
+    );
   }
 
   .sf-edge-fade {
