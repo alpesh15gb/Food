@@ -33,6 +33,7 @@ export function registerSeoRoutes(app: Express) {
       const origin = baseUrl(req).replace(/\/$/, "");
       const urls: Array<{ loc: string; changefreq: string; priority: string }> = [
         { loc: `${origin}/`, changefreq: "daily", priority: "0.8" },
+        { loc: `${origin}/about`, changefreq: "monthly", priority: "0.5" },
         { loc: `${origin}/terms`, changefreq: "yearly", priority: "0.3" },
         { loc: `${origin}/privacy`, changefreq: "yearly", priority: "0.3" },
         { loc: `${origin}/refund`, changefreq: "yearly", priority: "0.3" },

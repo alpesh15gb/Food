@@ -13,6 +13,7 @@ import Home from "./pages/Home";
 // don't pay for Admin/Signup JS on first load.
 const Admin = lazy(() => import("./pages/Admin"));
 const SignupPage = lazy(() => import("./pages/Signup"));
+const About = lazy(() => import("./pages/Legal").then(m => ({ default: m.About })));
 const Terms = lazy(() => import("./pages/Legal").then(m => ({ default: m.Terms })));
 const Privacy = lazy(() => import("./pages/Legal").then(m => ({ default: m.Privacy })));
 const Refund = lazy(() => import("./pages/Legal").then(m => ({ default: m.Refund })));
@@ -59,6 +60,7 @@ function Router() {
       <LocationNormalizer />
       <Switch>
         <Route path="/signup" component={SignupPage} />
+        <Route path="/about" component={About} />
         <Route path="/terms" component={Terms} />
         <Route path="/privacy" component={Privacy} />
         <Route path="/refund" component={Refund} />

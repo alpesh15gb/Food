@@ -24,6 +24,7 @@ export const RESERVED_PATH_FIRST = new Set([
   "admin",
   "signup",
   "order",
+  "about",
   "terms",
   "privacy",
   "refund",

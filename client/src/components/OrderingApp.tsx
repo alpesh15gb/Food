@@ -1359,6 +1359,8 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
         </div>
         <footer className="mx-auto max-w-[1440px] px-4 pb-10 sm:px-6 lg:px-10">
           <nav aria-label="Legal" className="flex flex-wrap items-center justify-center gap-x-1 gap-y-1 border-t border-[#eadac9] pt-5 text-xs font-bold text-[#856653]">
+            <a href="/about" className="min-h-[44px] px-3 py-3 hover:text-[#B95509]">About</a>
+            <span aria-hidden="true">·</span>
             <a href="/terms" className="min-h-[44px] px-3 py-3 hover:text-[#B95509]">Terms</a>
             <span aria-hidden="true">·</span>
             <a href="/privacy" className="min-h-[44px] px-3 py-3 hover:text-[#B95509]">Privacy</a>
@@ -2581,6 +2583,23 @@ function AddonGroupBlock({
   );
 }
 
+/** Compact legal footer for cart/checkout/confirmation — reviewers click through checkout. */
+function LegalFooter() {
+  return (
+    <nav aria-label="Legal" className="mx-auto flex max-w-5xl flex-wrap items-center justify-center gap-x-1 px-4 pb-10 text-xs font-bold text-[#856653] sm:px-6">
+      <a href="/about" className="min-h-[44px] px-2 py-3 hover:text-[#B95509]">About</a>
+      <span aria-hidden="true">·</span>
+      <a href="/terms" className="min-h-[44px] px-2 py-3 hover:text-[#B95509]">Terms</a>
+      <span aria-hidden="true">·</span>
+      <a href="/privacy" className="min-h-[44px] px-2 py-3 hover:text-[#B95509]">Privacy</a>
+      <span aria-hidden="true">·</span>
+      <a href="/refund" className="min-h-[44px] px-2 py-3 hover:text-[#B95509]">Refunds</a>
+      <span aria-hidden="true">·</span>
+      <a href="/contact" className="min-h-[44px] px-2 py-3 hover:text-[#B95509]">Contact</a>
+    </nav>
+  );
+}
+
 function ServiceSetupScreen({
   onMenu,
   screen,
@@ -2785,6 +2804,7 @@ function ServiceSetupScreen({
             />
           </aside>
         </div>
+        <LegalFooter />
       </main>
     );
   }
@@ -2859,6 +2879,7 @@ function ServiceSetupScreen({
             />
           </aside>
         </div>
+        <LegalFooter />
       </main>
     );
   }
@@ -3222,6 +3243,9 @@ function OrderStatusView({
           </>
         )}
       </section>
+      <div className="w-full max-w-lg">
+        <LegalFooter />
+      </div>
     </main>
   );
 }

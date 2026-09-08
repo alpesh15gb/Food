@@ -116,6 +116,7 @@ export default function PlatformLanding({
         </span>
         <span>Direct ordering for independent kitchens.</span>
         <nav aria-label="Legal" className="flex flex-wrap items-center justify-center gap-x-1">
+          <Link href="/about" className="min-h-[44px] px-2 py-3 font-bold hover:text-[#c84630]">About</Link>
           <Link href="/terms" className="min-h-[44px] px-2 py-3 font-bold hover:text-[#c84630]">Terms</Link>
           <Link href="/privacy" className="min-h-[44px] px-2 py-3 font-bold hover:text-[#c84630]">Privacy</Link>
           <Link href="/refund" className="min-h-[44px] px-2 py-3 font-bold hover:text-[#c84630]">Refunds</Link>
