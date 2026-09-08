@@ -617,7 +617,7 @@ Admin Login
     │                                    Red banner: "Sign-in was not accepted.
     │                                    Paste only the administrator passphrase."
     │
-    └── Empty/short passphrase ────────► Button disabled (< 16 chars)
+    └── Empty passphrase ──────────────► Button disabled
 ```
 
 ### 4.2 Admin Dashboard (Overview)
