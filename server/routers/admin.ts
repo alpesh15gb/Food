@@ -9,6 +9,7 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { adminProcedure, protectedProcedure, requirePermission, router, tenantAccessProcedure, checkTenantAccess } from "../_core/trpc";
+import { imagesDir } from "../_core/paths";
 import {
   createMenuItem,
   getAdminDashboard,
@@ -97,10 +98,8 @@ async function saveUploadedImage(
   assertImageMagic(buffer, contentType);
   const fs = await import("fs/promises");
   const path = await import("path");
-  const { fileURLToPath } = await import("url");
   const { randomUUID } = await import("crypto");
-  const __dirname = path.dirname(fileURLToPath(import.meta.url));
-  const dir = path.resolve(__dirname, "../../images", subdir);
+  const dir = path.resolve(imagesDir, subdir);
   await fs.mkdir(dir, { recursive: true });
   const filename = `${prefix}_${Date.now()}_${randomUUID().slice(0, 8)}.${ext}`;
   await fs.writeFile(path.join(dir, filename), buffer);

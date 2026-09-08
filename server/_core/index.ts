@@ -1,8 +1,6 @@
 import "dotenv/config";
 import express from "express";
 import { createServer } from "http";
-import fs from "fs";
-import path from "path";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { registerOAuthRoutes } from "./oauth";
 import { registerStorageProxy } from "./storageProxy";
@@ -10,13 +8,7 @@ import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { ENV } from "./env";
 import { serveStatic, setupVite } from "./vite";
-
-// NOTE: resolved from the process working directory, not __dirname — the
-// production bundle lives at dist/index.js, where ../../images would escape
-// to /images (ephemeral) instead of the /app/images volume. CWD is the repo
-// root in dev and /app in the container, both correct.
-const imagesDir = path.resolve(process.cwd(), "images");
-fs.mkdirSync(imagesDir, { recursive: true });
+import { imagesDir } from "./paths";
 
 async function startServer() {
   const app = express();
