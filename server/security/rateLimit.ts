@@ -19,6 +19,7 @@ const registerIpLimits = new Map<string, RateLimitEntry>();
 const localAdminLimits = new Map<string, RateLimitEntry>();
 const otpPurposeSendLimits = new Map<string, RateLimitEntry>();
 const otpPurposeVerifyLimits = new Map<string, RateLimitEntry>();
+const whatsappWebhookLimits = new Map<string, RateLimitEntry>();
 
 const ALL_STORES = [
   phoneSendLimits,
@@ -30,6 +31,7 @@ const ALL_STORES = [
   localAdminLimits,
   otpPurposeSendLimits,
   otpPurposeVerifyLimits,
+  whatsappWebhookLimits,
 ];
 
 /** Hard cap per store: bounds memory even under key-flooding. Oldest entries evicted first. */
@@ -119,6 +121,16 @@ export function checkRegisterIpLimit(ip: string) {
 /** Check local-admin passphrase attempts: 5 per 15 minutes per IP */
 export function checkLocalAdminIpLimit(ip: string) {
   return checkRateLimit(`local-admin:${ip}`, 5, 15 * 60 * 1000, localAdminLimits);
+}
+
+/**
+ * Evolution WhatsApp webhook throttle: 300 deliveries per minute per IP.
+ * Generous on purpose — Evolution retries aggressively and bursts on
+ * reconnect; abuse is handled by the unguessable webhook secret, this only
+ * bounds log/DB spam from a misconfigured sender.
+ */
+export function checkWhatsappWebhookLimit(ip: string) {
+  return checkRateLimit(`wa-webhook:${ip}`, 300, 60 * 1000, whatsappWebhookLimits);
 }
 
 /**

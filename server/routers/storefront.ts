@@ -223,6 +223,23 @@ export const storefrontRouter = router({
       return { success: true } as const;
     }),
 
+  // WhatsApp-inbound OTP status: has the expected OTP arrived via our linked
+  // WhatsApp account yet? Returns booleans + expiry ONLY — the OTP value is
+  // never exposed. The UI uses this to prompt code entry, not to skip it.
+  whatsappOtpStatus: publicProcedure
+    .input(z.object({ phone: z.string().min(10).max(15) }))
+    .query(async ({ ctx, input }) => {
+      const { getRateLimitClientIp, checkIpOtpLimit } = await import("../security/rateLimit");
+      const limit = checkIpOtpLimit(`wastatus:${getRateLimitClientIp(ctx.req)}`);
+      if (!limit.allowed) {
+        throw new Error(`Too many requests. Please try again in ${limit.retryAfterSeconds} seconds.`);
+      }
+      const { normalizePhone } = await import("../security/phoneValidation");
+      const phone = normalizePhone(input.phone);
+      const { getWhatsappOtpStatus } = await import("../db");
+      return (await getWhatsappOtpStatus(phone)) ?? { hasPending: false, received: false, expiresAt: null };
+    }),
+
   // =========================================================================
   // Search
   // =========================================================================

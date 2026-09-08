@@ -30,6 +30,11 @@ function jsonError(res: Response, status: number, error: string) {
   return res.status(status).json({ ok: false, processed: false, error });
 }
 
+/** Raw body buffer from express.raw() routes (empty buffer when absent). */
+function rawOf(req: Request): Buffer {
+  return Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+}
+
 /** Extract {event, payload} from a Razorpay webhook body (tolerates wrappers). */
 function normalizeRazorpayBody(json: unknown): { event: string; payload: Record<string, unknown> } | null {
   if (!json || typeof json !== "object") return null;
@@ -126,11 +131,133 @@ export function registerWebhookRoutes(app: Express) {
     }
   );
 
+  // --- Evolution WhatsApp inbound (OTP capture) ------------------------------
+  // Canonical URL: POST /api/webhooks/whatsapp (nginx preserves /api/).
+  // MESSAGES_UPSERT only. Shared-secret auth (?token= or Authorization),
+  // per-IP throttle, dedupe on WhatsApp message id, fast 200 always.
+  app.post(
+    "/api/webhooks/whatsapp",
+    express.raw({ type: "*/*", limit: RAW_LIMIT }),
+    async (req: Request, res: Response) => {
+      const ack = (extra?: Record<string, unknown>) =>
+        res.status(200).json({ received: true, ...extra });
+      try {
+        const { getRateLimitClientIp, checkWhatsappWebhookLimit } = await import("../security/rateLimit");
+        const ip = getRateLimitClientIp(req as never);
+        const limit = checkWhatsappWebhookLimit(ip);
+        if (!limit.allowed) return res.status(429).json({ received: false, error: "Rate limited." });
+
+        const { evolutionConfig, isValidWhatsappWebhookAuth, parseEvolutionUpsert,
+          extractOtpCandidate, maskOtp, logInboundDebug, INBOUND_STALE_MS } =
+          await import("./evolution");
+        const cfg = evolutionConfig();
+        const presentedToken = typeof req.query.token === "string" ? req.query.token : undefined;
+        const presentedAuth = typeof req.headers.authorization === "string" ? req.headers.authorization : undefined;
+        if (!isValidWhatsappWebhookAuth(presentedToken, presentedAuth, cfg.webhookSecret)) {
+          console.warn("[Evolution][metric=webhook_invalid_auth] rejected callback (bad/missing secret).");
+          return res.status(401).json({ received: false, error: "Invalid webhook authentication." });
+        }
+
+        const parsed = parseRawJsonBody(rawOf(req));
+        if (!parsed.ok) return ack({ processed: false });
+        const body = parsed.json as Record<string, unknown>;
+        const event = typeof body.event === "string" ? body.event : "";
+        if (event && event !== "MESSAGES_UPSERT") {
+          logInboundDebug({ event, senderJid: "-", messageId: "-", hasText: false, otpDetected: false, outcome: "ignored-event" });
+          return ack({ processed: false });
+        }
+
+        const msg = parseEvolutionUpsert(body);
+        const debug = (outcome: string, extra?: { otpDetected?: boolean; otpMasked?: string }) =>
+          logInboundDebug({
+            event: "MESSAGES_UPSERT",
+            senderJid: msg?.senderJid ?? "-",
+            messageId: msg?.messageId ?? "-",
+            hasText: Boolean(msg?.text),
+            otpDetected: extra?.otpDetected ?? false,
+            otpMasked: extra?.otpMasked,
+            outcome,
+          });
+        if (!msg) {
+          debug("ignored-no-envelope");
+          return ack({ processed: false });
+        }
+        // Guard rails: own messages, groups/status, missing text, stale mail.
+        if (msg.fromMe) { debug("ignored-from-me"); return ack({ processed: false }); }
+        if (msg.isGroup || !msg.senderDigits) { debug("ignored-group"); return ack({ processed: false }); }
+        if (!msg.text) { debug("ignored-no-text"); return ack({ processed: false }); }
+        if (msg.timestampMs && Date.now() - msg.timestampMs > INBOUND_STALE_MS) {
+          debug("ignored-stale");
+          return ack({ processed: false });
+        }
+
+        const code = extractOtpCandidate(msg.text);
+        if (!code) {
+          debug("ignored-no-otp");
+          return ack({ processed: false });
+        }
+
+        const { getDb } = await import("../db");
+        const db = await getDb();
+        if (!db) return ack({ processed: false, error: "Database unavailable." });
+        const { webhookEvents } = await import("../../drizzle/schema");
+        const { nanoid } = await import("nanoid");
+        try {
+          await db.insert(webhookEvents).values({
+            id: nanoid(18),
+            provider: "evolution-whatsapp",
+            eventType: "whatsapp.message.otp",
+            externalId: msg.messageId,
+            payload: {
+              senderJid: msg.senderJid,
+              timestampMs: msg.timestampMs,
+              otpDetected: true,
+              otpLength: code.length,
+            },
+            processed: false,
+          });
+        } catch {
+          debug("duplicate", { otpDetected: true, otpMasked: maskOtp(code) });
+          return ack({ processed: true, duplicate: true });
+        }
+
+        const { markWhatsappOtpReceived } = await import("../db");
+        const match = await markWhatsappOtpReceived({
+          code,
+          senderDigits: msg.senderDigits,
+          waMessageId: msg.messageId,
+        }).catch((err) => {
+          console.error("[Evolution] OTP match failed:", err instanceof Error ? err.message : String(err));
+          return null;
+        });
+
+        const { eq: eqW, and: andW } = await import("drizzle-orm");
+        await db.update(webhookEvents)
+          .set({ processed: true, processingError: match ? null : "No pending OTP request matched." })
+          .where(andW(eqW(webhookEvents.provider, "evolution-whatsapp"), eqW(webhookEvents.externalId, msg.messageId)));
+
+        if (match) {
+          console.log(`[Evolution][metric=otp_matched] phone=${match.phone.slice(0, 2)}**** len=${code.length}`);
+          debug("matched", { otpDetected: true, otpMasked: maskOtp(code) });
+          return ack({ processed: true, matched: true });
+        }
+        debug("no-pending-request", { otpDetected: true, otpMasked: maskOtp(code) });
+        return ack({ processed: true, matched: false });
+      } catch (err) {
+        // Never crash on malformed provider mail; acknowledge to stop retries
+        // for poison payloads while logging server-side.
+        console.error("[Evolution] webhook failed:", err instanceof Error ? err.message : String(err));
+        return res.status(200).json({ received: true, processed: false });
+      }
+    }
+  );
+
   app.get("/webhooks/health", (_req, res) => {
     res.status(200).json({
       ok: true,
       razorpay: Boolean(process.env.RAZORPAY_WEBHOOK_SECRET),
       shadowfax: Boolean(process.env.SHADOWFAX_WEBHOOK_SECRET),
+      evolution: Boolean(process.env.EVOLUTION_API_URL && process.env.EVOLUTION_API_KEY),
     });
   });
 }

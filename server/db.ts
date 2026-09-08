@@ -1631,7 +1631,7 @@ export function generateOtpCode(): string {
 const RESEND_COOLDOWN_MS = 60 * 1000;
 
 /** Create and store an OTP for phone verification (hash stored, code returned once) */
-export async function createOtp(phone: string): Promise<{ code: string; expiresAt: Date; cooldownRemaining?: number }> {
+export async function createOtp(phone: string, opts?: { expectedSender?: string }): Promise<{ code: string; expiresAt: Date; cooldownRemaining?: number }> {
   const db = await requireDb();
   const normalizedPhone = normalizePhone(phone) ?? phone.replace(/\D/g, "");
   if (!normalizedPhone || normalizedPhone.length < 10) throw new Error("Invalid phone number.");
@@ -1676,6 +1676,7 @@ export async function createOtp(phone: string): Promise<{ code: string; expiresA
       purpose: "login",
       expiresAt,
       attempts: 0,
+      expectedSender: opts?.expectedSender?.replace(/\D/g, "").slice(-15) || null,
     });
   } catch (err) {
     if (isUniqueViolation(err)) {
@@ -1799,6 +1800,84 @@ export async function verifyOtp(phone: string, code: string): Promise<{
     }
   }
   throw new Error("Could not verify phone. Please retry.");
+}
+
+// =============================================================================
+// WhatsApp-inbound OTP capture (Evolution API)
+// =============================================================================
+
+/**
+ * Match an inbound WhatsApp OTP against pending verifications and mark the
+ * winner RECEIVED (receivedAt + waMessageId). This deliberately does NOT
+ * consume the OTP — verifyOtp() still consumes on user entry, preserving
+ * single-use semantics. Returns the matched phone/purpose or null.
+ *
+ * Correlation: explicit expected-sender rows first, then most recent live
+ * row whose HMAC matches. One match max — never fan out across requests.
+ */
+export async function markWhatsappOtpReceived(args: {
+  code: string;
+  senderDigits: string | null;
+  waMessageId: string;
+}): Promise<{ phone: string; purpose: string } | null> {
+  const { matchInboundOtp } = await import("./integrations/evolution");
+  const db = await requireDb();
+  const now = new Date();
+
+  // Candidate pool: live rows only (unused, unexpired, attempts left).
+  // Bounded + recency-ordered; the matcher re-validates everything.
+  const candidates = await db.select().from(otpVerifications)
+    .where(and(
+      sql`${otpVerifications.usedAt} IS NULL`,
+      sql`${otpVerifications.receivedAt} IS NULL`,
+      sql`${otpVerifications.expiresAt} > ${now}`,
+      sql`${otpVerifications.attempts} < 5`,
+    ))
+    .orderBy(desc(otpVerifications.createdAt))
+    .limit(25);
+
+  const match = matchInboundOtp(args.code, args.senderDigits, candidates as never, now.getTime());
+  if (!match) return null;
+
+  // Claim atomically: only the still-unreceived row wins a concurrent race.
+  const claimed = await db.update(otpVerifications)
+    .set({ receivedAt: now, waMessageId: args.waMessageId.slice(0, 128) })
+    .where(and(
+      eq(otpVerifications.id, (match as { rowId: number }).rowId),
+      sql`${otpVerifications.receivedAt} IS NULL`,
+      sql`${otpVerifications.usedAt} IS NULL`,
+    ))
+    .returning({ id: otpVerifications.id });
+  if (claimed.length === 0) return null;
+  return { phone: match.phone, purpose: match.purpose };
+}
+
+/**
+ * Received-status for a phone's latest login OTP. Returns booleans and
+ * expiry ONLY — the OTP value is never exposed.
+ */
+export async function getWhatsappOtpStatus(phone: string): Promise<{
+  hasPending: boolean;
+  received: boolean;
+  expiresAt: string | null;
+} | null> {
+  const db = await requireDb();
+  const normalizedPhone = normalizePhone(phone) ?? phone.replace(/\D/g, "");
+  if (!normalizedPhone || normalizedPhone.length < 10) return null;
+  const row = (await db.select().from(otpVerifications)
+    .where(and(
+      eq(otpVerifications.phone, normalizedPhone),
+      eq(otpVerifications.purpose, "login"),
+    ))
+    .orderBy(desc(otpVerifications.createdAt))
+    .limit(1))[0];
+  if (!row) return { hasPending: false, received: false, expiresAt: null };
+  const live = !row.usedAt && new Date() <= row.expiresAt;
+  return {
+    hasPending: live,
+    received: live && Boolean(row.receivedAt),
+    expiresAt: live ? row.expiresAt.toISOString() : null,
+  };
 }
 
 // =============================================================================

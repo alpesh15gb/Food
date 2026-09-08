@@ -125,6 +125,13 @@ export const otpVerifications = pgTable("otp_verifications", {
   usedAt: timestamp("used_at"),
   attempts: smallint("attempts").default(0).notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
+  // WhatsApp-inbound OTP capture (Evolution API): which sender this request
+  // expects (nullable — correlation falls back to recency), when an inbound
+  // OTP matched (received, NOT consumed — verifyOtp still consumes), and the
+  // WhatsApp message id for idempotency/debug. Never stores OTP plaintext.
+  expectedSender: varchar("expected_sender", { length: 32 }),
+  receivedAt: timestamp("received_at"),
+  waMessageId: varchar("wa_message_id", { length: 128 }),
 }, (table) => [
   index("otp_phone_idx").on(table.phone),
   index("otp_lookup_idx").on(table.phone, table.purpose, table.usedAt),

@@ -110,6 +110,14 @@ export const ENV = {
   whatsappAccessToken: process.env.WHATSAPP_ACCESS_TOKEN ?? "",
   whatsappPhoneNumberId: process.env.WHATSAPP_PHONE_NUMBER_ID ?? "",
   msg91AuthKey: process.env.MSG91_AUTH_KEY ?? "",
+  // Self-hosted Evolution API (Baileys) for WhatsApp-INBOUND OTP capture.
+  // Key stays server-side; webhook secret authenticates Evolution callbacks.
+  evolutionApiUrl: (process.env.EVOLUTION_API_URL ?? "").replace(/\/+$/, ""),
+  evolutionApiKey: process.env.EVOLUTION_API_KEY ?? "",
+  evolutionInstance: process.env.EVOLUTION_INSTANCE ?? "whatsapp-main",
+  whatsappWebhookSecret: process.env.WHATSAPP_WEBHOOK_SECRET ?? "",
+  // Sanitized inbound-webhook metadata logging — explicit opt-in, dev only.
+  evolutionDebugLogEnabled: process.env.EVOLUTION_DEBUG_LOG_ENABLED === "true",
   // Custom-domain CNAME target shown in admin DNS instructions (wired from admin router).
   domainCnameTarget: process.env.DOMAIN_CNAME_TARGET ?? "cname.yourdomain.com",
   // Platform brand domain (e.g. munchpro.in). Empty = single-restaurant mode:

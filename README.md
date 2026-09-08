@@ -185,6 +185,44 @@ pnpm test
    then prove one sandbox order PENDING_PAYMENT → PAID → PLACED → DELIVERED.
 9. Poll `admin.opsAlerts` from your uptime monitor (P0: paid-but-stuck orders, webhook backlog).
 10. Confirm `/robots.txt`, `/sitemap.xml`, `/terms`, `/privacy`, `/refund`, `/contact` all return 200.
+11. Evolution WhatsApp-inbound OTP (optional): set `EVOLUTION_API_URL`, `EVOLUTION_API_KEY`,
+    `EVOLUTION_INSTANCE`, `WHATSAPP_WEBHOOK_SECRET` and point the instance at
+    `POST https://your-domain.com/api/webhooks/whatsapp` with events
+    `["MESSAGES_UPSERT"]` (see "WhatsApp OTP capture" below).
+
+## WhatsApp OTP capture (Evolution API)
+
+Inbound-only: our linked WhatsApp account receives OTPs, Evolution POSTs
+`MESSAGES_UPSERT` to `POST /api/webhooks/whatsapp`, and the backend matches
+the code against pending `otpVerifications` rows (sender-aware, recency
+fallback) marking the winner received — never consumed, never exposed.
+
+```bash
+# 1. Subscribe the instance (Evolution 2.3.7, apikey header)
+curl -X POST "$EVOLUTION_API_URL/webhook/set/whatsapp-main" \
+  -H "Content-Type: application/json" \
+  -H "apikey: $EVOLUTION_API_KEY" \
+  -d '{
+    "enabled": true,
+    "url": "https://9housekitchen.in/api/webhooks/whatsapp",
+    "events": ["MESSAGES_UPSERT"],
+    "base64": false
+  }'
+
+# 2. Verify the subscription
+curl -H "apikey: $EVOLUTION_API_KEY" \
+  "$EVOLUTION_API_URL/webhook/find/whatsapp-main"
+```
+
+Test simulation (use the real `WHATSAPP_WEBHOOK_SECRET` as `TOKEN`):
+
+```bash
+curl -X POST "https://9housekitchen.in/api/webhooks/whatsapp?token=TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"event":"MESSAGES_UPSERT","instance":"whatsapp-main","data":{"key":{"remoteJid":"14150001111@s.whatsapp.net","fromMe":false,"id":"TESTMSG1"},"message":{"conversation":"Your OTP is 482193"},"messageTimestamp":'$(date +%s)'}}'
+```
+
+No Nginx changes needed (`/api/` is already proxied to the app).
 
 ## License
 
