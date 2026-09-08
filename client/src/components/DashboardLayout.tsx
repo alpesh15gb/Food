@@ -7,6 +7,13 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from "@/components/ui/sheet";
+import {
   Sidebar,
   SidebarContent,
   SidebarFooter,
@@ -19,18 +26,11 @@ import {
   SidebarTrigger,
   useSidebar,
 } from "@/components/ui/sidebar";
-import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-  SheetTrigger,
-} from "@/components/ui/sheet";
 import { startLogin } from "@/const";
 import { useIsMobile } from "@/hooks/useMobile";
 import { trpc } from "@/lib/trpc";
 import { Award, BarChart3, Bell, Box, ChefHat, FileUp, Globe, Grid3X3, Layers, LayoutDashboard, LogOut, Menu, PanelLeft, PlugZap, ReceiptText, RefreshCw, Settings2, ShieldCheck, Store, Tag, TriangleAlert, UtensilsCrossed, Users } from "lucide-react";
-import { useState } from "react";
+import { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { DashboardLayoutSkeleton } from './DashboardLayoutSkeleton';
 import { Button } from "./ui/button";
@@ -91,18 +91,16 @@ export const SECTION_TITLES: Record<string, string> = {
   notifications: "Notification settings",
 };
 
-/** Pathname without ?query/#hash, duplicate slashes collapsed, no trailing slash. */
 export function cleanAdminLocation(location: string): string {
   const path = location.split(/[?#]/, 1)[0].replace(/\/{2,}/g, "/");
   return path.length > 1 ? path.replace(/\/+$/, "") : path;
 }
 
 export function parseAdminLocation(location: string): { slug?: string; section: string } {
-  const parts = cleanAdminLocation(location).split("/").filter(Boolean); // ["admin", ...]
+  const parts = cleanAdminLocation(location).split("/").filter(Boolean);
   if (parts[0]?.toLowerCase() !== "admin") return { section: "overview" };
   if (parts.length >= 3) return { slug: parts[1], section: parts[2].toLowerCase() || "overview" };
   if (parts.length === 2) {
-    // /admin/:x — either a slug (restaurant home) or a bare section (backward compat)
     if (parts[1].toLowerCase() in SECTION_TITLES) return { section: parts[1].toLowerCase() };
     return { slug: parts[1], section: "overview" };
   }
@@ -125,8 +123,6 @@ export function isForbiddenError(err: unknown): boolean {
   return msg.includes("FORBIDDEN") || msg.includes("Missing permission") || msg.includes("not a member");
 }
 
-// Fallback permission probe for servers without a dedicated getMyPermissions
-// endpoint: probe permission-gated queries and hide gated UI on FORBIDDEN.
 export function useMyPermissions(restaurantId: string | undefined) {
   const teamProbe = trpc.admin.listMembers.useQuery(
     { restaurantId: restaurantId ?? "" },
@@ -142,7 +138,7 @@ export function useMyPermissions(restaurantId: string | undefined) {
 
   return {
     canManageTeam: !teamHidden,
-    canManageDomains: !teamHidden, // domains require settings:write, same as team
+    canManageDomains: !teamHidden,
     canManageIntegrations: !integrationsHidden,
     permissionsLoading: !!restaurantId && (teamProbe.isLoading || integrationsProbe.isLoading),
   };
@@ -161,16 +157,16 @@ export function canSeeNavItem(
 export function AdminError({ message, onRetry }: { message: string; onRetry?: () => void }) {
   return (
     <main className="grid min-h-[50vh] place-items-center p-6">
-      <div className="w-full max-w-md rounded-2xl border border-red-200 bg-[#fff3f1] p-6 text-center">
-        <TriangleAlert className="mx-auto h-6 w-6 text-[#9d4331]" aria-hidden />
-        <p role="alert" className="mt-3 text-sm font-bold leading-relaxed text-[#9d4331]">
+      <div className="w-full max-w-md rounded-2xl border border-red-200 bg-red-50 p-6 text-center">
+        <TriangleAlert className="mx-auto h-6 w-6 text-red-600" aria-hidden />
+        <p role="alert" className="mt-3 text-sm font-bold leading-relaxed text-red-700">
           {message}
         </p>
         {onRetry && (
           <Button
             onClick={onRetry}
             variant="outline"
-            className="mt-4 h-10 rounded-xl border-[#D8DFC0] bg-white text-xs font-extrabold text-[#3F4C1E]"
+            className="mt-4 h-10 rounded-xl border-gray-200 bg-white text-xs font-extrabold text-gray-700"
           >
             <RefreshCw className="mr-2 h-3.5 w-3.5" aria-hidden />
             Retry
@@ -181,14 +177,47 @@ export function AdminError({ message, onRetry }: { message: string; onRetry?: ()
   );
 }
 
-const MOBILE_PRIMARY_SECTIONS = ["orders", "menu", "kds"] as const;
+const menuItems = [
+  { icon: LayoutDashboard, label: "Overview", path: "/admin" },
+  { icon: ReceiptText, label: "Orders", path: "/admin/orders" },
+  { icon: ChefHat, label: "KDS", path: "/admin/kds" },
+  { icon: Box, label: "Inventory", path: "/admin/inventory" },
+  { icon: UtensilsCrossed, label: "Menu", path: "/admin/menu" },
+  { icon: Grid3X3, label: "Categories", path: "/admin/categories" },
+  { icon: FileUp, label: "Import menu", path: "/admin/import" },
+  { icon: Tag, label: "Coupons", path: "/admin/coupons" },
+  { icon: Users, label: "Customers", path: "/admin/customers" },
+  { icon: Settings2, label: "Restaurant", path: "/admin/restaurant" },
+  { icon: PlugZap, label: "Integrations", path: "/admin/integrations" },
+  { icon: Globe, label: "Domains", path: "/admin/domains" },
+  { icon: ShieldCheck, label: "Team", path: "/admin/staff" },
+  { icon: Bell, label: "Notifications", path: "/admin/notifications" },
+  { icon: BarChart3, label: "Analytics", path: "/admin/analytics" },
+  { icon: Store, label: "Outlets", path: "/admin/outlets" },
+  { icon: Award, label: "Loyalty", path: "/admin/loyalty" },
+  { icon: UtensilsCrossed, label: "Combos", path: "/admin/combos" },
+];
+const mobilePrimaryItems = menuItems.slice(0, 3);
+
+const SIDEBAR_WIDTH_KEY = "sidebar-width";
+const DEFAULT_WIDTH = 280;
+const MIN_WIDTH = 200;
+const MAX_WIDTH = 480;
 
 export default function DashboardLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  const [sidebarWidth, setSidebarWidth] = useState(() => {
+    const saved = localStorage.getItem(SIDEBAR_WIDTH_KEY);
+    return saved ? parseInt(saved, 10) : DEFAULT_WIDTH;
+  });
   const { loading, user } = useAuth();
+
+  useEffect(() => {
+    localStorage.setItem(SIDEBAR_WIDTH_KEY, sidebarWidth.toString());
+  }, [sidebarWidth]);
 
   if (loading) {
     return <DashboardLayoutSkeleton />
@@ -219,8 +248,14 @@ export default function DashboardLayout({
   }
 
   return (
-    <SidebarProvider>
-      <DashboardLayoutContent>
+    <SidebarProvider
+      style={
+        {
+          "--sidebar-width": `${sidebarWidth}px`,
+        } as CSSProperties
+      }
+    >
+      <DashboardLayoutContent setSidebarWidth={setSidebarWidth}>
         {children}
       </DashboardLayoutContent>
     </SidebarProvider>
@@ -229,53 +264,65 @@ export default function DashboardLayout({
 
 type DashboardLayoutContentProps = {
   children: React.ReactNode;
+  setSidebarWidth: (width: number) => void;
 };
 
 function DashboardLayoutContent({
   children,
+  setSidebarWidth,
 }: DashboardLayoutContentProps) {
   const { user, logout } = useAuth();
   const [location, setLocation] = useLocation();
   const { state, toggleSidebar } = useSidebar();
   const isCollapsed = state === "collapsed";
-  const [moreOpen, setMoreOpen] = useState(false);
-
-  const { slug, section } = parseAdminLocation(location);
-  const base = slug ? `/admin/${slug}` : "/admin";
-  const pathFor = (s: string) => adminPath(slug, s);
-  // Exact match on the cleaned location (no ?query, no trailing slash): the
-  // old endsWith highlighted the wrong item for suffixed paths and missed
-  // entirely when a query string was present.
-  const loc = cleanAdminLocation(location);
-  const isActiveSection = (s: string) =>
-    s === "overview" ? loc === base || loc === `${base}/overview` : loc === `${base}/${s}`;
-
-  // Permission-gated nav: resolve the restaurant id for the current slug, then
-  // hide Team / Integrations / Domains when the server answers FORBIDDEN.
-  const dashboardProbe = trpc.admin.dashboard.useQuery(
-    { slug: slug ?? "" },
-    { enabled: !!slug, retry: false, staleTime: 60_000, refetchOnWindowFocus: false }
-  );
-  const restaurantId = (dashboardProbe.data as { restaurant?: { id?: string } } | null | undefined)?.restaurant?.id;
-  const perms = useMyPermissions(restaurantId);
-  const visibleItems = ADMIN_NAV_ITEMS.filter((item) => canSeeNavItem(item, perms));
-
-  const mobilePrimary = MOBILE_PRIMARY_SECTIONS.map(
-    (s) => visibleItems.find((item) => item.section === s)!
-  ).filter(Boolean);
-  const mobileMore = visibleItems.filter(
-    (item) => !(MOBILE_PRIMARY_SECTIONS as readonly string[]).includes(item.section)
-  );
-  const mobileMoreGroups: Array<"Operate" | "Catalog" | "Grow" | "Setup"> = ["Operate", "Catalog", "Grow", "Setup"];
-
+  const [isResizing, setIsResizing] = useState(false);
+  const sidebarRef = useRef<HTMLDivElement>(null);
+  const activeMenuItem = menuItems.find(item => item.path === location);
   const isMobile = useIsMobile();
+
+  useEffect(() => {
+    if (isCollapsed) {
+      setIsResizing(false);
+    }
+  }, [isCollapsed]);
+
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isResizing) return;
+
+      const sidebarLeft = sidebarRef.current?.getBoundingClientRect().left ?? 0;
+      const newWidth = e.clientX - sidebarLeft;
+      if (newWidth >= MIN_WIDTH && newWidth <= MAX_WIDTH) {
+        setSidebarWidth(newWidth);
+      }
+    };
+
+    const handleMouseUp = () => {
+      setIsResizing(false);
+    };
+
+    if (isResizing) {
+      document.addEventListener("mousemove", handleMouseMove);
+      document.addEventListener("mouseup", handleMouseUp);
+      document.body.style.cursor = "col-resize";
+      document.body.style.userSelect = "none";
+    }
+
+    return () => {
+      document.removeEventListener("mousemove", handleMouseMove);
+      document.removeEventListener("mouseup", handleMouseUp);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+  }, [isResizing, setSidebarWidth]);
 
   return (
     <>
-      <div className="relative">
+      <div className="relative" ref={sidebarRef}>
         <Sidebar
           collapsible="icon"
           className="border-r-0"
+          disableTransition={isResizing}
         >
           <SidebarHeader className="h-16 justify-center">
             <div className="flex items-center gap-3 px-2 transition-all w-full">
@@ -286,21 +333,22 @@ function DashboardLayoutContent({
               >
                 <PanelLeft className="h-4 w-4 text-muted-foreground" />
               </button>
-              {!isCollapsed ? <div className="min-w-0"><span className="block text-lg font-extrabold tracking-tight text-[#3f2c20]">Kitchen Admin</span><span className="block text-[10px] font-bold uppercase tracking-wider text-[#a06e53]">Operations desk</span></div> : null}
+              {!isCollapsed ? <div className="min-w-0"><span className="font-bold block text-lg tracking-tight text-gray-900">Kitchen Admin</span><span className="block text-[9px] font-extrabold uppercase tracking-[0.16em] text-gray-500">Operations desk</span></div> : null}
             </div>
           </SidebarHeader>
 
           <SidebarContent className="gap-0 px-1">
+            {!isCollapsed && <div className="mx-2 mt-3 rounded-2xl bg-gray-900 p-4 text-white"><p className="text-[10px] font-extrabold uppercase tracking-[0.16em] text-gray-300">Kitchen status</p><p className="font-bold mt-2 text-lg">Ready to configure</p><p className="mt-1 text-xs leading-relaxed text-white/65">Add your menu, then switch the kitchen on when you are ready for real orders.</p></div>}
             <SidebarMenu className="px-2 py-4">
-              {visibleItems.map(item => {
-                const isActive = isActiveSection(item.section);
+              {menuItems.map(item => {
+                const isActive = location === item.path;
                 return (
-                  <SidebarMenuItem key={item.section}>
+                  <SidebarMenuItem key={item.path}>
                     <SidebarMenuButton
                       isActive={isActive}
-                      onClick={() => setLocation(pathFor(item.section))}
+                      onClick={() => setLocation(item.path)}
                       tooltip={item.label}
-                      className={`h-10 rounded-lg transition-all font-semibold ${isActive ? "bg-[#f3e3d3] text-[#9C4A07] hover:bg-[#f3e3d3]" : "text-[#6d5140] hover:bg-[#f8eee6]"}`}
+                      className={`h-11 rounded-xl transition-all font-semibold ${isActive ? "bg-red-50 text-[#c84630] hover:bg-red-50" : "text-gray-600 hover:bg-gray-50"}`}
                     >
                       <item.icon
                         className={`h-4 w-4 ${isActive ? "text-primary" : ""}`}
@@ -344,87 +392,25 @@ function DashboardLayoutContent({
             </DropdownMenu>
           </SidebarFooter>
         </Sidebar>
+        <div
+          className={`absolute top-0 right-0 w-1 h-full cursor-col-resize hover:bg-primary/20 transition-colors ${isCollapsed ? "hidden" : ""}`}
+          onMouseDown={() => {
+            if (isCollapsed) return;
+            setIsResizing(true);
+          }}
+          style={{ zIndex: 50 }}
+        />
       </div>
 
-      <SidebarInset className="min-h-screen bg-[#f7f2eb]">
+      <SidebarInset className="min-h-screen bg-[#F8F9FA]">
         {isMobile && (
-          <div className="sticky top-0 z-40 flex h-16 items-center justify-between border-b border-[#D8DFC0] bg-[#fffdf9]/95 px-4 backdrop-blur">
-            <div className="min-w-0"><p className="text-[10px] font-bold uppercase tracking-wider text-[#a06e53]">Kitchen Admin</p><span className="block truncate text-lg font-extrabold text-[#3f2c20]">{sectionTitle(section)}</span></div>
-            <SidebarTrigger className="h-10 w-10 rounded-xl border border-[#D8DFC0] bg-[#E9EFD6] text-[#B95509]" aria-label="Open operations navigation"><Menu className="h-5 w-5" /></SidebarTrigger>
+          <div className="sticky top-0 z-40 flex h-16 items-center justify-between border-b border-gray-200 bg-white/95 px-4 backdrop-blur">
+            <div className="min-w-0"><p className="text-[9px] font-extrabold uppercase tracking-[0.16em] text-gray-500">Kitchen Admin</p><span className="font-bold block truncate text-xl text-gray-900">{activeMenuItem?.label ?? "Operations"}</span></div>
+            <SidebarTrigger className="h-10 w-10 rounded-xl border border-gray-200 bg-white text-gray-700" aria-label="Open operations navigation"><Menu className="h-5 w-5" /></SidebarTrigger>
           </div>
         )}
         <main className="flex-1 p-0 pb-24 md:p-0 md:pb-0">{children}</main>
-        {isMobile && (
-          <nav aria-label="Primary operations navigation" className="fixed inset-x-0 bottom-0 z-40 border-t border-[#e6d3c2] bg-[#fffdf9]/95 px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur">
-            <div className="mx-auto grid max-w-lg grid-cols-4 gap-1">
-              {mobilePrimary.map((item) => {
-                const active = isActiveSection(item.section);
-                return (
-                  <button
-                    key={item.section}
-                    onClick={() => setLocation(pathFor(item.section))}
-                    aria-label={`Go to ${item.label}`}
-                    aria-current={active ? "page" : undefined}
-                    className={`flex min-h-14 flex-col items-center justify-center gap-1 rounded-xl text-[10px] font-extrabold transition-colors ${active ? "bg-[#f8e3d4] text-[#9C4A07]" : "text-[#856552]"}`}
-                  >
-                    <item.icon className="h-4 w-4" aria-hidden />
-                    {item.label}
-                  </button>
-                );
-              })}
-              <Sheet open={moreOpen} onOpenChange={setMoreOpen}>
-                <SheetTrigger asChild>
-                  <button
-                    aria-label="Open more operations sections"
-                    className="flex min-h-14 flex-col items-center justify-center gap-1 rounded-xl text-[10px] font-extrabold text-[#856552]"
-                  >
-                    <PanelLeft className="h-4 w-4" aria-hidden />
-                    More
-                  </button>
-                </SheetTrigger>
-                <SheetContent side="bottom" className="max-h-[80vh] overflow-y-auto rounded-t-3xl bg-[#fffdf9]">
-                  <SheetHeader>
-                    <SheetTitle className="text-left font-display text-xl text-[#3f2c20]">
-                      All sections
-                    </SheetTitle>
-                  </SheetHeader>
-                  <div className="space-y-5 pb-6 pt-2">
-                    {mobileMoreGroups.map((group) => {
-                      const groupItems = mobileMore.filter((item) => item.group === group);
-                      if (!groupItems.length) return null;
-                      return (
-                        <div key={group}>
-                          <p className="text-[10px] font-extrabold uppercase tracking-[0.16em] text-[#a06e53]">
-                            {group}
-                          </p>
-                          <div className="mt-2 grid grid-cols-2 gap-2">
-                            {groupItems.map((item) => {
-                              const active = isActiveSection(item.section);
-                              return (
-                                <button
-                                  key={item.section}
-                                  onClick={() => {
-                                    setLocation(pathFor(item.section));
-                                    setMoreOpen(false);
-                                  }}
-                                  aria-current={active ? "page" : undefined}
-                                  className={`flex min-h-14 items-center gap-3 rounded-xl border px-3 text-left text-xs font-extrabold ${active ? "border-[#B95509] bg-[#f8e3d4] text-[#9C4A07]" : "border-[#D8DFC0] bg-white text-[#6d5140]"}`}
-                                >
-                                  <item.icon className="h-4 w-4 shrink-0" aria-hidden />
-                                  {item.label}
-                                </button>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </SheetContent>
-              </Sheet>
-            </div>
-          </nav>
-        )}
+        {isMobile && <nav aria-label="Primary operations navigation" className="fixed inset-x-0 bottom-0 z-40 border-t border-gray-200 bg-white/95 px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur"><div className="mx-auto grid max-w-lg grid-cols-4 gap-1">{mobilePrimaryItems.map(item => { const active = location === item.path; return <button key={item.path} onClick={() => setLocation(item.path)} className={`flex min-h-14 flex-col items-center justify-center gap-1 rounded-xl text-[10px] font-extrabold transition-colors ${active ? "bg-red-50 text-[#c84630]" : "text-gray-500"}`}><item.icon className="h-4 w-4" />{item.label}</button>; })}<button onClick={toggleSidebar} className="flex min-h-14 flex-col items-center justify-center gap-1 rounded-xl text-[10px] font-extrabold text-gray-500"><PanelLeft className="h-4 w-4" />More</button></div></nav>}
       </SidebarInset>
     </>
   );

@@ -5,7 +5,7 @@
  */
 /// <reference types="@types/google.maps" />
 
-import { useState, useCallback, useRef, useEffect, Suspense, lazy } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import {
   Dialog,
   DialogContent,
@@ -16,9 +16,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { MapPin, Navigation, Search, AlertTriangle, Loader2, Check, Crosshair } from "lucide-react";
-// Lazy: the Google Maps bundle only downloads when the pin step renders,
-// keeping the initial storefront JS small on 2G / low-end phones.
-const MapView = lazy(() => import("@/components/Map").then((m) => ({ default: m.MapView })));
+import { MapView } from "@/components/Map";
 import {
   searchPlaces,
   getPlaceDetails,
@@ -90,46 +88,19 @@ export default function DeliveryLocationDrawer({
   onOpenChange,
   onConfirm,
   existingLocation,
-  initialCenter,
-  cityBias,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onConfirm: (location: DeliveryLocation) => void;
   existingLocation?: DeliveryLocation | null;
-  /** Bias the initial map pin (outlet coordinates when known). */
-  initialCenter?: { lat: number; lng: number } | null;
-  /** Bias place search toward the outlet city. */
-  cityBias?: string | null;
 }) {
   const [step, setStep] = useState<GeoStep>(
     existingLocation?.confirmed ? "confirmed" : "choose_method"
   );
   const [geoState, setGeoState] = useState<GeoLocationState | null>(null);
   const [gpsError, setGpsError] = useState<string | null>(null);
-  const [geoError, setGeoError] = useState<string | null>(null);
-  // Conditional Back: only offer Back when the user actually visited a prior step.
-  const [visitedChoice, setVisitedChoice] = useState(step === "choose_method");
-  const [cameViaMap, setCameViaMap] = useState(false);
 
-  // Last confirmed pin (this device) — used to bias the initial map position.
-  const [lastPin] = useState<{ lat: number; lng: number } | null>(() => {
-    try {
-      const raw = localStorage.getItem("ck_last_pin");
-      if (!raw) return null;
-      const parsed = JSON.parse(raw) as { lat?: unknown; lng?: unknown };
-      if (typeof parsed.lat === "number" && typeof parsed.lng === "number") {
-        return { lat: parsed.lat, lng: parsed.lng };
-      }
-      return null;
-    } catch {
-      return null;
-    }
-  });
-  const biasedCenter = initialCenter ?? lastPin ?? DEFAULT_MAP_CENTER;
-
-  // Address form — re-synced whenever the drawer opens so edits always
-  // start from the latest confirmed location (the drawer stays mounted).
+  // Address form
   const [flatHouse, setFlatHouse] = useState(existingLocation?.flatHouse ?? "");
   const [building, setBuilding] = useState(existingLocation?.building ?? "");
   const [street, setStreet] = useState(existingLocation?.street ?? "");
@@ -137,70 +108,21 @@ export default function DeliveryLocationDrawer({
   const [area, setArea] = useState(existingLocation?.area ?? "");
   const [city, setCity] = useState(existingLocation?.city ?? "");
   const [postalCode, setPostalCode] = useState(existingLocation?.postalCode ?? "");
-  useEffect(() => {
-    if (!open) return;
-    setFlatHouse(existingLocation?.flatHouse ?? "");
-    setBuilding(existingLocation?.building ?? "");
-    setStreet(existingLocation?.street ?? "");
-    setLandmark(existingLocation?.landmark ?? "");
-    setArea(existingLocation?.area ?? "");
-    setCity(existingLocation?.city ?? "");
-    setPostalCode(existingLocation?.postalCode ?? "");
-  }, [open, existingLocation]);
 
-  // Warm up the Maps script as soon as the drawer opens — search needs
-  // google.maps loaded, but MapView only mounts at the map_confirm step.
-  // Without this, the first search always fails with MAPS_UNAVAILABLE.
-  useEffect(() => {
-    if (!open) return;
-    let cancelled = false;
-    void import("@/components/Map").then((m) => {
-      if (!cancelled) void m.preloadMaps();
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [open]);
   // Map state
   const mapRef = useRef<google.maps.Map | null>(null);
   const idleListenerRef = useRef<google.maps.MapsEventListener | null>(null);
-  // Surfaces Maps JS load failures (missing key, blocked script) inside the
-  // drawer instead of a silent blank map.
-  const [mapsError, setMapsError] = useState<string | null>(null);
-  // Explicit Map/Satellite toggle (the default control is tiny and was broken
-  // by DEMO_MAP_ID before — this is the discoverable switch for rooftops).
-  const [mapType, setMapType] = useState<"roadmap" | "satellite">("roadmap");
-  const setBasemap = useCallback((next: "roadmap" | "satellite") => {
-    setMapType(next);
-    try {
-      mapRef.current?.setMapTypeId(next === "satellite" ? "satellite" : "roadmap");
-    } catch {
-      // map not ready yet — state applies on next render via key below
-    }
-  }, []);
 
   // Search state
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<PlaceSearchResult[]>([]);
   const [searching, setSearching] = useState(false);
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => () => {
-    if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
-  }, []);
 
   const reset = useCallback(() => {
-    // Invalidate any in-flight GPS callbacks so a stale fix can't
-    // overwrite the fresh state (drawer closed/reopened mid-lookup).
-    gpsAttemptRef.current++;
-    setGpsStage(null);
-    setMapsError(null);
-    setMapType("roadmap");
     setStep("choose_method");
     setGeoState(null);
     setGpsError(null);
-    setGeoError(null);
-    setVisitedChoice(true);
-    setCameViaMap(false);
     setSearchQuery("");
     setSearchResults([]);
     if (!existingLocation) {
@@ -219,20 +141,10 @@ export default function DeliveryLocationDrawer({
     onOpenChange(open);
   }, [onOpenChange, reset]);
 
-  // --- Method A: Use Current Location (two-stage for desktop resilience) ---
-  // Desktops usually have no GPS and often no Wi-Fi positioning, so a single
-  // high-accuracy request just burns 10s and times out. We try precise first
-  // (fast on phones), then automatically fall back to a coarse fix before
-  // giving up and pointing at search / map pin.
-  const [gpsStage, setGpsStage] = useState<"precise" | "approximate" | null>(null);
-  const gpsAttemptRef = useRef(0);
-
+  // --- Method A: Use Current Location ---
   const useCurrentLocation = useCallback(() => {
     setStep("loading");
     setGpsError(null);
-    setGeoError(null);
-    setVisitedChoice(true);
-    setGpsStage("precise");
 
     if (!navigator.geolocation) {
       setGpsError("Geolocation is not supported by your browser. Please search or place a pin instead.");
@@ -240,149 +152,66 @@ export default function DeliveryLocationDrawer({
       return;
     }
 
-    const attemptId = ++gpsAttemptRef.current;
-
-    const handlePosition = (position: GeolocationPosition) => {
-      if (attemptId !== gpsAttemptRef.current) return;
-      const { latitude, longitude, accuracy } = position.coords;
-      const level = classifyAccuracy(accuracy);
-
-      setGeoState({
-        latitude,
-        longitude,
-        accuracyMeters: accuracy,
-        deviceAccuracyMeters: accuracy,
-        source: "device_gps",
-      });
-
-      if (requiresMapConfirmation(level)) {
-        setCameViaMap(true);
-        setStep("map_confirm");
-      } else {
-        setCameViaMap(false);
-        setStep("address_form");
-      }
-
-      reverseGeocode(latitude, longitude).then((result) => {
-        if (attemptId !== gpsAttemptRef.current) return;
-        if (result.area) setArea(result.area);
-        if (result.city) setCity(result.city);
-        if (result.postalCode) setPostalCode(result.postalCode);
-        if (result.street) setStreet(result.street);
-        if (!result.area && !result.city && !result.postalCode) {
-          setGeoError("We found your coordinates but couldn't identify the area. Please fill the address fields manually.");
-        }
-      }).catch(() => {
-        if (attemptId !== gpsAttemptRef.current) return;
-        setGeoError("Address lookup failed. Please fill the address fields manually.");
-      });
-    };
-
-    const attemptCoarse = () => {
-      if (attemptId !== gpsAttemptRef.current) return;
-      setGpsStage("approximate");
-      navigator.geolocation.getCurrentPosition(
-        handlePosition,
-        (error) => {
-          if (attemptId !== gpsAttemptRef.current) return;
-          setGpsStage(null);
-          setGpsError(
-            "Couldn't get a location fix on this device — common on desktops. " +
-            "Search your address below or drop a pin on the map instead."
-          );
-          setStep("choose_method");
-        },
-        { enableHighAccuracy: false, timeout: 12000, maximumAge: 60000 },
-      );
-    };
-
     navigator.geolocation.getCurrentPosition(
-      handlePosition,
-      (error) => {
-        if (attemptId !== gpsAttemptRef.current) return;
-        if (error.code === 1) {
-          // Denied: retrying would just re-prompt/fail — go straight to alternatives.
-          setGpsStage(null);
-          setGpsError("Location access is blocked. Allow it in your browser's site settings, or continue with search / map pin below.");
-          setStep("choose_method");
-          return;
+      (position) => {
+        const { latitude, longitude, accuracy } = position.coords;
+        const level = classifyAccuracy(accuracy);
+
+        setGeoState({
+          latitude,
+          longitude,
+          accuracyMeters: accuracy,
+          deviceAccuracyMeters: accuracy,
+          source: "device_gps",
+        });
+
+        if (requiresMapConfirmation(level)) {
+          setStep("map_confirm");
+        } else {
+          setStep("address_form");
         }
-        // UNAVAILABLE or TIMEOUT on precise fix: one automatic coarse attempt.
-        attemptCoarse();
+
+        reverseGeocode(latitude, longitude).then((result) => {
+          if (result.area) setArea(result.area);
+          if (result.city) setCity(result.city);
+          if (result.postalCode) setPostalCode(result.postalCode);
+          if (result.street) setStreet(result.street);
+        });
       },
-      { enableHighAccuracy: true, timeout: 8000, maximumAge: 30000 },
+      (error) => {
+        let msg = "Unable to get your location.";
+        if (error.code === 1) msg = "Location permission denied. Please search or place a pin on the map.";
+        else if (error.code === 2) msg = "Location unavailable. Please search or place a pin on the map.";
+        else if (error.code === 3) msg = "Location request timed out. Please try again or place a pin.";
+        setGpsError(msg);
+        setStep("choose_method");
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 }
     );
   }, []);
 
   // --- Method B: Search Address (Google Places Autocomplete) ---
-  const runSearchNow = useCallback(async (raw?: string) => {
-    const value = (raw ?? searchQuery).trim();
-    if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
-    if (value.length < 3) {
-      setSearchResults([]);
-      return;
-    }
-    setSearching(true);
-    setGeoError(null);
-    try {
-      // Ensure the Maps libraries exist before searching (fast typists can
-      // beat the open-time warmup). Dynamic import keeps the Map chunk split.
-      const { preloadMaps } = await import("@/components/Map");
-      const ready = await preloadMaps();
-      if (!ready) {
-        setGeoError("Map search isn't available right now (maps failed to load). Place the pin on the map below, or check your connection and retry.");
-        return;
-      }
-      // Ignore placeholder outlet cities ("To be configured") — biasing with
-      // them poisons the query and returns zero results.
-      const biased = cityBias && cityBias !== "To be configured" ? `${value}, ${cityBias}` : value;
-      // Location-bias around the outlet so nearby apartments rank first.
-      const bias = initialCenter && Number.isFinite(initialCenter.lat) && Number.isFinite(initialCenter.lng)
-        ? { lat: initialCenter.lat, lng: initialCenter.lng }
-        : undefined;
-      const results = await searchPlaces(biased, bias);
-      setSearchResults(results);
-      if (results.length === 0) {
-        setGeoError("No places found for that search. Try the building name, a nearby landmark, or place the pin on the map.");
-      }
-    } catch (err) {
-      if (err instanceof Error && err.message === "MAPS_UNAVAILABLE") {
-        setGeoError("Map search isn't available right now (maps failed to load). Place the pin on the map below, or check your connection and retry.");
-      } else {
-        setGeoError("Place search failed. Check your connection or place the pin on the map instead.");
-      }
-    } finally {
-      setSearching(false);
-    }
-  }, [searchQuery, cityBias, initialCenter]);
-
   const handleSearchInput = useCallback((value: string) => {
     setSearchQuery(value);
-    setGeoError(null);
     if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
     if (!value.trim() || value.length < 3) {
       setSearchResults([]);
-      setSearching(false);
       return;
     }
     setSearching(true);
-    searchTimerRef.current = setTimeout(() => {
-      void runSearchNow(value);
+    searchTimerRef.current = setTimeout(async () => {
+      const results = await searchPlaces(value);
+      setSearchResults(results);
+      setSearching(false);
     }, 300);
-  }, [runSearchNow]);
+  }, []);
 
   const handlePlaceSelect = useCallback(async (placeId: string, description: string) => {
     setSearchQuery(description);
     setSearchResults([]);
     setSearching(true);
-    setGeoError(null);
 
-    let details: Awaited<ReturnType<typeof getPlaceDetails>>;
-    try {
-      details = await getPlaceDetails(placeId);
-    } catch {
-      details = null;
-    }
+    const details = await getPlaceDetails(placeId);
     setSearching(false);
 
     if (details) {
@@ -400,10 +229,7 @@ export default function DeliveryLocationDrawer({
       if (details.city) setCity(details.city);
       if (details.postalCode) setPostalCode(details.postalCode);
       if (details.street) setStreet(details.street);
-      setCameViaMap(true);
       setStep("map_confirm");
-    } else {
-      setGeoError("Couldn't load that place's location. Pick another result or place the pin on the map.");
     }
   }, []);
 
@@ -437,20 +263,12 @@ export default function DeliveryLocationDrawer({
     });
   }, []);
 
-  // Center map when geoState changes and we're on map_confirm step.
-  // Skip re-centering when the map is already there: idle-drag updates echo
-  // the map center back into geoState, and re-centering would fight the user
-  // (plus force-zoom them back to 16 after every pinch-zoom).
+  // Center map when geoState changes and we're on map_confirm step
   useEffect(() => {
-    if (step !== "map_confirm" || !geoState || !mapRef.current) return;
-    const center = mapRef.current.getCenter();
-    if (center) {
-      const dLat = Math.abs(center.lat() - geoState.latitude);
-      const dLng = Math.abs(center.lng() - geoState.longitude);
-      if (dLat < 0.00005 && dLng < 0.00005) return;
+    if (step === "map_confirm" && geoState && mapRef.current) {
+      mapRef.current.setCenter({ lat: geoState.latitude, lng: geoState.longitude });
+      mapRef.current.setZoom(16);
     }
-    mapRef.current.setCenter({ lat: geoState.latitude, lng: geoState.longitude });
-    mapRef.current.setZoom(16);
   }, [step, geoState?.latitude, geoState?.longitude]);
 
   // Reverse geocode when map settles (debounced)
@@ -498,28 +316,23 @@ export default function DeliveryLocationDrawer({
       confirmedAt: new Date().toISOString(),
       confirmed: true,
     };
-    try {
-      localStorage.setItem("ck_last_pin", JSON.stringify({ lat: location.latitude, lng: location.longitude }));
-    } catch {
-      // storage unavailable — location still confirms for this session
-    }
     onConfirm(location);
     onOpenChange(false);
   }, [flatHouse, building, street, landmark, area, city, postalCode, geoState, onConfirm, onOpenChange]);
 
-  const formValid = Boolean(flatHouse.trim() && area.trim() && city.trim() && /^\d{6}$/.test(postalCode) && geoState);
+  const formValid = flatHouse.trim() && area.trim() && city.trim() && /^\d{6}$/.test(postalCode) && geoState;
 
   const accuracyLevel = geoState ? classifyAccuracy(geoState.deviceAccuracyMeters ?? geoState.accuracyMeters) : null;
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="max-w-md rounded-[1.5rem] border-[#D8DFC0] bg-[#fffaf3] p-0 max-h-[90vh] overflow-y-auto">
-        <div className="paper-grain rounded-t-[1.5rem] border-b border-[#D8DFC0] p-6">
+      <DialogContent className="max-w-md rounded-[1.5rem] border-gray-200 bg-white p-0 max-h-[90vh] overflow-y-auto">
+        <div className="rounded-t-[1.5rem] border-b border-gray-200 p-6">
           <DialogHeader>
-            <DialogTitle className="font-display text-3xl text-[#2A3A0C]">
+            <DialogTitle className="font-extrabold tracking-tight text-3xl text-gray-900">
               Delivery Location
             </DialogTitle>
-            <DialogDescription className="text-[#5F6B3C]">
+            <DialogDescription className="text-gray-500">
               {step === "confirmed" && existingLocation
                 ? "Your delivery location is confirmed."
                 : "Choose how to set your delivery location."}
@@ -532,21 +345,15 @@ export default function DeliveryLocationDrawer({
           {step === "choose_method" && (
             <>
               {gpsError && (
-                <div role="alert" className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-700">
+                <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-700">
                   <AlertTriangle className="mr-1 inline h-4 w-4" />
                   {gpsError}
-                </div>
-              )}
-              {geoError && (
-                <div role="alert" className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-700">
-                  <AlertTriangle className="mr-1 inline h-4 w-4" />
-                  {geoError}
                 </div>
               )}
 
               <Button
                 onClick={useCurrentLocation}
-                className="h-12 w-full rounded-xl bg-[#B95509] font-bold text-white hover:bg-[#9C4A07]"
+                className="h-12 w-full rounded-xl bg-[#C84630] font-bold text-white hover:bg-[#b03a28]"
               >
                 <Navigation className="mr-2 h-4 w-4" />
                 Use My Current Location
@@ -554,10 +361,10 @@ export default function DeliveryLocationDrawer({
 
               <div className="relative">
                 <div className="absolute inset-0 flex items-center">
-                  <div className="w-full border-t border-[#e7d2c0]" />
+                  <div className="w-full border-t border-gray-200" />
                 </div>
                 <div className="relative flex justify-center text-xs">
-                  <span className="bg-[#fffaf3] px-2 text-[#5F6B3C]">or</span>
+                  <span className="bg-white px-2 text-gray-500">or</span>
                 </div>
               </div>
 
@@ -565,38 +372,28 @@ export default function DeliveryLocationDrawer({
                 <div className="flex gap-2">
                   <Input
                     placeholder="Search address..."
-                    aria-label="Search delivery address"
                     value={searchQuery}
                     onChange={(e) => handleSearchInput(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
-                        e.preventDefault();
-                        void runSearchNow();
-                      }
-                    }}
-                    className="h-12 rounded-xl border-[#D8DFC0] bg-white text-[#2A3A0C]"
+                    className="h-12 rounded-xl border-gray-200 bg-white text-gray-900"
                   />
                   <Button
                     variant="outline"
-                    aria-label="Search places"
-                    onClick={() => void runSearchNow()}
-                    className="h-12 rounded-xl border-[#D8DFC0] bg-white font-bold text-[#2A3A0C]"
-                    disabled={!searchQuery.trim() || searching}
+                    className="h-12 rounded-xl border-gray-200 bg-white font-bold text-gray-700"
+                    disabled={!searchQuery.trim()}
                   >
                     {searching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
                   </Button>
                 </div>
 
                 {searchResults.length > 0 && (
-                  <div className="absolute left-0 right-0 top-14 z-50 max-h-48 overflow-y-auto rounded-xl border border-[#D8DFC0] bg-white shadow-lg">
+                  <div className="absolute left-0 right-0 top-14 z-50 max-h-48 overflow-y-auto rounded-xl border border-gray-200 bg-white shadow-lg">
                     {searchResults.map((result) => (
                       <button
                         key={result.placeId}
-                        type="button"
                         onClick={() => handlePlaceSelect(result.placeId, result.description)}
-                        className="w-full px-4 py-3 text-left text-sm text-[#2A3A0C] hover:bg-[#E9EFD6]"
+                        className="w-full px-4 py-3 text-left text-sm text-gray-900 hover:bg-gray-50"
                       >
-                        <MapPin className="mr-2 inline h-3 w-3 text-[#B95509]" />
+                        <MapPin className="mr-2 inline h-3 w-3 text-[#C84630]" />
                         {result.description}
                       </button>
                     ))}
@@ -607,26 +404,14 @@ export default function DeliveryLocationDrawer({
               <Button
                 onClick={() => {
                   setGeoState({
-                    latitude: biasedCenter.lat,
-                    longitude: biasedCenter.lng,
+                    latitude: DEFAULT_MAP_CENTER.lat,
+                    longitude: DEFAULT_MAP_CENTER.lng,
                     source: "map_pin",
                   });
-                  setVisitedChoice(true);
-                  setCameViaMap(true);
                   setStep("map_confirm");
-                  // Autofill empty fields for a fresh pin — never overwrite
-                  // what the user already typed or confirmed.
-                  reverseGeocode(biasedCenter.lat, biasedCenter.lng).then((result) => {
-                    if (result.area) setArea((prev) => prev || result.area || prev);
-                    if (result.city) setCity((prev) => prev || result.city || prev);
-                    if (result.postalCode) setPostalCode((prev) => prev || result.postalCode || prev);
-                    if (result.street) setStreet((prev) => prev || result.street || prev);
-                  }).catch(() => {
-                    // Offline / lookup failed — the user fills the form manually.
-                  });
                 }}
                 variant="outline"
-                className="h-11 w-full rounded-xl border-[#D8DFC0] bg-white font-bold text-[#2A3A0C]"
+                className="h-11 w-full rounded-xl border-gray-200 bg-white font-bold text-gray-700"
               >
                 <MapPin className="mr-2 h-4 w-4" />
                 Place Pin on Map
@@ -637,24 +422,20 @@ export default function DeliveryLocationDrawer({
           {/* Step: Loading */}
           {step === "loading" && (
             <div className="flex flex-col items-center gap-4 py-8">
-              <Loader2 className="h-8 w-8 animate-spin text-[#B95509]" />
-              <p className="text-sm text-[#5F6B3C]">
-                {gpsStage === "approximate"
-                  ? "Precise fix timed out — trying approximate location…"
-                  : "Getting your location…"}
-              </p>
+              <Loader2 className="h-8 w-8 animate-spin text-[#C84630]" />
+              <p className="text-sm text-gray-500">Getting your location...</p>
             </div>
           )}
 
           {/* Step: Map Confirm — real interactive map with fixed-center pin */}
           {step === "map_confirm" && (
             <>
-              <div className="rounded-xl border border-[#D8DFC0] bg-[#E9EFD6] p-4">
-                <p className="text-sm font-semibold text-[#2A3A0C]">
-                  <Crosshair className="mr-1 inline h-4 w-4 text-[#B95509]" />
+              <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+                <p className="text-sm font-semibold text-gray-700">
+                  <Crosshair className="mr-1 inline h-4 w-4 text-[#C84630]" />
                   Confirm your delivery pin
                 </p>
-                <p className="mt-1 text-xs text-[#885e43]">
+                <p className="mt-1 text-xs text-gray-600">
                   Move the map so the pin points to your exact delivery location.
                 </p>
               </div>
@@ -674,55 +455,24 @@ export default function DeliveryLocationDrawer({
               )}
 
               {/* Interactive Map with fixed-center pin */}
-              <div className="relative overflow-hidden rounded-xl border border-[#D8DFC0]">
-                {mapsError && (
-                  <div role="alert" className="m-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs font-bold text-amber-700">
-                    <AlertTriangle className="mr-1 inline h-3 w-3" />
-                    {mapsError} You can still type the address fields manually below.
-                  </div>
-                )}
-                <div className="absolute left-2 top-2 z-10 flex overflow-hidden rounded-lg border border-[#D8DFC0] bg-white shadow-sm" role="group" aria-label="Map style">
-                  {(["roadmap", "satellite"] as const).map((t) => (
-                    <button
-                      key={t}
-                      type="button"
-                      onClick={() => setBasemap(t)}
-                      aria-pressed={mapType === t}
-                      className={`min-h-[44px] px-3 text-xs font-bold capitalize ${mapType === t ? "bg-[#2A3A0C] text-white" : "text-[#5F6B3C] hover:bg-[#f3ede4]"}`}
-                    >
-                      {t === "roadmap" ? "Map" : "Satellite"}
-                    </button>
-                  ))}
-                </div>
-                <Suspense
-                  fallback={
-                    <div className="grid h-[300px] place-items-center bg-[#f6ecdf] text-sm font-bold text-[#5F6B3C]">
-                      <span className="inline-flex items-center gap-2">
-                        <Loader2 className="h-5 w-5 animate-spin text-[#B95509]" aria-hidden="true" />
-                        Loading the map…
-                      </span>
-                    </div>
-                  }
-                >
-                  <MapView
-                    className="h-[300px]"
-                    initialCenter={geoState ? { lat: geoState.latitude, lng: geoState.longitude } : biasedCenter}
-                    initialZoom={16}
-                    onMapReady={handleMapReady}
-                    onLoadError={(message) => setMapsError(message)}
-                  />
-                </Suspense>
+              <div className="relative overflow-hidden rounded-xl border border-gray-200">
+                <MapView
+                  className="h-[300px]"
+                  initialCenter={geoState ? { lat: geoState.latitude, lng: geoState.longitude } : DEFAULT_MAP_CENTER}
+                  initialZoom={16}
+                  onMapReady={handleMapReady}
+                />
                 {/* Fixed center pin overlay */}
                 <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
                   <div className="relative">
-                    <MapPin className="h-8 w-8 -translate-y-1/2 text-[#B95509] drop-shadow-md" fill="#B95509" />
+                    <MapPin className="h-8 w-8 -translate-y-1/2 text-[#C84630] drop-shadow-md" fill="#C84630" />
                     <div className="absolute -bottom-1 left-1/2 h-2 w-2 -translate-x-1/2 rounded-full bg-black/20 blur-sm" />
                   </div>
                 </div>
               </div>
 
               {geoState && (
-                <div className="space-y-1 text-xs text-[#885e43]">
+                <div className="space-y-1 text-xs text-gray-600">
                   <p>Pin: {geoState.latitude.toFixed(6)}, {geoState.longitude.toFixed(6)}</p>
                   {geoState.deviceAccuracyMeters && (
                     <p>Device accuracy: ~{Math.round(geoState.deviceAccuracyMeters)}m ({accuracyLevel})</p>
@@ -731,24 +481,17 @@ export default function DeliveryLocationDrawer({
               )}
 
               <div className="flex gap-2">
-                {visitedChoice && (
-                  <Button
-                    onClick={() => setStep("choose_method")}
-                    variant="outline"
-                    className="h-11 flex-1 rounded-xl border-[#D8DFC0] bg-white font-bold text-[#2A3A0C]"
-                  >
-                    Back
-                  </Button>
-                )}
                 <Button
-                  onClick={() => {
-                    if (geoState) {
-                      setCameViaMap(true);
-                      setStep("address_form");
-                    }
-                  }}
+                  onClick={() => setStep("choose_method")}
+                  variant="outline"
+                  className="h-11 flex-1 rounded-xl border-gray-200 bg-white font-bold text-gray-700"
+                >
+                  Back
+                </Button>
+                <Button
+                  onClick={() => geoState && setStep("address_form")}
                   disabled={!geoState}
-                  className="h-11 flex-1 rounded-xl bg-[#B95509] font-bold text-white hover:bg-[#9C4A07] disabled:opacity-50"
+                  className="h-11 flex-1 rounded-xl bg-[#C84630] font-bold text-white hover:bg-[#b03a28] disabled:opacity-50"
                 >
                   <Check className="mr-1 h-4 w-4" />
                   Confirm delivery pin
@@ -760,14 +503,8 @@ export default function DeliveryLocationDrawer({
           {/* Step: Address Form */}
           {step === "address_form" && (
             <>
-              {geoError && (
-                <div role="alert" className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-700">
-                  <AlertTriangle className="mr-1 inline h-3 w-3" />
-                  {geoError}
-                </div>
-              )}
               {geoState && (
-                <div className="rounded-xl border border-[#D8DFC0] bg-[#E9EFD6] p-3 text-xs text-[#885e43]">
+                <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 text-xs text-gray-600">
                   Location: {geoState.latitude.toFixed(6)}, {geoState.longitude.toFixed(6)}
                   {geoState.deviceAccuracyMeters && <> · Accuracy: ~{Math.round(geoState.deviceAccuracyMeters)}m</>}
                   {geoState.source === "map_pin" && <> · Source: Map pin</>}
@@ -777,72 +514,63 @@ export default function DeliveryLocationDrawer({
               <div className="space-y-3">
                 <Input
                   placeholder="Flat / House number *"
-                  aria-label="Flat or house number"
                   value={flatHouse}
                   onChange={(e) => setFlatHouse(e.target.value)}
-                  className="h-11 rounded-xl border-[#D8DFC0] bg-white text-[#2A3A0C]"
+                  className="h-11 rounded-xl border-gray-200 bg-white text-gray-900"
                 />
                 <Input
                   placeholder="Building / Apartment name"
-                  aria-label="Building or apartment name"
                   value={building}
                   onChange={(e) => setBuilding(e.target.value)}
-                  className="h-11 rounded-xl border-[#D8DFC0] bg-white text-[#2A3A0C]"
+                  className="h-11 rounded-xl border-gray-200 bg-white text-gray-900"
                 />
                 <Input
                   placeholder="Street"
-                  aria-label="Street"
                   value={street}
                   onChange={(e) => setStreet(e.target.value)}
-                  className="h-11 rounded-xl border-[#D8DFC0] bg-white text-[#2A3A0C]"
+                  className="h-11 rounded-xl border-gray-200 bg-white text-gray-900"
                 />
                 <Input
                   placeholder="Landmark"
-                  aria-label="Landmark"
                   value={landmark}
                   onChange={(e) => setLandmark(e.target.value)}
-                  className="h-11 rounded-xl border-[#D8DFC0] bg-white text-[#2A3A0C]"
+                  className="h-11 rounded-xl border-gray-200 bg-white text-gray-900"
                 />
                 <Input
                   placeholder="Area / Locality *"
-                  aria-label="Area or locality"
                   value={area}
                   onChange={(e) => setArea(e.target.value)}
-                  className="h-11 rounded-xl border-[#D8DFC0] bg-white text-[#2A3A0C]"
+                  className="h-11 rounded-xl border-gray-200 bg-white text-gray-900"
                 />
                 <div className="grid grid-cols-2 gap-2">
                   <Input
                     placeholder="City *"
-                    aria-label="City"
                     value={city}
                     onChange={(e) => setCity(e.target.value)}
-                    className="h-11 rounded-xl border-[#D8DFC0] bg-white text-[#2A3A0C]"
+                    className="h-11 rounded-xl border-gray-200 bg-white text-gray-900"
                   />
                   <Input
                     placeholder="PIN code *"
-                    aria-label="PIN code"
                     value={postalCode}
-                    onChange={(e) => setPostalCode(e.target.value.replace(/[^\d]/g, ""))}
+                    onChange={(e) => setPostalCode(e.target.value)}
                     maxLength={6}
-                    inputMode="numeric"
-                    autoComplete="postal-code"
-                    className="h-11 rounded-xl border-[#D8DFC0] bg-white text-[#2A3A0C]"
+                    className="h-11 rounded-xl border-gray-200 bg-white text-gray-900"
                   />
                 </div>
               </div>
 
               <div className="flex gap-2">
                 <Button
-                  onClick={() => setStep(cameViaMap ? "map_confirm" : "choose_method")}
+                  onClick={() => setStep("map_confirm")}
                   variant="outline"
-                  className="h-11 flex-1 rounded-xl border-[#D8DFC0] bg-white font-bold text-[#2A3A0C]"
+                  className="h-11 flex-1 rounded-xl border-gray-200 bg-white font-bold text-gray-700"
                 >
                   Back
                 </Button>
                 <Button
                   onClick={confirmAddress}
                   disabled={!formValid}
-                  className="h-11 flex-1 rounded-xl bg-[#B95509] font-bold text-white hover:bg-[#9C4A07] disabled:opacity-50"
+                  className="h-11 flex-1 rounded-xl bg-[#C84630] font-bold text-white hover:bg-[#b03a28] disabled:opacity-50"
                 >
                   <Check className="mr-1 h-4 w-4" />
                   Confirm Location
@@ -870,7 +598,7 @@ export default function DeliveryLocationDrawer({
               <Button
                 onClick={reset}
                 variant="outline"
-                className="h-11 w-full rounded-xl border-[#D8DFC0] bg-white font-bold text-[#2A3A0C]"
+                className="h-11 w-full rounded-xl border-gray-200 bg-white font-bold text-gray-700"
               >
                 Change Location
               </Button>

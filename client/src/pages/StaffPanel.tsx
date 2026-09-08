@@ -1,26 +1,10 @@
 import { useState } from "react";
-import { LoaderCircle, Plus, Shield, UserMinus, Users } from "lucide-react";
+import { LoaderCircle, Mail, Plus, Shield, UserMinus, Users } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import { AdminError } from "@/components/DashboardLayout";
 import { trpc } from "@/lib/trpc";
-
-function formatJoinedAt(value: unknown): string {
-  const d = value instanceof Date ? value : new Date(String(value ?? ""));
-  return Number.isNaN(d.getTime()) ? "—" : d.toLocaleDateString();
-}
 
 const ROLES = [
   { value: "owner", label: "Owner", desc: "Full access including billing and team" },
@@ -61,37 +45,36 @@ export default function StaffPanel({ restaurantId }: { restaurantId: string }) {
 
   const [showInvite, setShowInvite] = useState(false);
   const [inviteForm, setInviteForm] = useState({ email: "", role: "staff" as RoleValue });
-  const [deactivateId, setDeactivateId] = useState<string | null>(null);
 
   const list = members.data ?? [];
 
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-xl font-bold text-[#2A3A0C]" style={{ fontFamily: "var(--font-display)" }}>Team Management</h2>
-        <p className="text-sm text-[#3F4C1E] mt-1">Invite staff, assign roles, manage access levels.</p>
+        <h2 className="text-xl font-bold text-gray-900">Team Management</h2>
+        <p className="text-sm text-gray-600 mt-1">Invite staff, assign roles, manage access levels.</p>
       </div>
 
       {!showInvite ? (
-        <Button onClick={() => setShowInvite(true)} className="bg-[#2A3A0C] hover:bg-[#2A3A0C] text-white gap-2">
+        <Button onClick={() => setShowInvite(true)} className="bg-gray-900 hover:bg-gray-800 text-white gap-2">
           <Plus className="w-4 h-4" /> Invite Member
         </Button>
       ) : (
-        <div className="bg-white rounded-xl border border-[#D8DFC0] p-4 space-y-3">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-3">
+          <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1">
-              <Label htmlFor="invite-email">Email</Label>
-              <Input id="invite-email" type="email" value={inviteForm.email} onChange={e => setInviteForm({ ...inviteForm, email: e.target.value })} placeholder="staff@restaurant.com" />
+              <Label>Email</Label>
+              <Input type="email" value={inviteForm.email} onChange={e => setInviteForm({ ...inviteForm, email: e.target.value })} placeholder="staff@restaurant.com" />
             </div>
             <div className="space-y-1">
-              <Label htmlFor="invite-role">Role</Label>
-              <select id="invite-role" className="flex h-9 min-h-11 w-full rounded-md border border-input bg-background px-3 py-1 text-sm" value={inviteForm.role} onChange={e => setInviteForm({ ...inviteForm, role: e.target.value as RoleValue })}>
+              <Label>Role</Label>
+              <select className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm" value={inviteForm.role} onChange={e => setInviteForm({ ...inviteForm, role: e.target.value as RoleValue })}>
                 {ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
               </select>
             </div>
           </div>
-          <div className="flex flex-wrap gap-2 pt-2">
-            <Button onClick={() => { const email = inviteForm.email.trim().toLowerCase(); if (!email) { toast.error("Email required"); return; } if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { toast.error("Enter a valid email address."); return; } inviteMember.mutate({ restaurantId, email, role: inviteForm.role }); }} disabled={inviteMember.isPending} className="bg-[#2A3A0C] hover:bg-[#2A3A0C] text-white">
+          <div className="flex gap-2 pt-2">
+            <Button onClick={() => { if (!inviteForm.email) { toast.error("Email required"); return; } inviteMember.mutate({ restaurantId, email: inviteForm.email, role: inviteForm.role }); }} disabled={inviteMember.isPending} className="bg-gray-900 hover:bg-gray-800 text-white">
               {inviteMember.isPending ? <LoaderCircle className="w-4 h-4 animate-spin mr-1" /> : null} Send Invite
             </Button>
             <Button variant="outline" onClick={() => setShowInvite(false)}>Cancel</Button>
@@ -99,47 +82,33 @@ export default function StaffPanel({ restaurantId }: { restaurantId: string }) {
         </div>
       )}
 
-      {members.isLoading ? (
-        <div className="space-y-3" aria-label="Loading team members">
-          {[1, 2, 3].map(i => (
-            <div key={i} className="h-14 animate-pulse rounded-xl bg-[#E9EFD6]" />
-          ))}
-        </div>
-      ) : members.isError ? (
-        <AdminError
-          message="We couldn't load team members. Please retry."
-          onRetry={() => members.refetch()}
-        />
-      ) : (
-      <div className="bg-white rounded-xl border border-[#D8DFC0] overflow-x-auto">
-        <table className="w-full min-w-[640px] text-sm">
-          <thead className="bg-[#f7f2eb] text-left">
+      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+        <table className="w-full text-sm">
+          <thead className="bg-gray-50 text-left">
             <tr>
-              <th className="px-4 py-2.5 font-semibold text-[#3F4C1E]">Name</th>
-              <th className="px-4 py-2.5 font-semibold text-[#3F4C1E]">Email</th>
-              <th className="px-4 py-2.5 font-semibold text-[#3F4C1E]">Role</th>
-              <th className="px-4 py-2.5 font-semibold text-[#3F4C1E]">Status</th>
-              <th className="px-4 py-2.5 font-semibold text-[#3F4C1E]">Joined</th>
+              <th className="px-4 py-2.5 font-semibold text-gray-600">Name</th>
+              <th className="px-4 py-2.5 font-semibold text-gray-600">Email</th>
+              <th className="px-4 py-2.5 font-semibold text-gray-600">Role</th>
+              <th className="px-4 py-2.5 font-semibold text-gray-600">Status</th>
+              <th className="px-4 py-2.5 font-semibold text-gray-600">Joined</th>
               <th className="px-4 py-2.5"></th>
             </tr>
           </thead>
           <tbody>
             {list.length === 0 ? (
-              <tr><td colSpan={6} className="px-4 py-8 text-center text-[#9AA07E]">
+              <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-400">
                 <Users className="w-8 h-8 mx-auto mb-2 opacity-40" />
                 No team members yet
               </td></tr>
             ) : list.map(m => (
-              <tr key={m.id} className={`border-t border-[#f0e8de] ${!m.isActive ? "opacity-50" : ""}`}>
+              <tr key={m.id} className={`border-t border-gray-100 ${!m.isActive ? "opacity-50" : ""}`}>
                 <td className="px-4 py-2.5 font-medium">{m.userName ?? "—"}</td>
                 <td className="px-4 py-2.5">{m.userEmail ?? "—"}</td>
                 <td className="px-4 py-2.5">
                   <select
-                    aria-label={`Role for ${m.userEmail ?? m.userName ?? "member"}`}
-                    className="min-h-11 text-xs font-bold px-2 py-1 rounded border border-[#D8DFC0] bg-transparent"
+                    className="text-xs font-bold px-2 py-1 rounded border border-gray-200 bg-transparent"
                     value={m.role}
-                    disabled={updateRole.isPending}
-                    onChange={e => updateRole.mutate({ memberId: m.id, role: e.target.value as RoleValue, restaurantId })}
+                    onChange={e => updateRole.mutate({ memberId: m.id, role: e.target.value as RoleValue })}
                   >
                     {ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
                   </select>
@@ -149,10 +118,10 @@ export default function StaffPanel({ restaurantId }: { restaurantId: string }) {
                     {m.isActive ? "Active" : "Inactive"}
                   </span>
                 </td>
-                <td className="px-4 py-2.5 text-[#3F4C1E]">{formatJoinedAt(m.joinedAt)}</td>
+                <td className="px-4 py-2.5 text-gray-600">{new Date(m.joinedAt).toLocaleDateString()}</td>
                 <td className="px-4 py-2.5 text-right">
                   {m.isActive && (
-                    <Button size="sm" variant="ghost" aria-label={`Deactivate ${m.userEmail ?? m.userName ?? "member"}`} className="text-red-500 hover:text-red-700 hover:bg-red-50 h-7 px-2" disabled={deactivate.isPending} onClick={() => setDeactivateId(m.id)}>
+                    <Button size="sm" variant="ghost" className="text-red-500 hover:text-red-700 hover:bg-red-50 h-7 px-2" onClick={() => deactivate.mutate({ memberId: m.id })}>
                       <UserMinus className="w-3 h-3" />
                     </Button>
                   )}
@@ -162,36 +131,15 @@ export default function StaffPanel({ restaurantId }: { restaurantId: string }) {
           </tbody>
         </table>
       </div>
-      )}
-
-      <AlertDialog open={!!deactivateId} onOpenChange={(open) => { if (!open) setDeactivateId(null); }}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Deactivate this member?</AlertDialogTitle>
-            <AlertDialogDescription>
-              The member will immediately lose access to this restaurant. You can re-invite them later if needed.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Keep member</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => { if (deactivateId) deactivate.mutate({ memberId: deactivateId, restaurantId }); setDeactivateId(null); }}
-              className="bg-red-600 hover:bg-red-700"
-            >
-              Deactivate
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
 
       {/* Role Reference */}
-      <div className="bg-white rounded-xl border border-[#D8DFC0] p-4">
-        <h3 className="font-semibold text-[#2A3A0C] mb-3 flex items-center gap-2"><Shield className="w-4 h-4" /> Role Permissions</h3>
+      <div className="bg-white rounded-xl border border-gray-200 p-4">
+        <h3 className="font-semibold text-gray-900 mb-3 flex items-center gap-2"><Shield className="w-4 h-4" /> Role Permissions</h3>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           {ROLES.map(r => (
-            <div key={r.value} className="p-3 rounded-lg bg-[#f7f2eb]">
-              <p className="font-bold text-sm text-[#2A3A0C]">{r.label}</p>
-              <p className="text-xs text-[#3F4C1E] mt-1">{r.desc}</p>
+            <div key={r.value} className="p-3 rounded-lg bg-gray-50">
+              <p className="font-bold text-sm text-gray-900">{r.label}</p>
+              <p className="text-xs text-gray-600 mt-1">{r.desc}</p>
             </div>
           ))}
         </div>

@@ -1,4 +1,3 @@
-/* Market Table design: rice-paper surfaces, burnt-orange actions, and subtle ticket textures. */
 @import "tailwindcss";
 @import "tw-animate-css";
 
@@ -36,115 +35,93 @@
 }
 
 :root {
-  --primary: oklch(0.55 0.14 58);
+  --primary: oklch(0.53 0.16 31);
   --primary-foreground: oklch(0.99 0.01 75);
   --chart-1: oklch(0.72 0.12 55);
-  --chart-2: oklch(0.55 0.14 58);
+  --chart-2: oklch(0.53 0.16 31);
   --chart-3: oklch(0.42 0.1 120);
   --chart-4: oklch(0.76 0.08 80);
   --chart-5: oklch(0.32 0.03 55);
-  --radius: 1.1rem;
-  --background: oklch(0.985 0.012 80);
-  --foreground: oklch(0.24 0.03 115);
-  --card: oklch(1 0.005 80);
-  --card-foreground: oklch(0.24 0.03 115);
-  --popover: oklch(1 0.005 80);
-  --popover-foreground: oklch(0.24 0.03 115);
-  --secondary: oklch(0.94 0.025 115);
-  --secondary-foreground: oklch(0.33 0.04 115);
-  --muted: oklch(0.95 0.015 115);
-  --muted-foreground: oklch(0.5 0.035 115);
-  --accent: oklch(0.92 0.035 115);
-  --accent-foreground: oklch(0.27 0.04 115);
-  --destructive: oklch(0.54 0.19 26);
-  --destructive-foreground: oklch(0.99 0.01 75);
-  --border: oklch(0.89 0.02 115);
-  --input: oklch(0.89 0.02 115);
-  --ring: oklch(0.55 0.14 58);
+  --radius: 1rem;
+  --background: #FFFFFF;
+  --foreground: #1C1C1C;
+  --card: #FFFFFF;
+  --card-foreground: #1C1C1C;
+  --popover: #FFFFFF;
+  --popover-foreground: #1C1C1C;
+  --secondary: #F8F8F8;
+  --secondary-foreground: #3D3D3D;
+  --muted: #F5F5F5;
+  --muted-foreground: #696969;
+  --accent: #F0F0F0;
+  --accent-foreground: #1C1C1C;
+  --destructive: #E23744;
+  --destructive-foreground: #FFFFFF;
+  --border: #E8E8E8;
+  --input: #E8E8E8;
+  --ring: oklch(0.53 0.16 31);
 }
 
 .dark {
-  --background: oklch(0.19 0.02 48);
-  --foreground: oklch(0.94 0.015 115);
-  --card: oklch(0.24 0.023 48);
-  --card-foreground: oklch(0.94 0.015 80);
-  --popover: oklch(0.24 0.023 48);
-  --popover-foreground: oklch(0.94 0.015 80);
-  --secondary: oklch(0.29 0.027 48);
-  --secondary-foreground: oklch(0.86 0.02 80);
-  --muted: oklch(0.29 0.027 48);
-  --muted-foreground: oklch(0.72 0.025 115);
-  --accent: oklch(0.3 0.035 48);
-  --accent-foreground: oklch(0.94 0.015 80);
-  --border: oklch(0.94 0.015 80 / 12%);
-  --input: oklch(0.94 0.015 80 / 15%);
-  color-scheme: dark;
+  --background: #1A1A1A;
+  --foreground: #F0F0F0;
+  --card: #2C2C2C;
+  --card-foreground: #F0F0F0;
+  --popover: #2C2C2C;
+  --popover-foreground: #F0F0F0;
+  --secondary: #333333;
+  --secondary-foreground: #E0E0E0;
+  --muted: #333333;
+  --muted-foreground: #A0A0A0;
+  --accent: #3A3A3A;
+  --accent-foreground: #F0F0F0;
+  --border: rgba(255, 255, 255, 0.12);
+  --input: rgba(255, 255, 255, 0.15);
 }
 
-/* Storefront surfaces: warm paper by day, dark glass by night. */
-.sf-page { background-color: #fffaf3; }
-.dark .sf-page { background-color: #14100b; }
-.sf-card {
-  background-color: #ffffff;
-  border: 1px solid #e5d9cb;
-  box-shadow: 0 1px 2px rgba(84, 48, 26, 0.06);
-}
-.dark .sf-card {
-  background-color: rgba(255, 255, 255, 0.045);
-  border-color: rgba(255, 255, 255, 0.09);
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-}
-.sf-bar {
-  background-color: rgba(255, 250, 243, 0.95);
-  border-color: #eadbce;
-}
-.dark .sf-bar {
-  background-color: rgba(20, 16, 11, 0.82);
-  border-color: rgba(255, 255, 255, 0.08);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-}
-.sf-ink { color: #2A3A0C; }
-.dark .sf-ink { color: #f3e9da; }
-.sf-soft { color: #5F6B3C; }
-.dark .sf-soft { color: #b9a98f; }
-.sf-faint { color: #857262; }
-.dark .sf-faint { color: #8d7c66; }
-.sf-line { border-color: #e5d9cb; }
-.dark .sf-line { border-color: rgba(255, 255, 255, 0.09); }
-/* Amber price pill (both themes, like the reference). */
-.sf-price {
-  background: linear-gradient(135deg, #F5A623, #E8720C);
-  color: #241203;
-  box-shadow: 0 6px 16px rgba(232, 114, 12, 0.35);
-}
-/* Dark-glass label chip over food photos. */
-.sf-photo-chip {
-  background: rgba(12, 8, 5, 0.62);
-  color: #f5ede0;
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  border: 1px solid rgba(255, 255, 255, 0.14);
+/* ===================================================================
+   Storefront — Swiggy/Zomato-inspired premium customer UI.
+   Scoped under .storefront so admin dashboard can use global tokens.
+   =================================================================== */
+
+.storefront {
+  --sf-bg: #FFFFFF;
+  --sf-bg-subtle: #F8F8F8;
+  --sf-surface: #FFFFFF;
+  --sf-text: #1C1C1C;
+  --sf-text-secondary: #696969;
+  --sf-text-muted: #9C9C9C;
+  --sf-border: #E8E8E8;
+  --sf-border-subtle: #F0F0F0;
+  --sf-primary: var(--color-primary, #c84630);
+  --sf-primary-hover: color-mix(in srgb, var(--sf-primary) 85%, black);
+  --sf-primary-soft: color-mix(in srgb, var(--sf-primary) 8%, white);
+  --sf-green: #48AC68;
+  --sf-green-soft: #E8F5EE;
+  --sf-gold: #EEA61B;
+  --sf-gold-soft: #FFF4DC;
+  --sf-red: #E23744;
+  --sf-overlay: rgba(0, 0, 0, 0.5);
+  --sf-font-heading: 'Inter', 'Manrope', system-ui, sans-serif;
+  --sf-font-body: 'Manrope', 'Inter', system-ui, sans-serif;
+  --sf-radius-card: 16px;
+  --sf-radius-pill: 20px;
+  --sf-radius-btn: 12px;
+  --sf-radius-full: 9999px;
+  --sf-shadow-card: 0 2px 12px rgba(0, 0, 0, 0.06);
+  --sf-shadow-elevated: 0 8px 30px rgba(0, 0, 0, 0.08);
+  --sf-shadow-fab: 0 6px 20px rgba(200, 70, 48, 0.25);
+  --sf-shadow-float: 0 12px 40px rgba(0, 0, 0, 0.12);
+
+  font-family: var(--sf-font-body);
+  color: var(--sf-text);
+  background: var(--sf-bg);
 }
 
 @layer base {
   * { @apply border-border outline-ring/50; }
-  html { font-size: 16px; }
-  body { @apply bg-background text-foreground; font-family: "Manrope", sans-serif; font-size: 0.875rem; line-height: 1.5; }
+  body { @apply bg-background text-foreground; font-family: "Manrope", sans-serif; }
   button:not(:disabled), [role="button"]:not([aria-disabled="true"]), [type="button"]:not(:disabled), [type="submit"]:not(:disabled), [type="reset"]:not(:disabled), a[href], select:not(:disabled), input[type="checkbox"]:not(:disabled), input[type="radio"]:not(:disabled) { @apply cursor-pointer; }
-  /* Global keyboard-focus indicator (never remove outlines without a replacement). */
-  :focus-visible { outline: 2px solid var(--color-primary, #B95509); outline-offset: 2px; }
-}
-
-/* Dynamic storefront theming: the ordering app sets --theme-primary /
-   --theme-accent from the restaurant brand at runtime. Unlayered rules win
-   over the @theme layer, so brand colours flow into every `*-primary` /
-   `*-accent` utility without breaking the static defaults. */
-:root {
-  --color-primary: var(--theme-primary, var(--primary));
-  --color-accent: var(--theme-accent, var(--accent));
 }
 
 @layer components {
@@ -156,32 +133,101 @@
 
 @layer utilities {
   .font-display { font-family: "DM Serif Display", Georgia, serif; }
-  .paper-grain { background-image: radial-gradient(rgba(46, 66, 14, 0.06) 0.7px, transparent 0.7px); background-size: 8px 8px; }
+  .ticket-edge { clip-path: polygon(0.9rem 0, calc(100% - 0.9rem) 0, 100% 0.9rem, 100% calc(100% - 0.9rem), calc(100% - 0.9rem) 100%, 0.9rem 100%, 0 calc(100% - 0.9rem), 0 0.9rem); }
+  .paper-grain { background-image: radial-gradient(rgba(91, 58, 36, 0.06) 0.7px, transparent 0.7px); background-size: 8px 8px; }
+  .dotted-rule { border-top: 1px dashed oklch(0.78 0.035 70); }
   .hide-scrollbar::-webkit-scrollbar { display: none; }
   .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
-  /* Fixed bottom bars clear the iOS home indicator / gesture area. */
-  .safe-bottom { bottom: calc(1rem + env(safe-area-inset-bottom, 0px)); }
-  /* Alias for hide-scrollbar (Swiggy-style rails use scrollbar-hide). */
-  .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
-  .scrollbar-hide::-webkit-scrollbar { display: none; }
-  /* Long menu lists: the browser may skip off-screen rendering work.
-     Layout is preserved via the intrinsic-size placeholder. */
-  .menu-cv { content-visibility: auto; contain-intrinsic-size: auto 220px; }
-  @supports not (content-visibility: auto) { .menu-cv { content-visibility: visible; } }
-  /* Category sections settle below the sticky header + search rail. */
-  .section-anchor { scroll-margin-top: 184px; }
-  @media (min-width: 1024px) { .section-anchor { scroll-margin-top: 92px; } }
+
+  /* Storefront utilities */
+  .sf-heading {
+    font-family: var(--sf-font-heading);
+    letter-spacing: -0.2px;
+    font-weight: 800;
+  }
+
+  .sf-card {
+    background: var(--sf-surface);
+    border-radius: var(--sf-radius-card);
+    box-shadow: var(--sf-shadow-card);
+    border: none;
+  }
+
+  .sf-pill {
+    border-radius: var(--sf-radius-pill);
+    padding: 8px 16px;
+    font-size: 12px;
+    font-weight: 700;
+    white-space: nowrap;
+    transition: all 150ms ease;
+  }
+
+  .sf-pill-active {
+    background: var(--sf-primary);
+    color: white;
+  }
+
+  .sf-pill-inactive {
+    background: var(--sf-bg);
+    color: var(--sf-text-secondary);
+    border: 1px solid var(--sf-border);
+  }
+
+  .sf-add-btn {
+    border: 1.5px solid var(--sf-primary);
+    color: var(--sf-primary);
+    background: white;
+    border-radius: var(--sf-radius-btn);
+    font-size: 13px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    padding: 6px 16px;
+    transition: all 150ms ease;
+  }
+
+  .sf-add-btn:hover:not(:disabled) {
+    background: var(--sf-primary);
+    color: white;
+  }
+
+  .sf-shimmer {
+    background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+    background-size: 200% 100%;
+    animation: sf-shimmer 1.5s infinite;
+  }
+
+  .sf-header-blur {
+    backdrop-filter: blur(12px) saturate(180%);
+    -webkit-backdrop-filter: blur(12px) saturate(180%);
+    background: rgba(255, 255, 255, 0.85);
+  }
+
+  .sf-edge-fade {
+    mask-image: linear-gradient(to right, black 90%, transparent 100%);
+    -webkit-mask-image: linear-gradient(to right, black 90%, transparent 100%);
+  }
+
+  .sf-safe-bottom {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
 }
 
 button, a, input { transition: transform 160ms cubic-bezier(0.23, 1, 0.32, 1), background-color 160ms cubic-bezier(0.23, 1, 0.32, 1), border-color 160ms cubic-bezier(0.23, 1, 0.32, 1), box-shadow 160ms cubic-bezier(0.23, 1, 0.32, 1); }
 button:active:not(:disabled) { transform: scale(0.97); }
 
 @media (prefers-reduced-motion: no-preference) {
-  .rise-in { animation: rise-in 180ms cubic-bezier(0.23, 1, 0.32, 1) both; }
+  .rise-in { animation: rise-in 420ms cubic-bezier(0.23, 1, 0.32, 1) both; }
   @keyframes rise-in { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+
+  .sf-pop-in { animation: sf-pop-in 300ms cubic-bezier(0.34, 1.56, 0.64, 1) both; }
+  @keyframes sf-pop-in { from { opacity: 0; transform: scale(0.8); } to { opacity: 1; transform: scale(1); } }
+
+  .sf-slide-up { animation: sf-slide-up 350ms cubic-bezier(0.23, 1, 0.32, 1) both; }
+  @keyframes sf-slide-up { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
-  .rise-in { animation: none; }
+@keyframes sf-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
 }

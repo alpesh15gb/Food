@@ -1,85 +1,48 @@
 import { trpc } from "@/lib/trpc";
-import { BarChart3, CalendarDays, TrendingUp, Users } from "lucide-react";
+import { BarChart3, CalendarDays, Loader2, TrendingUp, Users } from "lucide-react";
 import { useMemo, useState } from "react";
-import { AdminError } from "@/components/DashboardLayout";
 import {
   Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Legend,
   Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
 
-const COLORS = ["#B95509", "#c97a4e", "#e9bda2", "#6d5140", "#a06e53", "#d4956b", "#8b5e3c", "#f0d4be"];
+const COLORS = ["#c84630", "#E8734A", "#EEA61B", "#48AC68", "#3B82F6", "#8B5CF6", "#EC4899", "#6B7280"];
 const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 function formatCurrency(paise: number) {
-  const safe = Number.isFinite(paise) ? paise : 0;
-  return `₹${(safe / 100).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
-}
-
-function toLocalDateKey(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}
-
-function formatTickDate(v: string): string {
-  const d = new Date(v);
-  if (Number.isNaN(d.getTime())) return String(v);
-  return d.toLocaleDateString("en-IN", { month: "short", day: "numeric" });
-}
-
-function formatFullDate(v: string): string {
-  const d = new Date(v);
-  if (Number.isNaN(d.getTime())) return String(v);
-  return d.toLocaleDateString("en-IN");
+  return `₹${(paise / 100).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
 }
 
 function getDefaultRange() {
   const end = new Date();
   const start = new Date(Date.now() - 30 * 86400000);
   return {
-    start: toLocalDateKey(start),
-    end: toLocalDateKey(end),
+    start: start.toISOString().split("T")[0],
+    end: end.toISOString().split("T")[0],
   };
 }
 
 export default function AnalyticsPanel({ restaurantId }: { restaurantId: string }) {
   const [range, setRange] = useState(getDefaultRange);
-  const isRangeInvalid = range.start > range.end;
-  const heatmapDays = (() => {
-    const s = new Date(range.start).getTime();
-    const e = new Date(range.end).getTime();
-    if (!Number.isFinite(s) || !Number.isFinite(e) || e < s) return 30;
-    return Math.min(90, Math.max(1, Math.round((e - s) / 86400000) + 1));
-  })();
 
-  const summaryQuery = trpc.analytics.summaryStats.useQuery({
+  const { data: summary, isLoading: summaryLoading } = trpc.analytics.summaryStats.useQuery({
     restaurantId, startDate: range.start, endDate: range.end,
-  }, { retry: false, enabled: !isRangeInvalid });
-  const revenueQuery = trpc.analytics.revenueTrend.useQuery({
+  });
+  const { data: revenueData, isLoading: revenueLoading } = trpc.analytics.revenueTrend.useQuery({
     restaurantId, startDate: range.start, endDate: range.end, granularity: "daily",
-  }, { retry: false, enabled: !isRangeInvalid });
-  const itemQuery = trpc.analytics.itemPerformance.useQuery({
+  });
+  const { data: itemData } = trpc.analytics.itemPerformance.useQuery({
     restaurantId, startDate: range.start, endDate: range.end, limit: 10,
-  }, { retry: false, enabled: !isRangeInvalid });
-  const heatmapQuery = trpc.analytics.hourlyHeatmap.useQuery({
-    restaurantId, days: heatmapDays,
-  }, { retry: false, enabled: !isRangeInvalid });
-  const categoryQuery = trpc.analytics.categoryBreakdown.useQuery({
+  });
+  const { data: heatmapData } = trpc.analytics.hourlyHeatmap.useQuery({
+    restaurantId, days: 30,
+  });
+  const { data: categoryData } = trpc.analytics.categoryBreakdown.useQuery({
     restaurantId, startDate: range.start, endDate: range.end,
-  }, { retry: false, enabled: !isRangeInvalid });
-  const retentionQuery = trpc.analytics.customerRetention.useQuery({
+  });
+  const { data: retentionData } = trpc.analytics.customerRetention.useQuery({
     restaurantId, startDate: range.start, endDate: range.end,
-  }, { retry: false, enabled: !isRangeInvalid });
-
-  const summary = summaryQuery.data;
-  const revenueData = revenueQuery.data;
-  const itemData = itemQuery.data;
-  const heatmapData = heatmapQuery.data;
-  const categoryData = categoryQuery.data;
-  const retentionData = retentionQuery.data;
-  const summaryLoading = summaryQuery.isLoading;
-  const revenueLoading = revenueQuery.isLoading;
+  });
 
   const heatmapGrid = useMemo(() => {
     if (!heatmapData) return [];
@@ -95,67 +58,41 @@ export default function AnalyticsPanel({ restaurantId }: { restaurantId: string 
 
   const maxHeatmap = Math.max(...heatmapGrid.map(g => g.count), 1);
 
-  const refetchAll = () => {
-    summaryQuery.refetch();
-    revenueQuery.refetch();
-    itemQuery.refetch();
-    heatmapQuery.refetch();
-    categoryQuery.refetch();
-    retentionQuery.refetch();
-  };
+  if (summaryLoading || revenueLoading) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-8 p-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Analytics</h1>
           <p className="mt-1 text-sm text-muted-foreground">Revenue, orders, and customer insights</p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <CalendarDays className="h-4 w-4 text-muted-foreground" aria-hidden />
-          <label htmlFor="analytics-start" className="sr-only">Start date</label>
+        <div className="flex items-center gap-2">
+          <CalendarDays className="h-4 w-4 text-muted-foreground" />
           <input
-            id="analytics-start"
             type="date"
             value={range.start}
-            max={range.end}
             onChange={(e: React.ChangeEvent<HTMLInputElement>) => setRange(r => ({ ...r, start: e.target.value }))}
-            className="min-h-11 rounded-md border px-2 py-1.5 text-sm"
+            className="rounded-md border px-2 py-1.5 text-sm"
           />
           <span className="text-muted-foreground">to</span>
-          <label htmlFor="analytics-end" className="sr-only">End date</label>
           <input
-            id="analytics-end"
             type="date"
             value={range.end}
-            min={range.start}
             onChange={(e: React.ChangeEvent<HTMLInputElement>) => setRange(r => ({ ...r, end: e.target.value }))}
-            className="min-h-11 rounded-md border px-2 py-1.5 text-sm"
+            className="rounded-md border px-2 py-1.5 text-sm"
           />
         </div>
       </div>
 
-      {isRangeInvalid && (
-        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm font-medium text-amber-800">
-          Start date must be before or equal to end date.
-        </div>
-      )}
-
-      {(summaryQuery.isError || revenueQuery.isError) && !isRangeInvalid && (
-        <AdminError
-          message="We couldn't load analytics for this range. Please retry."
-          onRetry={refetchAll}
-        />
-      )}
-
       {/* Summary Cards */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {summaryLoading ? (
-          [1, 2, 3, 4].map(i => (
-            <div key={i} className="h-28 animate-pulse rounded-xl border bg-card p-5" aria-label="Loading summary" />
-          ))
-        ) : (
-          <>
         <SummaryCard
           label="Total Revenue"
           value={formatCurrency(summary?.totalRevenuePaise ?? 0)}
@@ -178,70 +115,53 @@ export default function AnalyticsPanel({ restaurantId }: { restaurantId: string 
           bg="bg-purple-100"
         />
         <SummaryCard
-          label="Retention Rate"
+          label="Repeat Customers"
           value={`${retentionData?.retentionRate ?? 0}%`}
           subtitle={`${retentionData?.repeatCustomers ?? 0} of ${((retentionData?.newCustomers ?? 0) + (retentionData?.repeatCustomers ?? 0))} customers`}
           icon={Users}
           color="text-orange-700"
           bg="bg-orange-100"
         />
-          </>
-        )}
       </div>
 
       {/* Revenue Trend Chart */}
       <div className="rounded-xl border bg-card p-6">
         <h2 className="mb-4 font-semibold">Revenue Trend</h2>
-        {revenueLoading ? (
-          <div className="h-72 animate-pulse rounded-lg bg-muted" aria-label="Loading revenue trend" />
-        ) : !revenueData || revenueData.length === 0 ? (
-          <div className="grid h-72 place-items-center rounded-lg bg-muted/40 text-sm text-muted-foreground">
-            No revenue data for this range.
-          </div>
-        ) : (
         <div className="h-72">
           <ResponsiveContainer width="100%" height="100%">
             <AreaChart data={revenueData ?? []}>
               <defs>
                 <linearGradient id="revGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#B95509" stopOpacity={0.3} />
-                  <stop offset="95%" stopColor="#B95509" stopOpacity={0} />
+                  <stop offset="5%" stopColor="#c84630" stopOpacity={0.3} />
+                  <stop offset="95%" stopColor="#c84630" stopOpacity={0} />
                 </linearGradient>
               </defs>
               <CartesianGrid strokeDasharray="3 3" stroke="#eee" />
               <XAxis
                 dataKey="period"
-                tickFormatter={(v: string) => formatTickDate(v)}
+                tickFormatter={(v: string) => new Date(v).toLocaleDateString("en-IN", { month: "short", day: "numeric" })}
                 fontSize={11}
               />
-              <YAxis tickFormatter={(v: number) => `₹${((Number.isFinite(v) ? v : 0) / 100).toLocaleString("en-IN")}`} fontSize={11} />
+              <YAxis tickFormatter={(v: number) => `₹${(v / 100).toLocaleString("en-IN")}`} fontSize={11} />
               <Tooltip
                 formatter={(value: number) => [formatCurrency(value), "Revenue"]}
-                labelFormatter={(label: string) => formatFullDate(label)}
+                labelFormatter={(label: string) => new Date(label).toLocaleDateString("en-IN")}
               />
-              <Area type="monotone" dataKey="totalRevenuePaise" stroke="#B95509" fill="url(#revGrad)" strokeWidth={2} />
+              <Area type="monotone" dataKey="totalRevenuePaise" stroke="#c84630" fill="url(#revGrad)" strokeWidth={2} />
             </AreaChart>
           </ResponsiveContainer>
         </div>
-        )}
       </div>
 
       <div className="grid gap-6 lg:grid-cols-2">
         {/* Top Items */}
         <div className="rounded-xl border bg-card p-6">
           <h2 className="mb-4 font-semibold">Top Performing Items</h2>
-          {itemQuery.isLoading ? (
-            <div className="h-72 animate-pulse rounded-lg bg-muted" aria-label="Loading top items" />
-          ) : !itemData || itemData.length === 0 ? (
-            <div className="grid h-72 place-items-center rounded-lg bg-muted/40 text-sm text-muted-foreground">
-              No item sales for this range.
-            </div>
-          ) : (
           <div className="h-72">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={itemData ?? []} layout="vertical" margin={{ left: 20 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#eee" horizontal={false} />
-                <XAxis type="number" tickFormatter={(v: number) => `₹${((Number.isFinite(v) ? v : 0) / 100).toLocaleString("en-IN")}`} fontSize={11} />
+                <XAxis type="number" tickFormatter={(v: number) => `₹${(v / 100).toLocaleString("en-IN")}`} fontSize={11} />
                 <YAxis dataKey="itemName" type="category" width={100} fontSize={11} />
                 <Tooltip formatter={(value: number) => [formatCurrency(value), "Revenue"]} />
                 <Bar dataKey="totalRevenuePaise" radius={[0, 4, 4, 0]}>
@@ -252,19 +172,11 @@ export default function AnalyticsPanel({ restaurantId }: { restaurantId: string 
               </BarChart>
             </ResponsiveContainer>
           </div>
-          )}
         </div>
 
         {/* Category Breakdown */}
         <div className="rounded-xl border bg-card p-6">
           <h2 className="mb-4 font-semibold">Sales by Category</h2>
-          {categoryQuery.isLoading ? (
-            <div className="h-72 animate-pulse rounded-lg bg-muted" aria-label="Loading category breakdown" />
-          ) : !categoryData || categoryData.length === 0 ? (
-            <div className="grid h-72 place-items-center rounded-lg bg-muted/40 text-sm text-muted-foreground">
-              No category sales for this range.
-            </div>
-          ) : (
           <div className="h-72">
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
@@ -287,20 +199,12 @@ export default function AnalyticsPanel({ restaurantId }: { restaurantId: string 
               </PieChart>
             </ResponsiveContainer>
           </div>
-          )}
         </div>
       </div>
 
       {/* Hourly Heatmap */}
       <div className="rounded-xl border bg-card p-6">
-        <h2 className="mb-4 font-semibold">Order Volume Heatmap (Last {heatmapDays} Days)</h2>
-        {heatmapQuery.isLoading ? (
-          <div className="h-40 animate-pulse rounded-lg bg-muted" aria-label="Loading heatmap" />
-        ) : maxHeatmap <= 1 && heatmapGrid.every(g => g.count === 0) ? (
-          <div className="grid h-40 place-items-center rounded-lg bg-muted/40 text-sm text-muted-foreground">
-            No orders in the last {heatmapDays} days.
-          </div>
-        ) : (
+        <h2 className="mb-4 font-semibold">Order Volume Heatmap (Last 30 Days)</h2>
         <div className="overflow-x-auto">
           <div className="min-w-[600px]">
             <div className="flex">
@@ -321,7 +225,7 @@ export default function AnalyticsPanel({ restaurantId }: { restaurantId: string 
                       className="flex-1 aspect-square rounded-sm mx-px transition-colors"
                       style={{
                         backgroundColor: intensity > 0
-                          ? `rgba(157, 55, 39, ${0.15 + intensity * 0.85})`
+                          ? `rgba(200, 70, 48, ${0.15 + intensity * 0.85})`
                           : "rgba(0,0,0,0.03)",
                       }}
                       title={`${day} ${h}:00 — ${cell?.count ?? 0} orders`}
@@ -332,7 +236,6 @@ export default function AnalyticsPanel({ restaurantId }: { restaurantId: string 
             ))}
           </div>
         </div>
-        )}
       </div>
 
       {/* Customer Retention */}
