@@ -23,6 +23,7 @@ import OffersStrip from "./OffersStrip";
 import SearchAndFilters from "./SearchAndFilters";
 import PopularCarousel from "./PopularCarousel";
 import MenuStream from "./MenuStream";
+import StorefrontFooter from "./StorefrontFooter";
 import CartSidebar from "./CartSidebar";
 import MobileCartBar from "./MobileCartBar";
 import CustomizationDrawer from "./CustomizationDrawer";
@@ -566,7 +567,7 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
         />
 
         {/* Menu grid */}
-        <div className="mx-auto max-w-[1100px] px-4 pb-10 sm:px-6 lg:px-10">
+        <div className="mx-auto max-w-[1100px] px-4 pb-2 sm:px-6 lg:px-10">
           {query && (
             <div className="mb-4 flex items-center justify-between">
               <p className="text-sm font-bold" style={{ color: "var(--sf-text)" }}>
@@ -591,6 +592,13 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
             onQuantityChange={changeItemQty}
           />
         </div>
+
+        {/* Policies + contact (required on the storefront home page) */}
+        <StorefrontFooter
+          restaurantName={restaurant.name}
+          address={restaurant.address}
+          contactPhone={restaurant.contactPhone}
+        />
       </main>
 
       {/* Mobile Cart CTA */}
