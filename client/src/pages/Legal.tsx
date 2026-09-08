@@ -14,6 +14,7 @@ export const BUSINESS = {
   ],
   phones: ["+91 92814 17664", "+91 85007 27277"],
   phoneHrefs: ["tel:+919281417664", "tel:+918500727277"],
+  email: "9housekitchen@gmail.com",
   hours: "Open daily, 11:00 AM – 11:55 PM. Phone support during kitchen hours.",
   cuisines:
     "South Indian, Andhra, Mughlai, Biryani, Chinese, Pasta, Desserts and Beverages.",
@@ -91,7 +92,7 @@ export function Privacy() {
       <h2 className="font-display text-xl text-[#2A3A0C]">Retention & your rights</h2>
       <p>Order records are kept as required for tax/audit compliance. You may ask for correction of your details at any time. Deletion requests are honoured except where records must be retained by law (e.g. issued tax invoices).</p>
       <h2 className="font-display text-xl text-[#2A3A0C]">Grievances</h2>
-      <p>For privacy questions or requests, contact us at {BUSINESS.phones.join(" / ")} ({BUSINESS.hours}).</p>
+      <p>For privacy questions or requests, contact us at {BUSINESS.email} or {BUSINESS.phones.join(" / ")} ({BUSINESS.hours}).</p>
     </Shell>
   );
 }
@@ -119,6 +120,7 @@ export function Contact() {
       <p>Phone: {BUSINESS.phoneHrefs.map((href, i) => (
         <span key={href}><a className="font-bold text-[#B95509] hover:underline" href={href}>{BUSINESS.phones[i]}</a>{i < BUSINESS.phoneHrefs.length - 1 ? " / " : ""}</span>
       ))}</p>
+      <p>Email: <a className="font-bold text-[#B95509] hover:underline" href={`mailto:${BUSINESS.email}`}>{BUSINESS.email}</a></p>
       <h2 className="font-display text-xl text-[#2A3A0C]">Payment disputes</h2>
       <p>Share your order number, amount charged, date, and Razorpay payment ID (from your bank/UPI statement) on either number above and we will reconcile it against our payment ledger. Do not pay twice for the same order.</p>
     </Shell>
