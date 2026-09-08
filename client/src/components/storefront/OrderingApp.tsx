@@ -6,6 +6,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useLocation } from "wouter";
 import { toast } from "sonner";
+import { X } from "lucide-react";
 import { formatINR, type MenuItem } from "@/lib/types";
 import { trpc } from "@/lib/trpc";
 import { adaptStorefront } from "@/lib/storefrontAdapter";
@@ -449,6 +450,33 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
       );
     }
   };
+
+  // --- Error state ---
+  if (storefrontQuery.isError) {
+    return (
+      <div className="storefront">
+        <main className="grid min-h-screen place-items-center px-4" style={{ background: "var(--sf-bg)" }}>
+          <div className="w-full max-w-md text-center">
+            <div className="mx-auto grid h-16 w-16 place-items-center rounded-full bg-red-50 text-red-500">
+              <X className="h-7 w-7" />
+            </div>
+            <h1 className="sf-heading mt-5 text-2xl" style={{ color: "var(--sf-text)" }}>
+              Something went wrong
+            </h1>
+            <p className="mt-3 text-sm leading-relaxed" style={{ color: "var(--sf-text-secondary)" }}>
+              We couldn't load this restaurant. Please try again.
+            </p>
+            <button
+              onClick={() => storefrontQuery.refetch()}
+              className="sf-add-btn mt-6"
+            >
+              Try again
+            </button>
+          </div>
+        </main>
+      </div>
+    );
+  }
 
   // --- Loading state ---
   if (storefrontQuery.isLoading || !restaurant) return <MenuSkeleton />;
