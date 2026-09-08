@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { ShoppingBag, UserRound } from "lucide-react";
 
 export default function TopBar({
@@ -15,6 +16,9 @@ export default function TopBar({
   onAccount: () => void;
   customerPhone?: string;
 }) {
+  const [logoFailed, setLogoFailed] = useState(false);
+  const showLogo = !!restaurantLogo && !logoFailed;
+
   return (
     <header
       className="sticky top-0 z-40 border-b sf-header-blur"
@@ -26,11 +30,12 @@ export default function TopBar({
           onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
           className="flex min-w-0 items-center gap-3 text-left"
         >
-          {restaurantLogo ? (
+          {showLogo ? (
             <img
               src={restaurantLogo}
               alt={restaurantName}
               className="h-10 w-10 shrink-0 rounded-xl object-cover"
+              onError={() => setLogoFailed(true)}
             />
           ) : (
             <span

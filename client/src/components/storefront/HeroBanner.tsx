@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Bike, Clock3, ShoppingBag, Star } from "lucide-react";
 
 type HeroBannerProps = {
@@ -39,7 +40,8 @@ function InfoBadge({ icon, label, value }: { icon: React.ReactNode; label?: stri
 }
 
 export default function HeroBanner({ restaurant }: HeroBannerProps) {
-  const hasBanner = !!restaurant.bannerImage;
+  const [bannerFailed, setBannerFailed] = useState(false);
+  const hasBanner = !!restaurant.bannerImage && !bannerFailed;
 
   return (
     <section className="pb-2">
@@ -50,6 +52,7 @@ export default function HeroBanner({ restaurant }: HeroBannerProps) {
             src={restaurant.bannerImage!}
             alt={restaurant.name}
             className="h-[160px] w-full object-cover object-center sm:h-[200px]"
+            onError={() => setBannerFailed(true)}
           />
           <div className="absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-white to-transparent" />
         </div>
