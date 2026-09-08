@@ -45,7 +45,7 @@ export default function AuthDrawer({
 }) {
   return (
     <Drawer open={open} onOpenChange={onOpenChange}>
-      <DrawerContent className="max-h-[85vh]" style={{ background: "var(--sf-bg)" }}>
+      <DrawerContent className="storefront max-h-[85vh]" style={{ background: "var(--sf-bg)" }}>
         <DrawerHeader className="px-6 pb-2 text-left">
           <DrawerTitle
             className="sf-heading text-2xl"
@@ -127,7 +127,10 @@ export default function AuthDrawer({
                 inputMode="numeric"
                 maxLength={15}
                 className="h-12 rounded-[var(--sf-radius-btn)] text-base"
-                style={{ borderColor: "var(--sf-border)" }}
+                style={{
+                  borderColor: "var(--sf-border)",
+                  background: "var(--sf-bg-subtle)",
+                }}
               />
               {otpError && (
                 <p className="text-sm font-bold" style={{ color: "var(--sf-red)" }}>
@@ -167,7 +170,10 @@ export default function AuthDrawer({
                 inputMode="numeric"
                 maxLength={6}
                 className="h-12 rounded-[var(--sf-radius-btn)] text-center text-2xl font-mono tracking-[0.3em]"
-                style={{ borderColor: "var(--sf-border)" }}
+                style={{
+                  borderColor: "var(--sf-border)",
+                  background: "var(--sf-bg-subtle)",
+                }}
               />
               {otpError && (
                 <p className="text-sm font-bold" style={{ color: "var(--sf-red)" }}>

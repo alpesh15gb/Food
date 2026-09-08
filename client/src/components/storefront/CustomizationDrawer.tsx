@@ -59,7 +59,7 @@ export default function CustomizationDrawer({
   return (
     <Drawer open={!!item} onOpenChange={(open) => !open && onClose()}>
       <DrawerContent
-        className="max-h-[92dvh]"
+        className="storefront max-h-[92dvh]"
         style={{ background: "var(--sf-bg)" }}
       >
         <div className="mx-auto w-full max-w-xl overflow-y-auto px-5 pb-3">
