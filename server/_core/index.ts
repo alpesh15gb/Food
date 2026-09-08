@@ -51,8 +51,22 @@ async function startServer() {
   });
   // MP-008: lightweight client-error beacon (ErrorBoundary). No PII accepted.
   // Simple per-IP throttle (30/min) to prevent log spam.
+  // NOTE: sendBeacon posts text/plain (it can't set content-type), so these
+  // two routes parse text bodies tolerant of both plain and JSON.
+  const readBeaconBody = (req: { body?: unknown }): Record<string, unknown> => {
+    const b = req.body as unknown;
+    if (typeof b === "string") {
+      try {
+        const parsed: unknown = JSON.parse(b);
+        if (parsed && typeof parsed === "object") return parsed as Record<string, unknown>;
+      } catch { /* fall through */ }
+      return {};
+    }
+    if (b && typeof b === "object") return b as Record<string, unknown>;
+    return {};
+  };
   const clientErrorHits = new Map<string, { count: number; resetAt: number }>();
-  app.post("/api/client-errors", (req, res) => {
+  app.post("/api/client-errors", express.text({ type: "*/*", limit: "64kb" }), (req, res) => {
     try {
       const ip = (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || req.socket.remoteAddress || "unknown";
       const now = Date.now();
@@ -61,7 +75,7 @@ async function startServer() {
         if (slot.count >= 30) { res.status(429).json({ ok: false }); return; }
         slot.count += 1;
       } else clientErrorHits.set(ip, { count: 1, resetAt: now + 60_000 });
-      const body = (req.body ?? {}) as Record<string, unknown>;
+      const body = readBeaconBody(req);
       const message = String(body.message ?? "client error").slice(0, 500);
       const route = String(body.route ?? "").slice(0, 200);
       console.error(`[ClientError] route=${route || "-"} msg=${message}`);
@@ -79,9 +93,9 @@ async function startServer() {
     "payment_failed", "coupon_failed", "restaurant_unavailable",
     "item_unavailable", "address_not_serviceable", "login_failed",
   ]);
-  app.post("/api/funnel", (req, res) => {
+  app.post("/api/funnel", express.text({ type: "*/*", limit: "64kb" }), (req, res) => {
     try {
-      const body = (req.body ?? {}) as Record<string, unknown>;
+      const body = readBeaconBody(req);
       const event = String(body.event ?? "");
       if (!FUNNEL_EVENTS.has(event)) { res.status(400).json({ ok: false }); return; }
       const slug = typeof body.slug === "string" ? body.slug.slice(0, 96) : undefined;

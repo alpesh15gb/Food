@@ -22,7 +22,19 @@ export function funnel(event: string, opts?: { slug?: string; reason?: string; d
       slug: opts?.slug?.slice(0, 96),
       reason: opts?.reason?.slice(0, 64),
     });
-    if (navigator.sendBeacon) navigator.sendBeacon("/api/funnel", body);
-    else fetch("/api/funnel", { method: "POST", headers: { "Content-Type": "application/json" }, body }).catch(() => undefined);
+    // fetch+keepalive sends real JSON (sendBeacon forces text/plain, which
+    // older servers rejected with 400). Beacon stays as the fallback.
+    try {
+      void fetch("/api/funnel", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body,
+        keepalive: true,
+      }).catch(() => {
+        if (navigator.sendBeacon) navigator.sendBeacon("/api/funnel", body);
+      });
+    } catch {
+      if (navigator.sendBeacon) navigator.sendBeacon("/api/funnel", body);
+    }
   } catch { /* ignore */ }
 }
