@@ -78,6 +78,55 @@
   --accent-foreground: oklch(0.94 0.015 80);
   --border: oklch(0.94 0.015 80 / 12%);
   --input: oklch(0.94 0.015 80 / 15%);
+  color-scheme: dark;
+}
+
+/* Storefront surfaces: warm paper by day, dark glass by night. */
+.sf-page { background-color: #fffaf3; }
+.dark .sf-page { background-color: #14100b; }
+.sf-card {
+  background-color: #ffffff;
+  border: 1px solid #e5d9cb;
+  box-shadow: 0 1px 2px rgba(84, 48, 26, 0.06);
+}
+.dark .sf-card {
+  background-color: rgba(255, 255, 255, 0.045);
+  border-color: rgba(255, 255, 255, 0.09);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+.sf-bar {
+  background-color: rgba(255, 250, 243, 0.95);
+  border-color: #eadbce;
+}
+.dark .sf-bar {
+  background-color: rgba(20, 16, 11, 0.82);
+  border-color: rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+.sf-ink { color: #2A3A0C; }
+.dark .sf-ink { color: #f3e9da; }
+.sf-soft { color: #5F6B3C; }
+.dark .sf-soft { color: #b9a98f; }
+.sf-faint { color: #857262; }
+.dark .sf-faint { color: #8d7c66; }
+.sf-line { border-color: #e5d9cb; }
+.dark .sf-line { border-color: rgba(255, 255, 255, 0.09); }
+/* Amber price pill (both themes, like the reference). */
+.sf-price {
+  background: linear-gradient(135deg, #F5A623, #E8720C);
+  color: #241203;
+  box-shadow: 0 6px 16px rgba(232, 114, 12, 0.35);
+}
+/* Dark-glass label chip over food photos. */
+.sf-photo-chip {
+  background: rgba(12, 8, 5, 0.62);
+  color: #f5ede0;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.14);
 }
 
 @layer base {

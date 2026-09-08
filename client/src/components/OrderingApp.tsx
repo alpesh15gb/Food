@@ -8,8 +8,8 @@ import { useLocation, useSearch } from "wouter";
 import { toast } from "sonner";
 import {
   ArrowLeft, ArrowRight, Bike, Check, ChevronRight, Clock3, Copy,
-  MapPin, Minus, PackageCheck,
-  Plus, Search, ShoppingBag, Sparkles, Store,
+  MapPin, Minus, Moon, PackageCheck,
+  Plus, Search, ShoppingBag, Sparkles, Store, Sun,
   TicketPercent, UserRound, Utensils, X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -23,6 +23,7 @@ import { formatINR, type FoodKind } from "@/lib/types";
 import { trpc } from "@/lib/trpc";
 import { usePlatformHost } from "@/lib/platform";
 import { funnel } from "@/lib/funnel";
+import { useTheme } from "@/contexts/ThemeContext";
 
 const PlatformLanding = lazy(() => import("@/pages/PlatformLanding"));
 import {
@@ -148,7 +149,7 @@ function Quantity({
   const atMinimum = value <= 1;
   return (
     <div
-      className={`inline-flex min-h-[44px] items-center rounded-full border border-[#e7d2bf] bg-[#fffdf8] ${
+      className={`inline-flex min-h-[44px] items-center rounded-full border sf-line bg-white dark:bg-white/5 ${
         compact ? "h-11" : "h-11"
       }`}
     >
@@ -156,18 +157,18 @@ function Quantity({
         type="button"
         aria-label={atMinimum && allowZero ? "Remove item" : "Decrease quantity"}
         onClick={() => onChange(atMinimum ? (allowZero ? 0 : 1) : value - 1)}
-        className="grid h-full min-h-[44px] w-11 place-items-center rounded-l-full text-[#5F6B3C] hover:text-[#B95509] focus-visible:outline-2 focus-visible:outline-[#B95509]"
+        className="grid h-full min-h-[44px] w-11 place-items-center rounded-l-full sf-soft hover:text-[#B95509] focus-visible:outline-2 focus-visible:outline-[#B95509] dark:text-[#cbbfa9] dark:hover:text-[#F5A623]"
       >
         <Minus className="h-3.5 w-3.5" />
       </button>
-      <span aria-live="polite" aria-atomic="true" className="w-5 text-center text-sm font-extrabold tabular-nums">
+      <span aria-live="polite" aria-atomic="true" className="sf-ink w-5 text-center text-sm font-extrabold tabular-nums">
         {value}
       </span>
       <button
         type="button"
         aria-label="Increase quantity"
         onClick={() => onChange(value + 1)}
-        className="grid h-full min-h-[44px] w-11 place-items-center rounded-r-full text-[#5F6B3C] hover:text-[#B95509] focus-visible:outline-2 focus-visible:outline-[#B95509]"
+        className="grid h-full min-h-[44px] w-11 place-items-center rounded-r-full sf-soft hover:text-[#B95509] focus-visible:outline-2 focus-visible:outline-[#B95509] dark:text-[#cbbfa9] dark:hover:text-[#F5A623]"
       >
         <Plus className="h-3.5 w-3.5" />
       </button>
@@ -1040,7 +1041,7 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
 
   return (
     <>
-      <main className="min-h-screen bg-[#fffaf3] pb-28 lg:pb-10">
+      <main className="sf-page min-h-screen pb-28 lg:pb-10">
         {/* Header */}
         <TopBar
           restaurantName={restaurant.name}
@@ -1057,7 +1058,7 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
         {lowData && !lowDataDismissed && (
           <div
             role="status"
-            className="flex items-center justify-center gap-1 border-b border-[#D8DFC0] bg-[#fff6ea] py-1 pl-4 pr-2 text-xs font-bold text-[#5F6B3C]"
+            className="flex items-center justify-center gap-1 border-b border-[#D8DFC0] bg-[#fff6ea] py-1 pl-4 pr-2 text-xs font-bold sf-soft"
           >
             <span>Slow network — showing light mode.</span>
             <button
@@ -1074,7 +1075,7 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
         {/* Restaurant header — compact card, no tall hero. Banner photos are
             skipped: the live banner 404s and a 300px photo pushes the menu
             below the fold on phones. Brand colour carries identity instead. */}
-        <section className="border-b border-[#eadac9] bg-[#fffdf9]">
+        <section className="sf-card border-x-0 border-t-0">
           <div className="mx-auto flex max-w-[1440px] items-center gap-3 px-4 py-4 sm:px-6 lg:px-10">
             <div className="grid h-12 w-12 shrink-0 place-items-center overflow-hidden rounded-2xl bg-[#f3e8dc]">
               {restaurant.logo && !logoBroken ? (
@@ -1091,10 +1092,10 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
               )}
             </div>
             <div className="min-w-0 flex-1">
-              <h1 className="truncate text-xl font-extrabold leading-tight text-[#2A3A0C]">
+              <h1 className="sf-ink truncate text-xl font-extrabold leading-tight">
                 {restaurant.name}
               </h1>
-              <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs font-semibold text-[#5F6B3C]">
+              <p className="sf-soft mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs font-semibold">
                 <span className="inline-flex items-center gap-1">
                   <Clock3 className="h-3 w-3 shrink-0" aria-hidden="true" />
                   {restaurant.eta}
@@ -1130,7 +1131,7 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
               </span>
             </div>
           )}
-          <section className="mt-4 rounded-xl border border-[#e5d9cb] bg-white px-4 py-3 shadow-sm sm:px-5">
+          <section className="sf-card mt-4 rounded-xl px-4 py-3 sm:px-5">
             <button
               onClick={() => setLocationOpen(true)}
               className="flex w-full items-center justify-between gap-3 text-left"
@@ -1140,21 +1141,21 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
                   <MapPin className="h-4 w-4" />
                 </span>
                 <div className="min-w-0">
-                  <p className="text-[11px] font-bold uppercase tracking-wider text-[#857262]">
+                  <p className="sf-faint text-[11px] font-bold uppercase tracking-wider">
                     {deliveryAddress?.confirmed ? "Delivering to" : "Set delivery location"}
                   </p>
                   {deliveryAddress?.confirmed ? (
-                    <p className="truncate text-sm font-bold text-[#2A3A0C]">
+                    <p className="sf-ink truncate text-sm font-bold">
                       {deliveryAddress.flatHouse}, {deliveryAddress.area}, {deliveryAddress.city} {deliveryAddress.postalCode}
                     </p>
                   ) : (
-                    <p className="truncate text-sm font-bold text-[#B95509]">
+                    <p className="truncate text-sm font-bold text-[#E8720C]">
                       Tap to set your delivery location
                     </p>
                   )}
                 </div>
               </div>
-              <ChevronRight className="h-4 w-4 text-[#5F6B3C]" />
+              <ChevronRight className="sf-soft h-4 w-4" />
             </button>
           </section>
 
@@ -1165,8 +1166,8 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
           <div className="mt-5 lg:grid lg:grid-cols-[170px_minmax(0,1fr)_350px] lg:gap-8">
             {/* Desktop Category Sidebar */}
             <aside className="hidden lg:block">
-              <div className="sticky top-24">
-                <p className="mb-3 text-xs font-extrabold uppercase tracking-[0.16em] text-[#5F6B3C]">
+              <div className="sticky top-20">
+                <p className="sf-soft mb-3 text-xs font-extrabold uppercase tracking-[0.16em]">
                   On the menu
                 </p>
                 <nav aria-label="Menu categories" className="space-y-1">
@@ -1177,12 +1178,12 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
                       aria-pressed={activeCategory === category.name}
                       className={`flex min-h-[44px] w-full items-center justify-between gap-2 rounded-xl px-3 py-2 text-left text-sm font-semibold ${
                         activeCategory === category.name
-                          ? "bg-[#f5e4d4] text-[#b63d2d]"
-                          : "text-[#6f5140] hover:bg-[#faefe5]"
+                          ? "bg-[#B95509]/15 text-[#E8720C] dark:bg-[#E8720C]/20 dark:text-[#F5A623]"
+                          : "sf-soft hover:bg-black/5 dark:hover:bg-white/5"
                       }`}
                     >
                       <span className="truncate">{category.name}</span>
-                      <span className="shrink-0 text-xs font-bold tabular-nums text-[#5F6B3C]">
+                      <span className="sf-faint shrink-0 text-xs font-bold tabular-nums">
                         {countByCategory.get(category.name) ?? 0}
                       </span>
                     </button>
@@ -1195,10 +1196,10 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
             <section className="min-w-0">
               {/* Search + category rail (sticky on mobile, static on desktop).
                   Tightened so sticky chrome stays under ~180px with the header. */}
-              <div className="sticky top-16 z-20 -mx-4 bg-[#fffaf3]/95 px-4 pb-2 pt-3 backdrop-blur sm:-mx-6 sm:px-6 lg:static lg:mx-0 lg:bg-transparent lg:px-0 lg:pt-0">
+              <div className="sf-bar sticky top-16 z-20 -mx-4 px-4 pb-2 pt-3 backdrop-blur sm:-mx-6 sm:px-6 lg:static lg:mx-0 lg:bg-transparent lg:px-0 lg:pt-0 lg:backdrop-blur-none dark:lg:bg-transparent">
                 <div className="flex gap-2">
                   <div className="relative flex-1">
-                    <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-[#5F6B3C]" />
+                    <Search className="sf-soft pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2" />
                     <label htmlFor="dish-search" className="sr-only">
                       Search dishes, cuisines, or categories
                     </label>
@@ -1208,14 +1209,14 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
                       value={query}
                       onChange={(event) => setQuery(event.target.value)}
                       placeholder="Search dishes"
-                      className="h-11 rounded-xl border-[#D8DFC0] bg-white pl-11 pr-12 text-sm shadow-sm placeholder:text-[#ac8b73]"
+                      className="h-11 rounded-xl border-[#D8DFC0] bg-white pl-11 pr-12 text-sm shadow-sm placeholder:text-[#ac8b73] dark:border-white/10 dark:bg-white/5 dark:text-[#f3e9da] dark:placeholder:text-[#8d7c66]"
                     />
                     {query && (
                       <button
                         type="button"
                         onClick={clearSearch}
                         aria-label="Clear search"
-                        className="absolute right-1 top-1/2 grid h-11 w-11 -translate-y-1/2 place-items-center rounded-full text-[#5F6B3C] hover:text-[#B95509]"
+                        className="absolute right-1 top-1/2 grid h-11 w-11 -translate-y-1/2 place-items-center rounded-full sf-soft hover:text-[#B95509]"
                       >
                         <X className="h-4 w-4" aria-hidden="true" />
                       </button>
@@ -1235,8 +1236,8 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
                         aria-pressed={isActive}
                         className={`min-h-[44px] shrink-0 whitespace-nowrap rounded-full px-3.5 py-2 text-xs font-extrabold ${
                           isActive
-                            ? "bg-[#2A3A0C] text-white"
-                            : "border border-[#ead8c7] bg-white text-[#76523e]"
+                            ? "bg-[#2A3A0C] text-white dark:bg-[#E8720C] dark:text-[#1a0e02]"
+                            : "border border-[#ead8c7] bg-white sf-faint dark:border-white/10 dark:bg-white/5 dark:text-[#cbbfa9]"
                         }`}
                       >
                         {category.name}
@@ -1262,8 +1263,8 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
                       aria-pressed={filter === value}
                       className={`inline-flex min-h-[44px] shrink-0 items-center gap-1.5 rounded-full px-3.5 py-2 text-xs font-extrabold ${
                         filter === value
-                          ? "bg-[#B95509] text-white"
-                          : "border border-[#ead8c7] bg-[#fffdf9] text-[#76523e]"
+                          ? "bg-[#B95509] text-white dark:bg-[#E8720C] dark:text-[#1a0e02]"
+                          : "border border-[#ead8c7] bg-[#fffdf9] sf-faint dark:border-white/10 dark:bg-white/5 dark:text-[#cbbfa9]"
                       }`}
                     >
                       {value === "veg" && <FoodDot kind="veg" />}
@@ -1296,7 +1297,7 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
                     <div key={collection.name}>
                       <div className="mb-3 flex items-center gap-2">
                         <Sparkles className="h-4 w-4 text-[#B95509]" aria-hidden="true" />
-                        <h3 className="text-sm font-extrabold text-[#2A3A0C]">
+                        <h3 className="text-sm font-extrabold sf-ink">
                           {collection.name}
                         </h3>
                       </div>
@@ -1358,18 +1359,18 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
           </div>
         </div>
         <footer className="mx-auto max-w-[1440px] px-4 pb-10 sm:px-6 lg:px-10">
-          <nav aria-label="Legal" className="flex flex-wrap items-center justify-center gap-x-1 gap-y-1 border-t border-[#eadac9] pt-5 text-xs font-bold text-[#856653]">
-            <a href="/about" className="min-h-[44px] px-3 py-3 hover:text-[#B95509]">About</a>
+          <nav aria-label="Legal" className="sf-faint flex flex-wrap items-center justify-center gap-x-1 gap-y-1 border-t sf-line pt-5 text-xs font-bold">
+            <a href="/about" className="min-h-[44px] px-3 py-3 hover:text-[#B95509] dark:hover:text-[#F5A623]">About</a>
             <span aria-hidden="true">·</span>
-            <a href="/terms" className="min-h-[44px] px-3 py-3 hover:text-[#B95509]">Terms</a>
+            <a href="/terms" className="min-h-[44px] px-3 py-3 hover:text-[#B95509] dark:hover:text-[#F5A623]">Terms</a>
             <span aria-hidden="true">·</span>
-            <a href="/privacy" className="min-h-[44px] px-3 py-3 hover:text-[#B95509]">Privacy</a>
+            <a href="/privacy" className="min-h-[44px] px-3 py-3 hover:text-[#B95509] dark:hover:text-[#F5A623]">Privacy</a>
             <span aria-hidden="true">·</span>
-            <a href="/refund" className="min-h-[44px] px-3 py-3 hover:text-[#B95509]">Refunds & Cancellation</a>
+            <a href="/refund" className="min-h-[44px] px-3 py-3 hover:text-[#B95509] dark:hover:text-[#F5A623]">Refunds & Cancellation</a>
             <span aria-hidden="true">·</span>
-            <a href="/contact" className="min-h-[44px] px-3 py-3 hover:text-[#B95509]">Contact</a>
+            <a href="/contact" className="min-h-[44px] px-3 py-3 hover:text-[#B95509] dark:hover:text-[#F5A623]">Contact</a>
           </nav>
-          <p className="mt-1 text-center text-[11px] leading-relaxed text-[#ac8b73]">
+          <p className="sf-faint mt-1 text-center text-[11px] leading-relaxed">
             Prices include GST as shown at payment. Keep your confirmation link private — it carries your order token.
           </p>
         </footer>
@@ -1458,12 +1459,12 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
       {/* Customer Auth — Dialog on sm+ screens, Drawer on mobile */}
       {isDesktop ? (
         <Dialog open={authOpen} onOpenChange={handleAuthOpenChange}>
-          <DialogContent className="border-[#D8DFC0] bg-[#fffaf3] sm:max-w-md">
+          <DialogContent className="sf-card sm:max-w-md">
             <DialogHeader className="text-left">
-              <DialogTitle className="font-display text-2xl text-[#2A3A0C]">
+              <DialogTitle className="font-display text-2xl sf-ink">
                 {loggedInPhone ? "Your Account" : "Sign in to order"}
               </DialogTitle>
-              <DialogDescription className="text-[#5F6B3C]">
+              <DialogDescription className="sf-soft">
                 {loggedInPhone
                   ? `Logged in as ${loggedInPhone}`
                   : "Enter your phone number to get started"}
@@ -1492,10 +1493,10 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
         <Drawer open={authOpen} onOpenChange={handleAuthOpenChange}>
           <DrawerContent className="max-h-[85vh]">
             <DrawerHeader className="px-6 pb-2 text-left">
-              <DrawerTitle className="font-display text-2xl text-[#2A3A0C]">
+              <DrawerTitle className="font-display text-2xl sf-ink">
                 {loggedInPhone ? "Your Account" : "Sign in to order"}
               </DrawerTitle>
-              <DrawerDescription className="text-[#5F6B3C]">
+              <DrawerDescription className="sf-soft">
                 {loggedInPhone
                   ? `Logged in as ${loggedInPhone}`
                   : "Enter your phone number to get started"}
@@ -1567,15 +1568,15 @@ function AuthBody({
   if (loggedInPhone) {
     return (
       <div className="space-y-4">
-        <div className="rounded-xl border border-[#D8DFC0] bg-[#E9EFD6] p-4">
+        <div className="rounded-xl border border-[#D8DFC0] bg-[#E9EFD6] dark:bg-white/10 p-4">
           <div className="grid grid-cols-2 gap-4 text-sm">
             <div>
-              <p className="text-xs font-extrabold uppercase tracking-wider text-[#5F6B3C]">Phone</p>
-              <p className="mt-1 font-bold text-[#2A3A0C]">{loggedInPhone}</p>
+              <p className="text-xs font-extrabold uppercase tracking-wider sf-soft">Phone</p>
+              <p className="mt-1 font-bold sf-ink">{loggedInPhone}</p>
             </div>
             <div>
-              <p className="text-xs font-extrabold uppercase tracking-wider text-[#5F6B3C]">Total Orders</p>
-              <p className="mt-1 font-bold text-[#2A3A0C]">{totalOrders ?? 0}</p>
+              <p className="text-xs font-extrabold uppercase tracking-wider sf-soft">Total Orders</p>
+              <p className="mt-1 font-bold sf-ink">{totalOrders ?? 0}</p>
             </div>
           </div>
         </div>
@@ -1617,7 +1618,7 @@ function AuthBody({
         >
           {otpLoading ? "Sending..." : "Send verification code"}
         </Button>
-        <p className="text-center text-xs text-[#5F6B3C]">
+        <p className="text-center text-xs sf-soft">
           We'll send a 6-digit code to verify your number.
         </p>
       </div>
@@ -1626,7 +1627,7 @@ function AuthBody({
 
   return (
     <div className="space-y-4">
-      <p className="text-sm text-[#76523e]">
+      <p className="text-sm sf-faint">
         Enter the 6-digit code sent to {otpPhone}
       </p>
       <label htmlFor="auth-otp" className="sr-only">
@@ -1654,21 +1655,21 @@ function AuthBody({
         {otpLoading ? "Verifying..." : "Verify & continue"}
       </Button>
       {resendCooldown > 0 ? (
-        <p aria-live="polite" className="text-center text-xs font-bold text-[#5F6B3C]">
+        <p aria-live="polite" className="text-center text-xs font-bold sf-soft">
           Resend code in {resendCooldown}s
         </p>
       ) : (
         <button
           onClick={onSendOtp}
           disabled={otpLoading}
-          className="min-h-[44px] w-full text-center text-xs font-bold text-[#5F6B3C] underline disabled:opacity-50"
+          className="min-h-[44px] w-full text-center text-xs font-bold sf-soft underline disabled:opacity-50"
         >
           Resend code
         </button>
       )}
       <button
         onClick={onBackToPhone}
-        className="min-h-[44px] w-full text-center text-xs font-bold text-[#5F6B3C] underline"
+        className="min-h-[44px] w-full text-center text-xs font-bold sf-soft underline"
       >
         Change phone number
       </button>
@@ -1697,8 +1698,9 @@ function TopBar({
   deliveryFee?: number;
   minOrder?: number;
 }) {
+  const { theme, toggleTheme } = useTheme();
   return (
-    <header className="sticky top-0 z-40 border-b border-[#eadbce] bg-[#fffaf3]/95 backdrop-blur">
+    <header className="sf-bar sticky top-0 z-40 border-b backdrop-blur">
       <div className="mx-auto flex h-16 max-w-[1440px] items-center justify-between gap-2 px-4 sm:px-6 lg:px-10">
         <button
           onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
@@ -1708,11 +1710,11 @@ function TopBar({
         >
           <BrandMark name={restaurantName} />
           <span className="min-w-0">
-            <span className="block truncate text-lg font-extrabold leading-tight text-[#2A3A0C]">
+            <span className="sf-ink block truncate text-lg font-extrabold leading-tight">
               {restaurantName}
             </span>
             {/* Single compact meta row — fixed height so it never shifts layout */}
-            <span className="flex h-5 items-center gap-2 overflow-hidden whitespace-nowrap text-[11px] font-bold text-[#5F6B3C]">
+            <span className="sf-soft flex h-5 items-center gap-2 overflow-hidden whitespace-nowrap text-[11px] font-bold">
               {eta ? (
                 <span className="inline-flex items-center gap-1">
                   <Clock3 className="h-3 w-3 shrink-0" aria-hidden="true" />
@@ -1741,9 +1743,18 @@ function TopBar({
           </span>
         </button>
         <nav className="flex shrink-0 items-center gap-1 sm:gap-2">
+          {toggleTheme && (
+            <button
+              onClick={toggleTheme}
+              aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+              className="sf-card grid h-11 w-11 place-items-center rounded-xl text-[#B95509] hover:brightness-95 dark:text-[#F5A623] dark:hover:brightness-125"
+            >
+              {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+            </button>
+          )}
           <button
             onClick={onAccount}
-            className="flex min-h-[44px] items-center gap-1.5 rounded-xl border border-[#D8DFC0] bg-white px-3 py-2 text-xs font-extrabold text-[#2A3A0C] hover:bg-[#f9e6d9]"
+            className="sf-card flex min-h-[44px] items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-extrabold sf-ink hover:brightness-95 dark:hover:brightness-150"
             aria-label="Account"
           >
             <UserRound className="h-4 w-4" />
@@ -1751,7 +1762,7 @@ function TopBar({
           </button>
           <button
             onClick={onCart}
-            className="relative grid h-11 w-11 place-items-center rounded-xl bg-[#2A3A0C] text-white hover:bg-[#B95509]"
+            className="relative grid h-11 w-11 place-items-center rounded-xl bg-[#2A3A0C] text-white hover:bg-[#B95509] dark:bg-[#E8720C] dark:hover:bg-[#F5851F]"
             aria-label={itemCount > 0 ? `Open cart, ${itemCount} items` : "Open cart"}
           >
             <ShoppingBag className="h-4 w-4" />
@@ -1790,10 +1801,10 @@ function OfferStrip({
         {offers.slice(0, 6).map((offer) => (
           <article
             key={offer.code}
-            className="w-[260px] shrink-0 snap-start rounded-2xl border border-[#D8DFC0] bg-gradient-to-r from-[#fff9f0] to-[#fff3e5] p-3"
+            className="sf-card w-[260px] shrink-0 snap-start rounded-2xl p-3"
           >
             <div className="flex items-center gap-2.5">
-              <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[#B95509]/10 text-[#B95509]">
+              <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[#B95509]/10 text-[#B95509] dark:bg-[#E8720C]/15 dark:text-[#F5A623]">
                 <TicketPercent className="h-5 w-5" aria-hidden="true" />
               </span>
               <div className="min-w-0 flex-1">
@@ -1802,17 +1813,17 @@ function OfferStrip({
                   onClick={() => void copyCode(offer.code)}
                   aria-label={`Copy offer code ${offer.code}`}
                   title="Tap to copy"
-                  className="flex min-h-[44px] items-center gap-1.5 text-left text-sm font-extrabold tracking-wide text-[#B95509]"
+                  className="flex min-h-[44px] items-center gap-1.5 text-left text-sm font-extrabold tracking-wide text-[#B95509] dark:text-[#F5A623]"
                 >
                   <span className="truncate">{offer.code}</span>
                   <Copy className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
                 </button>
-                <p className="truncate text-xs text-[#8d6b55]">{offer.description}</p>
+                <p className="sf-faint truncate text-xs">{offer.description}</p>
               </div>
               <button
                 type="button"
                 onClick={() => onApplyCoupon(offer.code)}
-                className="min-h-[44px] shrink-0 rounded-lg px-3 text-xs font-extrabold text-[#B95509] hover:bg-[#B95509]/10"
+                className="min-h-[44px] shrink-0 rounded-lg px-3 text-xs font-extrabold text-[#B95509] hover:bg-[#B95509]/10 dark:text-[#F5A623] dark:hover:bg-[#E8720C]/15"
               >
                 Apply
               </button>
@@ -1837,27 +1848,29 @@ const CollectionCard = memo(function CollectionCard({
   item: StorefrontMenuItem;
 }) {
   return (
-    <div className="flex w-[220px] shrink-0 snap-start gap-3 rounded-xl border border-[#e5d9cb] bg-white p-3 shadow-sm">
-      <SmartImage
-        src={item.image}
-        alt={item.name}
-        ratio="1/1"
-        fallbackLabel={item.name}
-        className="h-20 w-20 shrink-0 rounded-lg"
-      />
+    <div className="sf-card flex w-[220px] shrink-0 snap-start gap-3 rounded-xl p-3">
+      <div className="relative h-20 w-20 shrink-0">
+        <SmartImage
+          src={item.image}
+          alt={item.name}
+          ratio="1/1"
+          fallbackLabel={item.name}
+          className="rounded-lg"
+        />
+        <span className="sf-price absolute -bottom-2 left-1 rounded-full px-2 py-0.5 text-[11px] font-extrabold tabular-nums">
+          {formatINR(item.price)}
+        </span>
+      </div>
       <div className="flex min-w-0 flex-1 flex-col justify-between">
         <div className="min-w-0">
-          <p className="truncate text-xs font-bold text-[#2A3A0C]">
+          <p className="sf-ink truncate text-xs font-bold">
             {item.name}
-          </p>
-          <p className="mt-0.5 text-xs font-bold tabular-nums text-[#B95509]">
-            {formatINR(item.price)}
           </p>
         </div>
         <button
           onClick={() => onAdd(item)}
           disabled={disabled}
-          className="mt-1 min-h-[44px] w-full rounded-lg border border-[#d8c3ab] bg-white px-2 py-1 text-xs font-bold text-[#B95509] hover:bg-[#B95509] hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+          className="mt-1 min-h-[44px] w-full rounded-lg border border-[#d8c3ab] bg-white px-2 py-1 text-xs font-bold text-[#B95509] hover:bg-[#B95509] hover:text-white disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/15 dark:bg-white/5 dark:text-[#F5A623] dark:hover:bg-[#E8720C] dark:hover:text-[#1a0e02]"
         >
           {disabled ? "Closed" : item.customizable ? "ADD +" : "ADD"}
         </button>
@@ -1941,14 +1954,14 @@ const MenuStream = memo(function MenuStream({
   if (searching) {
     if (items.length === 0)
       return (
-        <div className="rounded-2xl border border-[#e5d9cb] mt-5 bg-[#fffdf8] p-9 text-center shadow-sm">
-          <div className="mx-auto grid h-14 w-14 place-items-center rounded-full bg-[#E9EFD6] text-[#B95509]">
+        <div className="sf-card mt-5 p-9 text-center">
+          <div className="mx-auto grid h-14 w-14 place-items-center rounded-full bg-[#B95509]/10 text-[#B95509] dark:bg-[#E8720C]/15 dark:text-[#F5A623]">
             <Utensils className="h-6 w-6" />
           </div>
-          <h2 className="font-display mt-4 text-2xl">
+          <h2 className="sf-ink mt-4 text-2xl font-extrabold">
             No dishes for “{query.trim()}”
           </h2>
-          <p className="mt-2 text-sm text-[#856855]">
+          <p className="sf-soft mt-2 text-sm">
             Check spelling (e.g. “piza” → “pizza”), try a shorter word like “veg” or “rice”,
             or browse the categories below.
           </p>
@@ -1964,14 +1977,14 @@ const MenuStream = memo(function MenuStream({
       <div className="space-y-3 pb-3">
         <div className="mb-4 flex items-end justify-between">
           <div>
-            <p className="text-xs font-bold uppercase tracking-wider text-[#857262]">
+            <p className="sf-faint text-xs font-bold uppercase tracking-wider">
               Search results
             </p>
-            <h2 className="mt-1 text-xl font-extrabold text-[#2A3A0C]">
+            <h2 className="sf-ink mt-1 text-xl font-extrabold">
               What we found
             </h2>
           </div>
-          <span role="status" aria-live="polite" className="text-xs font-semibold tabular-nums text-[#857262]">
+          <span role="status" aria-live="polite" className="sf-faint text-xs font-semibold tabular-nums">
             {items.length} dish{items.length !== 1 ? "es" : ""}
           </span>
         </div>
@@ -1985,14 +1998,14 @@ const MenuStream = memo(function MenuStream({
   // state — otherwise the page below the rail is silently blank.
   if (!searching && categories.length === 0) {
     return (
-      <div className="rounded-2xl border border-[#e5d9cb] mt-5 bg-[#fffdf8] p-9 text-center shadow-sm">
-        <div className="mx-auto grid h-14 w-14 place-items-center rounded-full bg-[#E9EFD6] text-[#B95509]">
+      <div className="sf-card mt-5 p-9 text-center">
+        <div className="mx-auto grid h-14 w-14 place-items-center rounded-full bg-[#B95509]/10 text-[#B95509] dark:bg-[#E8720C]/15 dark:text-[#F5A623]">
           <Utensils className="h-6 w-6" />
         </div>
-        <h2 className="font-display mt-4 text-2xl">
+        <h2 className="sf-ink mt-4 text-2xl font-extrabold">
           Menu coming soon
         </h2>
-        <p className="mt-2 text-sm text-[#856855]">
+        <p className="sf-soft mt-2 text-sm">
           The kitchen is setting up its menu — please check back shortly.
         </p>
       </div>
@@ -2011,21 +2024,21 @@ const MenuStream = memo(function MenuStream({
             className="section-anchor"
           >
             <div className="mb-3 flex items-end justify-between">
-              <h2 className="text-lg font-extrabold text-[#2A3A0C]">
+              <h2 className="sf-ink text-lg font-extrabold">
                 {category.name}
               </h2>
-              <span className="text-xs font-semibold tabular-nums text-[#8a7a68]">
+              <span className="sf-faint text-xs font-semibold tabular-nums">
                 {catItems.length} dish{catItems.length !== 1 ? "es" : ""}
               </span>
             </div>
             {catItems.length > 0 ? (
               <div className="space-y-3">{catItems.map(renderRow)}</div>
             ) : (
-              <div className="rounded-2xl border border-dashed border-[#e5d0bd] bg-[#fffdf9] p-5 text-center">
+              <div className="sf-card rounded-2xl border-dashed p-5 text-center">
                 <p className="text-sm font-extrabold text-[#5b4233]">
                   Nothing in {category.name} yet
                 </p>
-                <p className="mt-1 text-xs text-[#856855]">
+                <p className="mt-1 text-xs sf-faint">
                   The kitchen team will publish dishes here shortly.
                 </p>
               </div>
@@ -2058,7 +2071,7 @@ const MenuCard = memo(function MenuCard({
 
   return (
     <article
-      className={`menu-cv flex gap-3 rounded-xl border border-[#e5d9cb] bg-white p-3 shadow-sm sm:p-3.5 ${
+      className={`menu-cv sf-card flex gap-3 rounded-xl p-3 sm:p-3.5 ${
         unavailable ? "opacity-70" : ""
       }`}
     >
@@ -2066,27 +2079,27 @@ const MenuCard = memo(function MenuCard({
         <div className="flex items-center gap-1.5">
           <FoodDot kind={item.kind} />
           {item.isBestseller && (
-            <span className="rounded-full bg-[#f7e6ca] px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[#9c5a21]">
+            <span className="rounded-full bg-[#f7e6ca] px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[#9c5a21] dark:bg-[#F5A623]/15 dark:text-[#F5A623]">
               Bestseller
             </span>
           )}
         </div>
-        <h3 className="mt-1 text-[15px] font-bold leading-snug text-[#2A3A0C]">
+        <h3 className="sf-ink mt-1 text-[15px] font-bold leading-snug">
           {item.name}
         </h3>
-        <p className="mt-0.5 flex items-baseline gap-2 text-sm font-bold tabular-nums text-[#2A3A0C]">
-          {formatINR(item.price)}
-          {hasDiscount && (
-            <span className="text-xs font-semibold text-[#a89880] line-through">
-              {formatINR(item.originalPrice!)}
+        {hasDiscount && (
+          <p className="mt-0.5 text-xs font-semibold tabular-nums">
+            <span className="sf-faint line-through">{formatINR(item.originalPrice!)}</span>
+            <span className="ml-1.5 text-[#2e7d32] dark:text-[#7bc47f]">
+              Save {Math.round((1 - item.price / item.originalPrice!) * 100)}%
             </span>
-          )}
-        </p>
-        <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-[#857262]">
+          </p>
+        )}
+        <p className="sf-faint mt-1 line-clamp-2 text-xs leading-relaxed">
           {item.description}
         </p>
         {(unavailable || item.customizable) && (
-          <p className="mt-1 text-[11px] font-semibold text-[#9d7b64]">
+          <p className="mt-1 text-[11px] font-semibold text-[#9d7b64] dark:text-[#a89578]">
             {unavailable
               ? (disabled ? "Kitchen closed" : item.availableNote || "Unavailable right now")
               : "Customisable — tap to choose options"}
@@ -2102,6 +2115,9 @@ const MenuCard = memo(function MenuCard({
             fallbackLabel={item.name}
             className="rounded-lg"
           />
+          <span className="sf-photo-chip absolute left-1.5 top-1.5 max-w-[calc(100%-12px)] truncate rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide">
+            {item.category}
+          </span>
           {unavailable && (
             <div className="absolute inset-0 grid place-items-center rounded-lg bg-[#3a251b]/45 px-2 text-center text-xs font-bold text-white">
               {disabled
@@ -2111,8 +2127,13 @@ const MenuCard = memo(function MenuCard({
                 : "Unavailable"}
             </div>
           )}
+          {!unavailable && (
+            <span className="sf-price absolute -bottom-2.5 right-1.5 rounded-full px-2.5 py-1 text-xs font-extrabold tabular-nums">
+              {formatINR(item.price)}
+            </span>
+          )}
         </div>
-        <div className="relative z-10 -mt-5 flex justify-center px-2">
+        <div className="relative z-10 mt-4 flex justify-center px-2">
           {showStepper ? (
             <div className="flex h-10 min-h-[44px] items-center rounded-lg border border-[#e0d3c2] bg-white text-[#B95509] shadow-sm">
               <button
@@ -2173,10 +2194,10 @@ function MobileCartBar({
     <button
       onClick={onCart}
       aria-label={`View cart, ${quantity} item${quantity !== 1 ? "s" : ""}, total ${formatINR(total)}`}
-      className="safe-bottom fixed left-4 right-4 z-40 flex min-h-[56px] items-center justify-between rounded-2xl bg-[#2A3A0C] px-5 py-3 text-left text-white shadow-lg lg:hidden"
+      className="safe-bottom fixed left-4 right-4 z-40 flex min-h-[56px] items-center justify-between rounded-2xl bg-[#2A3A0C] px-5 py-3 text-left text-white shadow-lg lg:hidden dark:bg-[#E8720C] dark:text-[#1a0e02] dark:shadow-[0_18px_45px_rgba(0,0,0,0.5)]"
     >
       <span aria-live="polite" aria-atomic="true">
-        <span className="block text-xs font-semibold text-white/70">
+        <span className="block text-xs font-semibold text-white/70 dark:text-[#1a0e02]/70">
           {quantity} item{quantity !== 1 ? "s" : ""} in your order
         </span>
         <span className="text-base font-extrabold tabular-nums">{formatINR(total)}</span>
@@ -2241,20 +2262,20 @@ function CartTicket({
             {cart.map((line) => (
               <div key={line.id} className="flex gap-2">
                 <div className="min-w-0 flex-1">
-                  <p className="text-sm font-extrabold text-[#442f20]">
+                  <p className="sf-ink text-sm font-extrabold">
                     {line.item.name}
                   </p>
-                  <p className="mt-0.5 text-xs text-[#5F6B3C]">
+                  <p className="sf-faint mt-0.5 text-xs">
                     {line.modifiers?.join(" · ") || "As listed"}
                   </p>
-                  <p className="mt-1 text-xs font-bold">
+                  <p className="sf-ink mt-1 text-xs font-bold tabular-nums">
                     {formatINR(line.unitPrice * line.quantity)}
                   </p>
                   <button
                     type="button"
                     onClick={() => onQuantity(line.id, 0)}
                     aria-label={`Remove ${line.item.name} from cart`}
-                    className="mt-1 min-h-[44px] text-xs font-bold text-[#4A5729] hover:text-[#B95509]"
+                    className="mt-1 min-h-[44px] text-xs font-bold text-[#4A5729] hover:text-[#B95509] dark:text-[#a89578] dark:hover:text-[#F5A623]"
                   >
                     Remove
                   </button>
@@ -2267,29 +2288,29 @@ function CartTicket({
                 />
               </div>
             ))}
-            <div className="space-y-2 border-t border-[#eee2d3] pt-4">
-              <div className="flex justify-between text-xs text-[#6b5f52]">
+            <div className="space-y-2 border-t sf-line pt-4">
+              <div className="sf-soft flex justify-between text-xs">
                 <span>Item total</span>
                 <span className="tabular-nums">{formatINR(itemTotal)}</span>
               </div>
-              <div className="flex justify-between text-xs text-[#6b5f52]">
+              <div className="sf-soft flex justify-between text-xs">
                 <span>Packaging</span>
                 <span className="tabular-nums">{formatINR(packaging)}</span>
               </div>
-              <div className="flex justify-between text-xs text-[#6b5f52]">
+              <div className="sf-soft flex justify-between text-xs">
                 <span>Delivery</span>
                 <span className="tabular-nums">{formatINR(delivery)}</span>
               </div>
-              <div className="flex justify-between text-xs text-[#6b5f52]">
+              <div className="sf-soft flex justify-between text-xs">
                 <span>Taxes</span>
                 <span className="tabular-nums">{formatINR(taxes)}</span>
               </div>
-              <div className="flex justify-between border-t border-[#eee2d3] pt-3 text-base font-extrabold text-[#2A3A0C]">
+              <div className="sf-ink flex justify-between border-t sf-line pt-3 text-base font-extrabold">
                 <span>{estimated ? "Estimated total" : "To pay"}</span>
                 <span className="tabular-nums">{formatINR(total)}</span>
               </div>
               {estimated && (
-                <p className="text-xs text-[#857262]">
+                <p className="sf-faint text-xs">
                   Estimate before coupons — kitchen confirms the exact payable (incl. discounts & GST) at payment.
                 </p>
               )}
@@ -2314,7 +2335,7 @@ function CartTicket({
             </Button>
           </>
         ) : (
-          <p className="text-sm font-bold text-[#5F6B3C]">
+          <p className="text-sm font-bold sf-soft">
             Browse the menu to add items
           </p>
         )}
@@ -2365,7 +2386,7 @@ function CustomizationDrawer({
 
   return (
     <Drawer open={!!item} onOpenChange={(open) => !open && onClose()}>
-      <DrawerContent className="max-h-[92dvh] border-[#D8DFC0] bg-[#fffaf3]">
+      <DrawerContent className="sf-card max-h-[92dvh]">
         <div className="mx-auto w-full max-w-xl overflow-y-auto px-5 pb-3">
           <DrawerHeader className="px-0 text-left">
             <div className="mb-3 flex items-start justify-between gap-3">
@@ -2376,7 +2397,7 @@ function CustomizationDrawer({
                     CUSTOMIZE
                   </span>
                 </div>
-                <DrawerTitle className="font-display mt-2 text-3xl text-[#2A3A0C]">
+                <DrawerTitle className="font-display mt-2 text-3xl sf-ink">
                   {item.name}
                 </DrawerTitle>
                 <DrawerDescription className="mt-1 max-w-md text-sm leading-relaxed text-[#836552]">
@@ -2386,7 +2407,7 @@ function CustomizationDrawer({
               <button
                 onClick={onClose}
                 aria-label="Close customization"
-                className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-[#f5e7da] text-[#5F6B3C]"
+                className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-[#f5e7da] sf-soft"
               >
                 <X className="h-4 w-4" />
               </button>
@@ -2411,7 +2432,7 @@ function CustomizationDrawer({
           ))}
 
           {!hasRealModifiers && (
-            <p className="mt-6 rounded-xl border border-dashed border-[#e5d0bd] bg-white p-3 text-xs leading-relaxed text-[#5F6B3C]">
+            <p className="mt-6 rounded-xl border border-dashed border-[#e5d0bd] bg-white p-3 text-xs leading-relaxed sf-soft">
               This dish has no extra options right now — add a note below if the
               kitchen should know something.
             </p>
@@ -2419,7 +2440,7 @@ function CustomizationDrawer({
 
           <div className="mt-6">
             <label
-              className="text-sm font-extrabold text-[#2A3A0C]"
+              className="text-sm font-extrabold sf-ink"
               htmlFor="special-note"
             >
               Special instructions
@@ -2438,7 +2459,7 @@ function CustomizationDrawer({
             <Quantity value={quantity} onChange={(next) => onQuantity(Math.min(MAX_LINE_QTY, Math.max(1, next)))} />
           </div>
         </div>
-        <DrawerFooter className="border-t border-[#D8DFC0] bg-[#fffdf9] px-5 pb-5 pt-4">
+        <DrawerFooter className="sf-card border-x-0 border-b-0 px-5 pb-5 pt-4">
           <Button
             onClick={onAdd}
             className="h-13 min-h-[44px] w-full rounded-xl bg-[#B95509] text-sm font-extrabold hover:bg-[#9C4A07]"
@@ -2463,9 +2484,9 @@ function VariantGroup({
 }) {
   return (
     <div className="mt-6" role="radiogroup" aria-label="Choose a variant">
-      <p className="text-sm font-extrabold text-[#2A3A0C]">
+      <p className="text-sm font-extrabold sf-ink">
         Choose a variant{" "}
-        <span className="font-medium text-[#5F6B3C]">(optional)</span>
+        <span className="font-medium sf-soft">(optional)</span>
       </p>
       <div className="mt-3 grid gap-2">
         {variants.map((variant) => {
@@ -2480,7 +2501,7 @@ function VariantGroup({
               onClick={() => onSelect(variant.id)}
               className={`flex min-h-[44px] items-center justify-between rounded-xl border px-3.5 py-3 text-left text-sm font-bold disabled:cursor-not-allowed disabled:opacity-50 ${
                 active
-                  ? "border-[#B95509] bg-[#E9EFD6] text-[#9C4A07]"
+                  ? "border-[#B95509] bg-[#E9EFD6] dark:bg-white/10 text-[#9C4A07]"
                   : "border-[#ead7c5] bg-white text-[#5f4534]"
               }`}
             >
@@ -2522,16 +2543,16 @@ function AddonGroupBlock({
   const single = group.selectionType === "single";
   return (
     <div className="mt-6" role={single ? "radiogroup" : "group"} aria-label={group.name}>
-      <p className="text-sm font-extrabold text-[#2A3A0C]">
+      <p className="text-sm font-extrabold sf-ink">
         {group.name}{" "}
         {group.isRequired ? (
           <span className="font-medium text-[#B95509]">Required</span>
         ) : (
-          <span className="font-medium text-[#5F6B3C]">(optional)</span>
+          <span className="font-medium sf-soft">(optional)</span>
         )}
       </p>
       {!single && group.maxSelections > 1 && (
-        <p className="mt-1 text-xs text-[#5F6B3C]">Pick up to {group.maxSelections}</p>
+        <p className="mt-1 text-xs sf-soft">Pick up to {group.maxSelections}</p>
       )}
       <div className="mt-3 grid gap-2">
         {group.options.map((option) => {
@@ -2546,7 +2567,7 @@ function AddonGroupBlock({
               onClick={() => onToggle(option.id)}
               className={`flex min-h-[44px] items-center justify-between rounded-xl border px-3.5 py-3 text-left text-sm font-bold disabled:cursor-not-allowed disabled:opacity-50 ${
                 active
-                  ? "border-[#B95509] bg-[#E9EFD6] text-[#9C4A07]"
+                  ? "border-[#B95509] bg-[#E9EFD6] dark:bg-white/10 text-[#9C4A07]"
                   : "border-[#ead7c5] bg-white text-[#5f4534]"
               }`}
             >
@@ -2669,21 +2690,21 @@ function ServiceSetupScreen({
 }) {
   if (screen === "cart") {
     return (
-      <main className="min-h-screen bg-[#fffaf3]">
-        <header className="paper-grain relative overflow-hidden border-b border-[#D8DFC0] bg-[#fffdf9]">
+      <main className="sf-page min-h-screen">
+        <header className="sf-bar relative overflow-hidden border-b backdrop-blur">
           <div className="relative mx-auto flex min-h-20 max-w-5xl items-center gap-4 px-4 py-4 sm:px-6">
             <button
               onClick={onMenu}
               aria-label="Back to menu"
-              className="grid h-11 w-11 shrink-0 place-items-center rounded-full border border-[#e7d2c0] bg-[#fffdf9] text-[#684d3c] hover:bg-[#E9EFD6]"
+              className="sf-card grid h-11 w-11 shrink-0 place-items-center rounded-full hover:brightness-95 dark:hover:brightness-150"
             >
               <ArrowLeft className="h-4 w-4" />
             </button>
             <div>
-              <p className="text-xs font-extrabold uppercase tracking-[0.16em] text-[#5F6B3C]">
+              <p className="text-xs font-extrabold uppercase tracking-[0.16em] sf-soft">
                 Your order
               </p>
-              <h1 className="font-display mt-1 text-3xl leading-none text-[#2A3A0C]">
+              <h1 className="font-display mt-1 text-3xl leading-none sf-ink">
                 Review & checkout
               </h1>
             </div>
@@ -2697,7 +2718,7 @@ function ServiceSetupScreen({
           </div>
         )}
         <div className="mx-auto grid max-w-5xl gap-5 px-4 py-6 sm:px-6 md:grid-cols-[1fr_360px]">
-          <section className="rounded-2xl border border-[#e5d9cb] bg-[#fffdf9] p-5 shadow-sm">
+          <section className="sf-card rounded-2xl p-5">
             <div className="mb-5 flex items-center justify-between">
               <p className="text-sm font-extrabold text-[#4c3424]">
                 {cart.length} item{cart.length !== 1 ? "s" : ""} from your order
@@ -2711,7 +2732,7 @@ function ServiceSetupScreen({
             </div>
             {cart.length === 0 ? (
               <div className="py-6 text-center">
-                <p className="text-sm font-bold text-[#5F6B3C]">
+                <p className="text-sm font-bold sf-soft">
                   Your cart is empty — let's fix that.
                 </p>
                 <Button
@@ -2729,14 +2750,14 @@ function ServiceSetupScreen({
                     className="flex gap-3 border-b border-dashed border-[#D8DFC0] pb-5 last:border-0 last:pb-0"
                   >
                     <div className="min-w-0 flex-1">
-                      <p className="text-sm font-extrabold text-[#2A3A0C]">
+                      <p className="text-sm font-extrabold sf-ink">
                         {line.item.name}
                       </p>
-                      <p className="mt-1 text-xs text-[#8d705c]">
+                      <p className="mt-1 text-xs sf-faint">
                         {line.modifiers?.join(" · ") || "No customizations"}
                       </p>
                       {line.note && (
-                        <p className="mt-1 text-xs italic text-[#8d705c]">
+                        <p className="mt-1 text-xs italic sf-faint">
                           "{line.note}"
                         </p>
                       )}
@@ -2811,21 +2832,21 @@ function ServiceSetupScreen({
 
   if (screen === "checkout") {
     return (
-      <main className="min-h-screen bg-[#fffaf3]">
-        <header className="paper-grain relative overflow-hidden border-b border-[#D8DFC0] bg-[#fffdf9]">
+      <main className="sf-page min-h-screen">
+        <header className="sf-bar relative overflow-hidden border-b backdrop-blur">
           <div className="relative mx-auto flex min-h-20 max-w-5xl items-center gap-4 px-4 py-4 sm:px-6">
             <button
               onClick={onMenu}
               aria-label="Back to menu"
-              className="grid h-11 w-11 shrink-0 place-items-center rounded-full border border-[#e7d2c0] bg-[#fffdf9] text-[#684d3c] hover:bg-[#E9EFD6]"
+              className="sf-card grid h-11 w-11 shrink-0 place-items-center rounded-full hover:brightness-95 dark:hover:brightness-150"
             >
               <ArrowLeft className="h-4 w-4" />
             </button>
             <div>
-              <p className="text-xs font-extrabold uppercase tracking-[0.16em] text-[#5F6B3C]">
+              <p className="text-xs font-extrabold uppercase tracking-[0.16em] sf-soft">
                 Almost there
               </p>
-              <h1 className="font-display mt-1 text-3xl leading-none text-[#2A3A0C]">
+              <h1 className="font-display mt-1 text-3xl leading-none sf-ink">
                 Checkout
               </h1>
             </div>
@@ -2914,10 +2935,10 @@ function ServiceSetupScreen({
 
   // Safe fallback — never render ServiceSetupScreen from itself.
   return (
-    <main className="grid min-h-screen place-items-center bg-[#fffaf3] px-4">
-      <section className="w-full max-w-md rounded-2xl bg-[#fffdf9] p-8 text-center shadow-sm">
-        <h1 className="font-display text-3xl text-[#2A3A0C]">Back to the menu</h1>
-        <p className="mt-3 text-sm leading-relaxed text-[#5F6B3C]">
+    <main className="sf-page grid min-h-screen place-items-center px-4">
+      <section className="sf-card w-full max-w-md rounded-2xl p-8 text-center">
+        <h1 className="font-display text-3xl sf-ink">Back to the menu</h1>
+        <p className="mt-3 text-sm leading-relaxed sf-soft">
           This page isn't part of ordering — let's get you back to the good stuff.
         </p>
         <Button
@@ -2963,14 +2984,14 @@ function CheckoutDetailsForm({
   disabled?: boolean;
 }) {
   return (
-    <section aria-label="Checkout details" className="space-y-4 rounded-2xl border border-[#D8DFC0] bg-[#fffdf9] p-5 shadow-sm">
+    <section aria-label="Checkout details" className="sf-card space-y-4 rounded-2xl p-5">
       <div>
-        <p className="text-xs font-extrabold uppercase tracking-[0.15em] text-[#5F6B3C]">
+        <p className="sf-soft text-xs font-extrabold uppercase tracking-[0.15em]">
           Delivery address
         </p>
         {deliveryAddress?.confirmed ? (
           <div className="mt-2 flex items-start justify-between gap-3">
-            <p className="text-sm font-bold leading-relaxed text-[#2A3A0C]">
+            <p className="sf-ink text-sm font-bold leading-relaxed">
               {deliveryAddress.flatHouse}, {deliveryAddress.area}, {deliveryAddress.city}{" "}
               {deliveryAddress.postalCode}
             </p>
@@ -2978,7 +2999,7 @@ function CheckoutDetailsForm({
               type="button"
               onClick={onEditLocation}
               disabled={disabled}
-              className="min-h-[44px] shrink-0 text-xs font-extrabold text-[#B95509] disabled:opacity-50"
+              className="min-h-[44px] shrink-0 text-xs font-extrabold text-[#B95509] disabled:opacity-50 dark:text-[#F5A623]"
             >
               Change
             </button>
@@ -2989,19 +3010,19 @@ function CheckoutDetailsForm({
             onClick={onEditLocation}
             disabled={disabled}
             variant="outline"
-            className="mt-2 h-11 min-h-[44px] w-full rounded-xl border-[#D8DFC0] font-extrabold text-[#B95509]"
+            className="mt-2 h-11 min-h-[44px] w-full rounded-xl font-extrabold text-[#B95509] dark:text-[#F5A623]"
           >
             <MapPin className="mr-2 h-4 w-4" />
             Set delivery location
           </Button>
         )}
         {serviceChecking && (
-          <p aria-live="polite" className="mt-2 text-xs font-bold text-[#5F6B3C]">
+          <p aria-live="polite" className="sf-soft mt-2 text-xs font-bold">
             Checking delivery availability…
           </p>
         )}
         {serviceBlocked && (
-          <p role="alert" className="mt-2 text-xs font-bold text-[#B95509]">
+          <p role="alert" className="mt-2 text-xs font-bold text-[#B95509] dark:text-[#F5A623]">
             {serviceReason === "OUTSIDE_DELIVERY_RADIUS"
               ? "This address is outside our delivery area — try a closer address."
               : "We can't deliver to this address right now."}
@@ -3010,7 +3031,7 @@ function CheckoutDetailsForm({
       </div>
 
       <div>
-        <label htmlFor="checkout-phone" className="text-xs font-extrabold uppercase tracking-[0.15em] text-[#5F6B3C]">
+        <label htmlFor="checkout-phone" className="sf-soft text-xs font-extrabold uppercase tracking-[0.15em]">
           Phone number
         </label>
         <Input
@@ -3023,15 +3044,15 @@ function CheckoutDetailsForm({
           autoComplete="tel"
           maxLength={15}
           disabled={disabled}
-          className="mt-2 h-12 min-h-[44px] rounded-xl border-[#D8DFC0] text-base"
+          className="mt-2 h-12 min-h-[44px] rounded-xl text-base dark:border-white/10 dark:bg-white/5"
         />
-        <p className="mt-1 text-xs text-[#5F6B3C]">
+        <p className="sf-soft mt-1 text-xs">
           Order updates and the delivery partner reach you here.
         </p>
       </div>
 
       <div>
-        <label htmlFor="checkout-coupon" className="text-xs font-extrabold uppercase tracking-[0.15em] text-[#5F6B3C]">
+        <label htmlFor="checkout-coupon" className="sf-soft text-xs font-extrabold uppercase tracking-[0.15em]">
           Coupon code
         </label>
         <Input
@@ -3043,12 +3064,12 @@ function CheckoutDetailsForm({
           autoComplete="off"
           maxLength={48}
           disabled={disabled}
-          className="mt-2 h-12 min-h-[44px] rounded-xl border-[#D8DFC0] uppercase"
+          className="mt-2 h-12 min-h-[44px] rounded-xl uppercase dark:border-white/10 dark:bg-white/5"
         />
       </div>
 
       <div>
-        <label htmlFor="checkout-notes" className="text-xs font-extrabold uppercase tracking-[0.15em] text-[#5F6B3C]">
+        <label htmlFor="checkout-notes" className="sf-soft text-xs font-extrabold uppercase tracking-[0.15em]">
           Delivery notes
         </label>
         <textarea
@@ -3058,18 +3079,18 @@ function CheckoutDetailsForm({
           placeholder="Gate code, floor, ring the bell twice…"
           disabled={disabled}
           maxLength={1000}
-          className="mt-2 min-h-20 w-full resize-none rounded-xl border border-[#D8DFC0] bg-white p-3 text-sm outline-none ring-[#B95509] focus:ring-2 disabled:opacity-50"
+          className="mt-2 min-h-20 w-full resize-none rounded-xl border border-[#D8DFC0] bg-white p-3 text-sm outline-none ring-[#B95509] focus:ring-2 disabled:opacity-50 dark:border-white/10 dark:bg-white/5 dark:text-[#f3e9da] dark:placeholder:text-[#8d7c66]"
         />
       </div>
 
-      <label htmlFor="checkout-cutlery" className="flex min-h-[44px] cursor-pointer items-center gap-3 text-sm font-bold text-[#2A3A0C]">
+      <label htmlFor="checkout-cutlery" className="sf-ink flex min-h-[44px] cursor-pointer items-center gap-3 text-sm font-bold">
         <input
           id="checkout-cutlery"
           type="checkbox"
           checked={cutlery}
           onChange={(event) => onCutlery(event.target.checked)}
           disabled={disabled}
-          className="h-5 w-5 accent-[#B95509]"
+          className="h-5 w-5 accent-[#B95509] dark:accent-[#E8720C]"
         />
         Include cutlery with my order
       </label>
@@ -3108,17 +3129,17 @@ function OrderStatusView({
     : etaFallback;
 
   return (
-    <main className="grid min-h-screen place-items-center bg-[#fffaf3] px-4 py-10">
-      <section aria-live="polite" className="rounded-2xl border border-[#e5d9cb] w-full max-w-lg bg-[#fffdf9] p-8 text-center shadow-sm">
+    <main className="sf-page grid min-h-screen place-items-center px-4 py-10">
+      <section aria-live="polite" className="sf-card w-full max-w-lg rounded-2xl p-8 text-center">
         {!hasCredentials ? (
           <>
-            <div className="mx-auto grid h-16 w-16 place-items-center rounded-full bg-[#E9EFD6] text-[#B95509]">
+            <div className="mx-auto grid h-16 w-16 place-items-center rounded-full bg-[#B95509]/10 text-[#B95509] dark:bg-[#E8720C]/15 dark:text-[#F5A623]">
               <PackageCheck className="h-7 w-7" />
             </div>
-            <h1 className="font-display mt-5 text-4xl text-[#2A3A0C]">
+            <h1 className="sf-ink mt-5 text-3xl font-extrabold">
               {variant === "confirmation" ? "Thank you!" : "Track your order"}
             </h1>
-            <p role="alert" className="mt-3 text-sm leading-relaxed text-[#5F6B3C]">
+            <p role="alert" className="sf-soft mt-3 text-sm leading-relaxed">
               We couldn't find your secure order link. Please open tracking from
               your confirmation page or receipt.
             </p>
@@ -3133,19 +3154,19 @@ function OrderStatusView({
           </>
         ) : tracking.isLoading ? (
           <>
-            <div className="mx-auto grid h-16 w-16 place-items-center rounded-full bg-[#E9EFD6] text-[#B95509]">
+            <div className="mx-auto grid h-16 w-16 place-items-center rounded-full bg-[#B95509]/10 text-[#B95509] dark:bg-[#E8720C]/15 dark:text-[#F5A623]">
               <Clock3 className="h-7 w-7 animate-pulse" />
             </div>
-            <h1 className="font-display mt-5 text-4xl text-[#2A3A0C]">Fetching your order…</h1>
-            <p className="mt-3 text-sm text-[#5F6B3C]">One moment while we check the kitchen.</p>
+            <h1 className="sf-ink mt-5 text-3xl font-extrabold">Fetching your order…</h1>
+            <p className="sf-soft mt-3 text-sm">One moment while we check the kitchen.</p>
           </>
         ) : tracking.isError || !tracking.data ? (
           <>
-            <div className="mx-auto grid h-16 w-16 place-items-center rounded-full bg-[#E9EFD6] text-[#B95509]">
+            <div className="mx-auto grid h-16 w-16 place-items-center rounded-full bg-[#B95509]/10 text-[#B95509] dark:bg-[#E8720C]/15 dark:text-[#F5A623]">
               <X className="h-7 w-7" />
             </div>
-            <h1 className="font-display mt-5 text-4xl text-[#2A3A0C]">Couldn't load your order</h1>
-            <p role="alert" className="mt-3 text-sm leading-relaxed text-[#5F6B3C]">
+            <h1 className="sf-ink mt-5 text-3xl font-extrabold">Couldn't load your order</h1>
+            <p role="alert" className="sf-soft mt-3 text-sm leading-relaxed">
               {tracking.isError
                 ? "Something went wrong while fetching your order. Please try again."
                 : "We couldn't find this order — the link may be incomplete."}
@@ -3154,7 +3175,7 @@ function OrderStatusView({
               <Button
                 onClick={() => tracking.refetch()}
                 variant="outline"
-                className="h-12 min-h-[44px] rounded-xl border-[#D8DFC0] px-6 font-extrabold text-[#2A3A0C]"
+                className="h-12 min-h-[44px] rounded-xl border-[#D8DFC0] px-6 font-extrabold sf-ink"
               >
                 Try again
               </Button>
@@ -3173,10 +3194,10 @@ function OrderStatusView({
             <div className="mx-auto grid h-16 w-16 place-items-center rounded-full bg-[#e5f1e5] text-[#42774b]">
               <Check className="h-7 w-7" />
             </div>
-            <h1 className="font-display mt-5 text-4xl text-[#2A3A0C]">
+            <h1 className="sf-ink mt-5 text-3xl font-extrabold">
               {variant === "confirmation" ? "Thank you — order confirmed!" : "Your order"}
             </h1>
-            <p className="mt-3 text-sm leading-relaxed text-[#5F6B3C]">
+            <p className="mt-3 text-sm leading-relaxed sf-soft">
               {variant === "confirmation"
                 ? `The kitchen ${restaurantName ? `at ${restaurantName} ` : ""}has your order and the burners are already warming up. Sit back — we'll take it from here.`
                 : `Here's the latest from the kitchen${restaurantName ? ` at ${restaurantName}` : ""}.`}
@@ -3201,17 +3222,17 @@ function OrderStatusView({
                   <span className="font-bold text-[#442f20]">
                     {item.quantity} × {item.itemNameSnapshot}
                   </span>
-                  <span className="font-bold text-[#5F6B3C]">
+                  <span className="font-bold sf-soft">
                     {formatINR((item.unitPricePaise / 100) * item.quantity)}
                   </span>
                 </div>
               ))}
-              <div className="flex items-center justify-between gap-3 border-t border-dashed border-[#D8DFC0] pt-3 text-base font-extrabold text-[#2A3A0C]">
+              <div className="flex items-center justify-between gap-3 border-t border-dashed border-[#D8DFC0] pt-3 text-base font-extrabold sf-ink">
                 <span>Paid total</span>
                 <span>{formatINR(tracking.data.totalPaise / 100)}</span>
               </div>
               {(tracking.data.deliveryArea || tracking.data.deliveryCity) && (
-                <p className="flex items-center gap-1.5 text-xs text-[#5F6B3C]">
+                <p className="flex items-center gap-1.5 text-xs sf-soft">
                   <MapPin className="h-3.5 w-3.5" />
                   Delivering to {[tracking.data.deliveryArea, tracking.data.deliveryCity].filter(Boolean).join(", ")}
                 </p>
@@ -3220,10 +3241,10 @@ function OrderStatusView({
             {tracking.data.history.length > 0 && (
               <ol className="mt-5 space-y-2 border-t border-dashed border-[#D8DFC0] pt-4 text-left">
                 {tracking.data.history.map((entry: { status: string; note: string | null; createdAt: Date | string }, index: number) => (
-                  <li key={`${entry.status}-${index}`} className="flex items-start gap-2 text-xs text-[#5F6B3C]">
+                  <li key={`${entry.status}-${index}`} className="flex items-start gap-2 text-xs sf-soft">
                     <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#42774b]" />
                     <span>
-                      <span className="font-extrabold text-[#2A3A0C]">
+                      <span className="font-extrabold sf-ink">
                         {String(entry.status).replace(/_/g, " ")}
                       </span>
                       {entry.note ? ` — ${entry.note}` : ""}
@@ -3266,13 +3287,13 @@ function PlatformGate() {
 
 function NoSlugScreen() {
   return (
-    <main className="grid min-h-screen place-items-center bg-[#fffaf3] px-4">
-      <section className="w-full max-w-md rounded-2xl bg-[#fffdf9] p-8 text-center shadow-sm">
-        <div className="mx-auto grid h-14 w-14 place-items-center rounded-full bg-[#E9EFD6] text-[#B95509]">
+    <main className="sf-page grid min-h-screen place-items-center px-4">
+      <section className="sf-card w-full max-w-md rounded-2xl p-8 text-center">
+        <div className="mx-auto grid h-14 w-14 place-items-center rounded-full bg-[#E9EFD6] dark:bg-white/10 text-[#B95509]">
           <Store className="h-6 w-6" />
         </div>
-        <h1 className="font-display mt-4 text-3xl text-[#2A3A0C]">Pick a kitchen to start</h1>
-        <p className="mt-3 text-sm leading-relaxed text-[#5F6B3C]">
+        <h1 className="font-display mt-4 text-3xl sf-ink">Pick a kitchen to start</h1>
+        <p className="mt-3 text-sm leading-relaxed sf-soft">
           This link doesn't point at a restaurant. Ask the restaurant for their
           direct ordering link.
         </p>
@@ -3283,13 +3304,13 @@ function NoSlugScreen() {
 
 function StorefrontUnavailable({ onRetry }: { onRetry: () => void }) {
   return (
-    <main className="grid min-h-screen place-items-center bg-[#fffaf3] px-4">
-      <section className="w-full max-w-md rounded-2xl bg-[#fffdf9] p-8 text-center shadow-sm">
-        <div className="mx-auto grid h-14 w-14 place-items-center rounded-full bg-[#E9EFD6] text-[#B95509]">
+    <main className="sf-page grid min-h-screen place-items-center px-4">
+      <section className="sf-card w-full max-w-md rounded-2xl p-8 text-center">
+        <div className="mx-auto grid h-14 w-14 place-items-center rounded-full bg-[#E9EFD6] dark:bg-white/10 text-[#B95509]">
           <Utensils className="h-6 w-6" />
         </div>
-        <h1 className="font-display mt-4 text-3xl text-[#2A3A0C]">This kitchen isn't available</h1>
-        <p role="alert" className="mt-3 text-sm leading-relaxed text-[#5F6B3C]">
+        <h1 className="font-display mt-4 text-3xl sf-ink">This kitchen isn't available</h1>
+        <p role="alert" className="sf-soft mt-3 text-sm leading-relaxed">
           We couldn't load this storefront. It may have moved or be offline.
         </p>
         <Button
@@ -3305,39 +3326,39 @@ function StorefrontUnavailable({ onRetry }: { onRetry: () => void }) {
 
 function MenuSkeleton() {
   return (
-    <main aria-busy="true" aria-label="Loading menu" className="min-h-screen bg-[#fffaf3] pb-28">
+    <main aria-busy="true" aria-label="Loading menu" className="sf-page min-h-screen pb-28">
       <div className="mx-auto max-w-[1440px] animate-pulse px-4 sm:px-6 lg:px-10">
         {/* Slim header */}
         <div className="flex h-16 items-center gap-2.5">
-          <div className="h-10 w-10 rounded-xl bg-[#E9EFD6]" />
+          <div className="h-10 w-10 rounded-xl bg-[#E9EFD6] dark:bg-white/10" />
           <div className="space-y-2">
-            <div className="h-5 w-40 rounded bg-[#E9EFD6]" />
-            <div className="h-3 w-56 rounded bg-[#E9EFD6]" />
+            <div className="h-5 w-40 rounded bg-[#E9EFD6] dark:bg-white/10" />
+            <div className="h-3 w-56 rounded bg-[#E9EFD6] dark:bg-white/10" />
           </div>
         </div>
         {/* Hero */}
-        <div className="h-[220px] rounded-2xl bg-[#E9EFD6] lg:h-[260px]" />
+        <div className="h-[220px] rounded-2xl bg-[#E9EFD6] dark:bg-white/10 lg:h-[260px]" />
         {/* Search + rail */}
-        <div className="mt-4 h-12 rounded-2xl bg-[#E9EFD6]" />
+        <div className="mt-4 h-12 rounded-2xl bg-[#E9EFD6] dark:bg-white/10" />
         <div className="mt-3 flex gap-2">
           {[96, 120, 88, 110].map((width) => (
-            <div key={width} style={{ width }} className="h-11 shrink-0 rounded-full bg-[#E9EFD6]" />
+            <div key={width} style={{ width }} className="h-11 shrink-0 rounded-full bg-[#E9EFD6] dark:bg-white/10" />
           ))}
         </div>
         {/* Menu rows shaped like the dish cards */}
         <div className="mt-5 space-y-3">
           {[1, 2, 3, 4].map((key) => (
-            <div key={key} className="flex gap-3 rounded-2xl border border-[#D8DFC0] bg-[#fffdf9] p-3">
+            <div key={key} className="sf-card flex gap-3 rounded-2xl p-3">
               <div className="min-w-0 flex-1 space-y-2 py-1">
-                <div className="h-3 w-16 rounded bg-[#E9EFD6]" />
-                <div className="h-5 w-3/4 rounded bg-[#E9EFD6]" />
-                <div className="h-4 w-1/4 rounded bg-[#E9EFD6]" />
-                <div className="h-3 w-full rounded bg-[#E9EFD6]" />
-                <div className="h-3 w-2/3 rounded bg-[#E9EFD6]" />
+                <div className="h-3 w-16 rounded bg-[#E9EFD6] dark:bg-white/10" />
+                <div className="h-5 w-3/4 rounded bg-[#E9EFD6] dark:bg-white/10" />
+                <div className="h-4 w-1/4 rounded bg-[#E9EFD6] dark:bg-white/10" />
+                <div className="h-3 w-full rounded bg-[#E9EFD6] dark:bg-white/10" />
+                <div className="h-3 w-2/3 rounded bg-[#E9EFD6] dark:bg-white/10" />
               </div>
               <div className="w-[120px] shrink-0">
-                <div className="aspect-square w-full rounded-xl bg-[#E9EFD6]" />
-                <div className="mx-auto -mt-5 h-11 w-[104px] rounded-xl bg-[#E9EFD6]" />
+                <div className="aspect-square w-full rounded-xl bg-[#E9EFD6] dark:bg-white/10" />
+                <div className="mx-auto -mt-5 h-11 w-[104px] rounded-xl bg-[#E9EFD6] dark:bg-white/10" />
               </div>
             </div>
           ))}
