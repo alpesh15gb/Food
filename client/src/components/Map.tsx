@@ -126,6 +126,19 @@ async function mapsScriptUrl(): Promise<string> {
   throw new Error("MAPS_KEY_MISSING");
 }
 
+/** Warm up the Maps script (drawer open, first search keystroke). Resolves
+ * true when google.maps is ready, false otherwise — never throws. */
+export async function preloadMaps(): Promise<boolean> {
+  try {
+    await loadMapScript();
+    return Boolean(window.google?.maps);
+  } catch {
+    return false;
+  }
+}
+
+const LOAD_TIMEOUT_MS = 25000;
+
 function loadMapScript(): Promise<void> {
   // Already loaded (drawer remounts, StrictMode, retries).
   if (window.google?.maps) return Promise.resolve();
@@ -137,20 +150,32 @@ function loadMapScript(): Promise<void> {
     });
   }
   return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      document.querySelector<HTMLScriptElement>('script[data-maps-loader="1"]')?.remove();
+      reject(new Error("MAPS_SCRIPT_TIMEOUT"));
+    }, LOAD_TIMEOUT_MS);
     mapsScriptUrl().then((src) => {
       const script = document.createElement("script");
       script.dataset.mapsLoader = "1";
       script.src = src;
       script.async = true;
-      script.crossOrigin = "anonymous";
-      script.onload = () => resolve();
+      // NOTE: no crossOrigin attribute — Google's documented embed has none,
+      // and anonymous CORS on a CDN without ACAO headers blocks execution.
+      script.onload = () => {
+        clearTimeout(timer);
+        resolve();
+      };
       script.onerror = () => {
+        clearTimeout(timer);
         console.error("Failed to load Google Maps script");
         script.remove();
         reject(new Error("MAPS_SCRIPT_ERROR"));
       };
       document.head.appendChild(script);
-    }, reject);
+    }, (err) => {
+      clearTimeout(timer);
+      reject(err);
+    });
   });
 }
 

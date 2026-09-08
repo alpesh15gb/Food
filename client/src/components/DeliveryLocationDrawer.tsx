@@ -148,6 +148,19 @@ export default function DeliveryLocationDrawer({
     setPostalCode(existingLocation?.postalCode ?? "");
   }, [open, existingLocation]);
 
+  // Warm up the Maps script as soon as the drawer opens — search needs
+  // google.maps loaded, but MapView only mounts at the map_confirm step.
+  // Without this, the first search always fails with MAPS_UNAVAILABLE.
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    void import("@/components/Map").then((m) => {
+      if (!cancelled) void m.preloadMaps();
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
   // Map state
   const mapRef = useRef<google.maps.Map | null>(null);
   const idleListenerRef = useRef<google.maps.MapsEventListener | null>(null);
@@ -312,6 +325,14 @@ export default function DeliveryLocationDrawer({
     setSearching(true);
     setGeoError(null);
     try {
+      // Ensure the Maps libraries exist before searching (fast typists can
+      // beat the open-time warmup). Dynamic import keeps the Map chunk split.
+      const { preloadMaps } = await import("@/components/Map");
+      const ready = await preloadMaps();
+      if (!ready) {
+        setGeoError("Map search isn't available right now (maps failed to load). Place the pin on the map below, or check your connection and retry.");
+        return;
+      }
       // Ignore placeholder outlet cities ("To be configured") — biasing with
       // them poisons the query and returns zero results.
       const biased = cityBias && cityBias !== "To be configured" ? `${value}, ${cityBias}` : value;
