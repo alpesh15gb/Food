@@ -769,7 +769,12 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
       });
     }
     if (normalizePhone(customerPhone).length !== 10 || !isPlausibleIndianPhone(customerPhone)) {
-      return toast.error("Please enter your 10-digit phone number.");
+      // The phone field lives on the cart/checkout screens — navigate there
+      // instead of stranding the user on the menu with an unactionable toast.
+      if (screen !== "cart" && screen !== "checkout") navigate(`/${storefrontSlug}/cart`);
+      return toast.error("Please enter your 10-digit phone number.", {
+        description: "Add it in the checkout details before paying.",
+      });
     }
 
     // Serviceability pre-check — server-authoritative, blocks out-of-area orders.
