@@ -35,7 +35,7 @@ export default function SearchAndFilters({
   ];
 
   return (
-    <div className="sticky top-14 z-20 -mx-4 px-4 pb-3 pt-4 sf-header-blur lg:static lg:mx-0 lg:bg-transparent lg:px-0 lg:pt-0">
+    <div className="sticky top-[60px] z-20 -mx-4 px-4 pb-3 pt-4 sf-header-blur lg:static lg:mx-0 lg:bg-transparent lg:px-0 lg:pt-0">
       {/* Search */}
       <div className="relative">
         <Search
@@ -45,8 +45,8 @@ export default function SearchAndFilters({
         <Input
           value={query}
           onChange={(event) => onQueryChange(event.target.value)}
-          placeholder="Search dishes, cuisines, or categories"
-          className="h-11 rounded-full border bg-[var(--sf-bg-subtle)] pl-11 pr-4 text-sm placeholder:text-[var(--sf-text-muted)]"
+          placeholder="Search for dishes, cuisines..."
+          className="h-12 rounded-full border bg-[var(--sf-bg-subtle)] pl-11 pr-4 text-sm font-medium shadow-sm placeholder:text-[var(--sf-text-muted)] focus-visible:ring-2 focus-visible:ring-[var(--sf-primary)]/20"
           style={{ borderColor: "var(--sf-border)" }}
         />
       </div>
@@ -75,10 +75,10 @@ export default function SearchAndFilters({
           <button
             key={value}
             onClick={() => onFilterChange(value)}
-            className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-3.5 py-2 text-xs font-bold transition-colors ${
+            className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-4 py-2 text-xs font-bold transition-all ${
               filter === value
-                ? "sf-pill-active"
-                : "sf-pill-inactive"
+                ? "sf-pill-active shadow-sm"
+                : "sf-pill-inactive hover:border-[var(--sf-text-muted)]"
             }`}
           >
             {value === "veg" && <FoodDot kind="veg" />}

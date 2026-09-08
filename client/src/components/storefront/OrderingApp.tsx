@@ -532,7 +532,13 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
         />
 
         {/* Hero Banner */}
-        <HeroBanner restaurant={restaurant} />
+        <HeroBanner
+          restaurant={{
+            ...restaurant,
+            logo: restaurant.logo || undefined,
+            bannerImage: restaurant.bannerImage || undefined,
+          }}
+        />
 
         {/* Delivery Address Bar */}
         <div className="mt-3">
