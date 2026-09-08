@@ -568,21 +568,43 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
     toast.success(`Code ${code} added — it will be applied at checkout.`);
   }, []);
 
-  // Category rail: highlight + scroll the section into view below the
-  // sticky header/rail (scroll-margin handled by .section-anchor CSS).
+  // Collapsible category tree: one tap opens a section instead of an
+  // endless 221-item scroll. First category starts open; chips, sidebar and
+  // headers all funnel through scrollToCategory so they expand + reveal.
+  const [openCats, setOpenCats] = useState<Set<string>>(() => new Set());
+  useEffect(() => {
+    if (categories.length > 0) {
+      setOpenCats((prev) => (prev.size > 0 ? prev : new Set([categories[0].name])));
+    }
+  }, [categories]);
+  const toggleCategory = useCallback((categoryName: string) => {
+    setActiveCategory(categoryName);
+    setOpenCats((prev) => {
+      const next = new Set(prev);
+      if (next.has(categoryName)) next.delete(categoryName);
+      else next.add(categoryName);
+      return next;
+    });
+  }, []);
+
+  // Category rail: highlight + expand + scroll the section into view below
+  // the sticky header/rail (scroll-margin handled by .section-anchor CSS).
   // Also exits search mode — sections don't exist in the flat result list,
   // so scrolling without clearing would silently do nothing.
   const scrollToCategory = useCallback((categoryId: string, categoryName: string) => {
     setQuery("");
     setDebouncedQuery("");
     setActiveCategory(categoryName);
+    setOpenCats((prev) => (prev.has(categoryName) ? prev : new Set(prev).add(categoryName)));
     requestAnimationFrame(() => {
-      const el = document.getElementById(`menu-section-${categoryId}`);
-      if (!el) return;
-      const reduce =
-        typeof window !== "undefined" &&
-        window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-      el.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "start" });
+      requestAnimationFrame(() => {
+        const el = document.getElementById(`menu-section-${categoryId}`);
+        if (!el) return;
+        const reduce =
+          typeof window !== "undefined" &&
+          window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+        el.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "start" });
+      });
     });
   }, []);
 
@@ -1329,6 +1351,8 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
                 onDecrement={decrementSimple}
                 onSpyCategory={setActiveCategory}
                 onClearSearch={clearSearch}
+                openCategories={openCats}
+                onToggleCategory={toggleCategory}
               />
             </section>
 
@@ -1891,6 +1915,8 @@ const MenuStream = memo(function MenuStream({
   onDecrement,
   onSpyCategory,
   onClearSearch,
+  openCategories,
+  onToggleCategory,
 }: {
   items: StorefrontMenuItem[];
   categories: Array<{ id: string; name: string }>;
@@ -1903,6 +1929,8 @@ const MenuStream = memo(function MenuStream({
   onDecrement: (item: StorefrontMenuItem) => void;
   onSpyCategory: (name: string) => void;
   onClearSearch?: () => void;
+  openCategories: Set<string>;
+  onToggleCategory: (name: string) => void;
 }) {
   const searching = query.trim().length > 0;
 
@@ -2012,36 +2040,50 @@ const MenuStream = memo(function MenuStream({
     );
   }
   return (
-    <div className="space-y-8 pb-3">
+    <div className="space-y-3 pb-3">
       {categories.map((category) => {
         const catItems = items.filter((item) => item.category === category.name);
+        const open = openCategories.has(category.name);
         return (
           <section
             key={category.id}
             id={`menu-section-${category.id}`}
             data-menu-section={category.name}
             aria-label={category.name}
-            className="section-anchor"
+            className="section-anchor sf-card overflow-hidden rounded-xl"
           >
-            <div className="mb-3 flex items-end justify-between">
-              <h2 className="sf-ink text-lg font-extrabold">
-                {category.name}
-              </h2>
-              <span className="sf-faint text-xs font-semibold tabular-nums">
-                {catItems.length} dish{catItems.length !== 1 ? "es" : ""}
+            <button
+              type="button"
+              onClick={() => onToggleCategory(category.name)}
+              aria-expanded={open}
+              className="flex min-h-[56px] w-full items-center justify-between gap-3 px-4 py-3 text-left"
+            >
+              <span className="min-w-0">
+                <span className="sf-ink block truncate text-[15px] font-extrabold">
+                  {category.name}
+                </span>
+                <span className="sf-faint block text-xs font-semibold tabular-nums">
+                  {catItems.length} dish{catItems.length !== 1 ? "es" : ""}
+                </span>
               </span>
-            </div>
-            {catItems.length > 0 ? (
-              <div className="space-y-3">{catItems.map(renderRow)}</div>
-            ) : (
-              <div className="sf-card rounded-2xl border-dashed p-5 text-center">
-                <p className="text-sm font-extrabold text-[#5b4233]">
-                  Nothing in {category.name} yet
-                </p>
-                <p className="mt-1 text-xs sf-faint">
-                  The kitchen team will publish dishes here shortly.
-                </p>
-              </div>
+              <ChevronRight
+                className={`h-5 w-5 shrink-0 sf-soft transition-transform duration-200 ${open ? "rotate-90" : ""}`}
+                aria-hidden="true"
+              />
+            </button>
+            {open && (
+              catItems.length > 0 ? (
+                <div className="space-y-3 px-3 pb-3">{catItems.map(renderRow)}</div>
+              ) : (
+                <div className="mx-3 mb-3 rounded-xl border border-dashed sf-line p-5 text-center">
+                  <p className="sf-ink text-sm font-extrabold">
+                    Nothing in {category.name} yet
+                  </p>
+                  <p className="sf-faint mt-1 text-xs">
+                    The kitchen team will publish dishes here shortly.
+                  </p>
+                </div>
+              )
             )}
           </section>
         );
