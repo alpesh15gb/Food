@@ -42,74 +42,45 @@ export default function HeroBanner({ restaurant }: HeroBannerProps) {
   const hasBanner = !!restaurant.bannerImage;
 
   return (
-    <section>
+    <section className="pb-2">
       {/* Banner image or gradient fallback */}
       {hasBanner ? (
         <div className="relative overflow-hidden">
           <img
             src={restaurant.bannerImage!}
             alt={restaurant.name}
-            className="h-[180px] w-full object-cover object-center sm:h-[220px]"
+            className="h-[160px] w-full object-cover object-center sm:h-[200px]"
           />
-          <div className="absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-white via-white/60 to-transparent" />
+          <div className="absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-white to-transparent" />
         </div>
       ) : (
         <div
-          className="relative flex h-[140px] items-end overflow-hidden sm:h-[160px]"
+          className="relative h-[80px] overflow-hidden sm:h-[100px]"
           style={{
             background: "linear-gradient(135deg, var(--sf-primary-soft, #fef2f0) 0%, var(--sf-bg-subtle) 50%, var(--sf-bg) 100%)",
           }}
         >
-          {/* Decorative circles */}
           <div
             className="absolute -right-10 -top-10 h-48 w-48 rounded-full opacity-10"
-            style={{ background: "var(--sf-primary)" }}
-          />
-          <div
-            className="absolute -left-6 top-12 h-24 w-24 rounded-full opacity-[0.07]"
             style={{ background: "var(--sf-primary)" }}
           />
         </div>
       )}
 
-      {/* Restaurant info card */}
+      {/* Restaurant info (name already shown in TopBar) */}
       <div className="mx-auto max-w-[1440px] px-4 sm:px-6 lg:px-10">
-        <div className={`${hasBanner ? "-mt-8" : "-mt-6"} pb-2`}>
-          {/* Logo + Name row */}
-          <div className="flex items-start gap-4">
-            {restaurant.logo ? (
-              <img
-                src={restaurant.logo}
-                alt={restaurant.name}
-                className="h-14 w-14 shrink-0 rounded-2xl object-cover shadow-md sm:h-16 sm:w-16"
-              />
-            ) : (
-              <div
-                className="grid h-14 w-14 shrink-0 place-items-center rounded-2xl text-xl font-extrabold text-white shadow-md sm:h-16 sm:w-16"
-                style={{ background: "var(--sf-primary)" }}
-              >
-                {restaurant.name.charAt(0)}
-              </div>
-            )}
-            <div className="min-w-0 pt-1">
-              <h1
-                className="sf-heading truncate text-xl leading-tight sm:text-[26px]"
-                style={{ color: "var(--sf-text)" }}
-              >
-                {restaurant.name}
-              </h1>
-              {restaurant.cuisines.length > 0 && (
-                <p className="mt-0.5 truncate text-sm font-medium" style={{ color: "var(--sf-text-secondary)" }}>
-                  {restaurant.cuisines.join(" \u2022 ")}
-                </p>
-              )}
-            </div>
-          </div>
+        <div className="mt-4">
+          {/* Cuisines */}
+          {restaurant.cuisines.length > 0 && (
+            <p className="text-sm font-semibold" style={{ color: "var(--sf-text-secondary)" }}>
+              {restaurant.cuisines.join(" \u2022 ")}
+            </p>
+          )}
 
           {/* Description */}
           {restaurant.description && (
             <p
-              className="mt-3 max-w-xl text-[13px] leading-relaxed"
+              className="mt-2 max-w-xl text-[13px] leading-relaxed"
               style={{ color: "var(--sf-text-muted)" }}
             >
               {restaurant.description}
