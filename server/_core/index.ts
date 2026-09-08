@@ -40,6 +40,15 @@ async function startServer() {
   app.get("/api/healthz", (_req, res) => {
     res.status(200).json({ ok: true });
   });
+  // Public Maps key for the browser (referrer-restricted public key — safe
+  // to expose; Google enforces the domain allowlist). Served at RUNTIME so
+  // key rotation never needs a frontend rebuild (Vite build-args proved
+  // unreliable through the compose/bake cache path).
+  app.get("/api/maps-config", (_req, res) => {
+    const key = process.env.GOOGLE_MAPS_API_KEY ?? "";
+    res.set("Cache-Control", "no-store");
+    res.status(200).json({ keySet: key.trim().length > 0, key });
+  });
   // MP-008: lightweight client-error beacon (ErrorBoundary). No PII accepted.
   // Simple per-IP throttle (30/min) to prevent log spam.
   const clientErrorHits = new Map<string, { count: number; resetAt: number }>();

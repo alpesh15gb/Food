@@ -37,6 +37,7 @@ request /terms 200
 request /webhooks/health 200
 request /robots.txt 200
 request /sitemap.xml 200
+request /api/maps-config 200
 
 # Brand assets ship from client/public and may legitimately lag VPS content
 # (or be renamed) — warn without failing the release gate.

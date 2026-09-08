@@ -87,17 +87,38 @@ declare global {
 }
 
 // Preferred: your own Google Cloud key (Maps JavaScript API + Places API +
-// Geocoding API), baked at build time via the Dockerfile build-arg. Legacy:
-// the Forge proxy pair (managed-platform only — unset on self-hosted VPS).
-const GOOGLE_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY as string | undefined;
+// Geocoding API). Resolution order: runtime /api/maps-config (no rebuild on
+// rotation) → baked VITE_GOOGLE_MAPS_API_KEY → legacy Forge proxy pair
+// (managed-platform only — unset on self-hosted VPS).
+const BAKED_GOOGLE_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY as string | undefined;
 const FORGE_KEY = import.meta.env.VITE_FRONTEND_FORGE_API_KEY as string | undefined;
 const FORGE_BASE_URL =
   import.meta.env.VITE_FRONTEND_FORGE_API_URL ||
   "https://forge.butterfly-effect.dev";
 
-function mapsScriptUrl(): string {
-  if (GOOGLE_KEY && GOOGLE_KEY !== "undefined" && GOOGLE_KEY.trim()) {
-    return `https://maps.googleapis.com/maps/api/js?key=${GOOGLE_KEY.trim()}&v=weekly&libraries=marker,places,geocoding,geometry`;
+let runtimeKey: string | null | undefined;
+async function runtimeGoogleKey(): Promise<string | null> {
+  if (runtimeKey !== undefined) return runtimeKey;
+  try {
+    const res = await fetch("/api/maps-config", { headers: { Accept: "application/json" } });
+    if (!res.ok) {
+      runtimeKey = null;
+      return null;
+    }
+    const data = (await res.json()) as { key?: unknown };
+    runtimeKey = typeof data.key === "string" && data.key.trim() ? data.key.trim() : null;
+  } catch {
+    runtimeKey = null;
+  }
+  return runtimeKey;
+}
+
+async function mapsScriptUrl(): Promise<string> {
+  const live = await runtimeGoogleKey();
+  const googleKey = live
+    ?? (BAKED_GOOGLE_KEY && BAKED_GOOGLE_KEY !== "undefined" && BAKED_GOOGLE_KEY.trim() ? BAKED_GOOGLE_KEY.trim() : null);
+  if (googleKey) {
+    return `https://maps.googleapis.com/maps/api/js?key=${googleKey}&v=weekly&libraries=marker,places,geocoding,geometry`;
   }
   if (FORGE_KEY && FORGE_KEY !== "undefined" && FORGE_KEY.trim()) {
     return `${FORGE_BASE_URL}/v1/maps/proxy/maps/api/js?key=${FORGE_KEY.trim()}&v=weekly&libraries=marker,places,geocoding,geometry`;
@@ -116,25 +137,20 @@ function loadMapScript(): Promise<void> {
     });
   }
   return new Promise((resolve, reject) => {
-    let src: string;
-    try {
-      src = mapsScriptUrl();
-    } catch (err) {
-      reject(err);
-      return;
-    }
-    const script = document.createElement("script");
-    script.dataset.mapsLoader = "1";
-    script.src = src;
-    script.async = true;
-    script.crossOrigin = "anonymous";
-    script.onload = () => resolve();
-    script.onerror = () => {
-      console.error("Failed to load Google Maps script");
-      script.remove();
-      reject(new Error("MAPS_SCRIPT_ERROR"));
-    };
-    document.head.appendChild(script);
+    mapsScriptUrl().then((src) => {
+      const script = document.createElement("script");
+      script.dataset.mapsLoader = "1";
+      script.src = src;
+      script.async = true;
+      script.crossOrigin = "anonymous";
+      script.onload = () => resolve();
+      script.onerror = () => {
+        console.error("Failed to load Google Maps script");
+        script.remove();
+        reject(new Error("MAPS_SCRIPT_ERROR"));
+      };
+      document.head.appendChild(script);
+    }, reject);
   });
 }
 
