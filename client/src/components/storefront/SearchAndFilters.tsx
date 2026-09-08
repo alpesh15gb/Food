@@ -1,6 +1,4 @@
 import { Search } from "lucide-react";
-import { Input } from "@/components/ui/input";
-import FoodDot from "./FoodDot";
 import type { Filter } from "./types";
 
 type CategoryLike = {
@@ -27,65 +25,52 @@ export default function SearchAndFilters({
   filter: Filter;
   onFilterChange: (value: Filter) => void;
 }) {
-  const filterOptions: [Filter, string][] = [
-    ["all", "All"],
-    ["veg", "Veg"],
-    ["nonveg", "Non-Veg"],
-    ["bestseller", "Bestseller"],
-  ];
+  const allCategories = [{ id: "all", name: "All", emoji: null, isOpen: true }, ...categories];
 
   return (
-    <div className="sticky top-[60px] z-20 -mx-4 px-4 pb-3 pt-4 sf-header-blur lg:static lg:mx-0 lg:bg-transparent lg:px-0 lg:pt-0">
-      {/* Search */}
-      <div className="relative">
+    <div className="sticky top-[52px] z-20 -mx-4 px-4 pb-3 pt-3 sf-header-blur lg:static lg:mx-0 lg:bg-transparent lg:px-0 lg:pt-0">
+      {/* Search bar (compact) */}
+      <div className="relative mb-3">
         <Search
-          className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2"
+          className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2"
           style={{ color: "var(--sf-text-muted)" }}
         />
-        <Input
+        <input
           value={query}
           onChange={(event) => onQueryChange(event.target.value)}
-          placeholder="Search for dishes, cuisines..."
-          className="h-12 rounded-full border bg-[var(--sf-bg-subtle)] pl-11 pr-4 text-sm font-medium shadow-sm placeholder:text-[var(--sf-text-muted)] focus-visible:ring-2 focus-visible:ring-[var(--sf-primary)]/20"
-          style={{ borderColor: "var(--sf-border)" }}
+          placeholder="Search dishes..."
+          className="h-10 w-full rounded-full border pl-10 pr-4 text-sm font-medium outline-none placeholder:text-[var(--sf-text-muted)] focus:ring-2"
+          style={{
+            background: "var(--sf-bg-subtle)",
+            borderColor: "var(--sf-border)",
+            color: "var(--sf-text)",
+            "--tw-ring-color": "var(--sf-primary)",
+          } as React.CSSProperties}
         />
       </div>
 
-      {/* Mobile Category Pills */}
-      <div className="hide-scrollbar sf-edge-fade mt-3 flex gap-2 overflow-x-auto pb-1 lg:hidden">
-        {categories.map((category) => (
-          <button
-            key={category.id}
-            onClick={() => onCategoryChange(category.name)}
-            className={`sf-pill shrink-0 ${
-              activeCategory === category.name
-                ? "sf-pill-active"
-                : "sf-pill-inactive"
-            }`}
-          >
-            {category.emoji && <span className="mr-1">{category.emoji}</span>}
-            {category.name}
-          </button>
-        ))}
-      </div>
-
-      {/* Filter Chips */}
-      <div className="hide-scrollbar mt-3 flex gap-2 overflow-x-auto pb-1">
-        {filterOptions.map(([value, label]) => (
-          <button
-            key={value}
-            onClick={() => onFilterChange(value)}
-            className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-4 py-2 text-xs font-bold transition-all ${
-              filter === value
-                ? "sf-pill-active shadow-sm"
-                : "sf-pill-inactive hover:border-[var(--sf-text-muted)]"
-            }`}
-          >
-            {value === "veg" && <FoodDot kind="veg" />}
-            {value === "nonveg" && <FoodDot kind="nonveg" />}
-            {label}
-          </button>
-        ))}
+      {/* Category Pills */}
+      <div className="hide-scrollbar sf-edge-fade flex gap-2 overflow-x-auto pb-1">
+        {allCategories.map((category) => {
+          const active = activeCategory === category.name;
+          return (
+            <button
+              key={category.id}
+              onClick={() => onCategoryChange(category.name)}
+              className={`shrink-0 rounded-full px-5 py-2.5 text-xs font-bold transition-all ${
+                active ? "" : "hover:border-[var(--sf-text-muted)]"
+              }`}
+              style={{
+                background: active ? "var(--sf-primary)" : "transparent",
+                color: active ? "white" : "var(--sf-text-secondary)",
+                border: active ? "1px solid var(--sf-primary)" : "1px solid var(--sf-border)",
+              }}
+            >
+              {category.emoji && <span className="mr-1">{category.emoji}</span>}
+              {category.name}
+            </button>
+          );
+        })}
       </div>
     </div>
   );

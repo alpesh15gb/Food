@@ -103,7 +103,7 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
   const [cart, setCart] = useState<CartLine[]>([]);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
-  const [activeCategory, setActiveCategory] = useState("Menu");
+  const [activeCategory, setActiveCategory] = useState("All");
   const [selected, setSelected] = useState<MenuItem | null>(null);
   const [customQty, setCustomQty] = useState(1);
   const [size, setSize] = useState("Regular");
@@ -528,7 +528,6 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
           itemCount={totalQuantity}
           onCart={() => {}}
           onAccount={() => setAuthOpen(true)}
-          customerPhone={loggedInPhone ?? undefined}
         />
 
         {/* Hero Banner */}
@@ -538,6 +537,7 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
             logo: restaurant.logo || undefined,
             bannerImage: restaurant.bannerImage || undefined,
           }}
+          firstItemImage={liveMenu[0]?.image}
         />
 
         {/* Delivery Address Bar */}

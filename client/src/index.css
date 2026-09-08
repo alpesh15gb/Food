@@ -80,38 +80,38 @@
 }
 
 /* ===================================================================
-   Storefront — Swiggy/Zomato-inspired premium customer UI.
+   Storefront — Dark premium customer UI matching 9-House Kitchen brand.
    Scoped under .storefront so admin dashboard can use global tokens.
    =================================================================== */
 
 .storefront {
-  --sf-bg: #FFFFFF;
-  --sf-bg-subtle: #F8F8F8;
-  --sf-surface: #FFFFFF;
-  --sf-text: #1C1C1C;
-  --sf-text-secondary: #696969;
-  --sf-text-muted: #9C9C9C;
-  --sf-border: #E8E8E8;
-  --sf-border-subtle: #F0F0F0;
-  --sf-primary: var(--color-primary, #c84630);
-  --sf-primary-hover: color-mix(in srgb, var(--sf-primary) 85%, black);
-  --sf-primary-soft: color-mix(in srgb, var(--sf-primary) 8%, white);
-  --sf-green: #48AC68;
-  --sf-green-soft: #E8F5EE;
-  --sf-gold: #EEA61B;
-  --sf-gold-soft: #FFF4DC;
-  --sf-red: #E23744;
-  --sf-overlay: rgba(0, 0, 0, 0.5);
+  --sf-bg: #1A1A1A;
+  --sf-bg-subtle: #242424;
+  --sf-surface: #2C2C2C;
+  --sf-text: #F0F0F0;
+  --sf-text-secondary: #A0A0A0;
+  --sf-text-muted: #6B6B6B;
+  --sf-border: rgba(255, 255, 255, 0.12);
+  --sf-border-subtle: rgba(255, 255, 255, 0.06);
+  --sf-primary: var(--color-primary, #E67E22);
+  --sf-primary-hover: color-mix(in srgb, var(--sf-primary) 85%, white);
+  --sf-primary-soft: color-mix(in srgb, var(--sf-primary) 12%, #1A1A1A);
+  --sf-green: #27AE60;
+  --sf-green-soft: rgba(39, 174, 96, 0.12);
+  --sf-gold: #F1C40F;
+  --sf-gold-soft: rgba(241, 196, 15, 0.12);
+  --sf-red: #E74C3C;
+  --sf-overlay: rgba(0, 0, 0, 0.7);
   --sf-font-heading: 'Inter', 'Manrope', system-ui, sans-serif;
   --sf-font-body: 'Manrope', 'Inter', system-ui, sans-serif;
   --sf-radius-card: 16px;
   --sf-radius-pill: 20px;
   --sf-radius-btn: 12px;
   --sf-radius-full: 9999px;
-  --sf-shadow-card: 0 2px 12px rgba(0, 0, 0, 0.06);
-  --sf-shadow-elevated: 0 8px 30px rgba(0, 0, 0, 0.08);
-  --sf-shadow-fab: 0 6px 20px rgba(200, 70, 48, 0.25);
-  --sf-shadow-float: 0 12px 40px rgba(0, 0, 0, 0.12);
+  --sf-shadow-card: 0 2px 12px rgba(0, 0, 0, 0.3);
+  --sf-shadow-elevated: 0 8px 30px rgba(0, 0, 0, 0.4);
+  --sf-shadow-fab: 0 6px 20px rgba(230, 126, 34, 0.35);
+  --sf-shadow-float: 0 12px 40px rgba(0, 0, 0, 0.5);
 
   font-family: var(--sf-font-body);
   color: var(--sf-text);
@@ -134,8 +134,8 @@
 @layer utilities {
   .font-display { font-family: "DM Serif Display", Georgia, serif; }
   .ticket-edge { clip-path: polygon(0.9rem 0, calc(100% - 0.9rem) 0, 100% 0.9rem, 100% calc(100% - 0.9rem), calc(100% - 0.9rem) 100%, 0.9rem 100%, 0 calc(100% - 0.9rem), 0 0.9rem); }
-  .paper-grain { background-image: radial-gradient(rgba(91, 58, 36, 0.06) 0.7px, transparent 0.7px); background-size: 8px 8px; }
-  .dotted-rule { border-top: 1px dashed oklch(0.78 0.035 70); }
+  .paper-grain { background-image: radial-gradient(rgba(255, 255, 255, 0.04) 0.7px, transparent 0.7px); background-size: 8px 8px; }
+  .dotted-rule { border-top: 1px dashed rgba(255, 255, 255, 0.1); }
   .hide-scrollbar::-webkit-scrollbar { display: none; }
   .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
 
@@ -176,7 +176,7 @@
   .sf-add-btn {
     border: 1.5px solid var(--sf-primary);
     color: var(--sf-primary);
-    background: white;
+    background: var(--sf-surface);
     border-radius: var(--sf-radius-btn);
     font-size: 13px;
     font-weight: 800;
@@ -192,7 +192,7 @@
   }
 
   .sf-shimmer {
-    background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+    background: linear-gradient(90deg, #2C2C2C 25%, #3A3A3A 50%, #2C2C2C 75%);
     background-size: 200% 100%;
     animation: sf-shimmer 1.5s infinite;
   }
@@ -200,7 +200,7 @@
   .sf-header-blur {
     backdrop-filter: blur(12px) saturate(180%);
     -webkit-backdrop-filter: blur(12px) saturate(180%);
-    background: rgba(255, 255, 255, 0.85);
+    background: rgba(26, 26, 26, 0.85);
   }
 
   .sf-edge-fade {

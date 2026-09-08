@@ -1,5 +1,5 @@
+import { Plus } from "lucide-react";
 import { formatINR, type MenuItem } from "@/lib/types";
-import FoodDot from "./FoodDot";
 import Quantity from "./Quantity";
 
 export default function MenuCard({
@@ -15,147 +15,90 @@ export default function MenuCard({
 }) {
   const unavailable = item.availability !== "AVAILABLE";
   const hasDiscount = item.originalPrice && item.originalPrice > item.price;
-  const discountPercent =
-    hasDiscount && item.originalPrice
-      ? Math.round(((item.originalPrice - item.price) / item.originalPrice) * 100)
-      : 0;
 
   return (
     <article
-      className={`sf-card group flex gap-4 p-4 transition-all hover:shadow-[var(--sf-shadow-elevated)] sm:p-5 ${
-        unavailable ? "opacity-60" : ""
+      className={`sf-card group flex flex-col overflow-hidden transition-all hover:shadow-[var(--sf-shadow-elevated)] ${
+        unavailable ? "opacity-50" : ""
       }`}
     >
-      {/* Left column: details */}
-      <div className="min-w-0 flex-1">
-        {/* Badges row */}
-        <div className="flex flex-wrap items-center gap-1.5">
-          <FoodDot kind={item.kind} />
-          {item.isBestseller && (
-            <span
-              className="rounded-md px-1.5 py-0.5 text-[10px] font-extrabold uppercase tracking-wide"
-              style={{
-                background: "var(--sf-gold-soft)",
-                color: "var(--sf-gold)",
-              }}
-            >
-              Bestseller
-            </span>
-          )}
-          {item.tag && item.tag !== "Bestseller" && (
-            <span
-              className="rounded-md px-1.5 py-0.5 text-[10px] font-extrabold uppercase tracking-wide"
-              style={{
-                background: "var(--sf-green-soft)",
-                color: "var(--sf-green)",
-              }}
-            >
-              {item.tag}
-            </span>
-          )}
-          {hasDiscount && (
-            <span
-              className="rounded-md px-1.5 py-0.5 text-[10px] font-extrabold uppercase tracking-wide"
-              style={{
-                background: "var(--sf-green-soft)",
-                color: "var(--sf-green)",
-              }}
-            >
-              {discountPercent}% OFF
-            </span>
-          )}
-        </div>
+      {/* Image */}
+      <div className="relative aspect-[4/3] w-full overflow-hidden">
+        {item.image ? (
+          <img
+            src={item.image}
+            alt={item.name}
+            className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+          />
+        ) : (
+          <div
+            className="grid h-full w-full place-items-center"
+            style={{ background: "var(--sf-bg-subtle)" }}
+          >
+            <span className="text-3xl opacity-30">🍽️</span>
+          </div>
+        )}
+        {unavailable && (
+          <div className="absolute inset-0 grid place-items-center bg-black/60 text-xs font-extrabold text-white">
+            {item.availability === "SOLD_OUT" ? "Sold out" : "Unavailable"}
+          </div>
+        )}
+        {item.isBestseller && (
+          <span
+            className="absolute left-2 top-2 rounded-md px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wide"
+            style={{ background: "var(--sf-gold-soft)", color: "var(--sf-gold)" }}
+          >
+            Bestseller
+          </span>
+        )}
+      </div>
 
-        {/* Name */}
+      {/* Details */}
+      <div className="flex flex-1 flex-col p-4">
         <h3
-          className="sf-heading mt-2 text-[15px] leading-snug sm:text-base"
+          className="sf-heading line-clamp-1 text-[15px] sm:text-base"
           style={{ color: "var(--sf-text)" }}
         >
           {item.name}
         </h3>
 
-        {/* Description */}
         {item.description && (
           <p
-            className="mt-1 line-clamp-2 max-w-md text-xs leading-relaxed sm:text-[13px]"
-            style={{ color: "var(--sf-text-secondary)" }}
+            className="mt-1 line-clamp-2 text-xs leading-relaxed"
+            style={{ color: "var(--sf-text-muted)" }}
           >
             {item.description}
           </p>
         )}
 
-        {/* Price + ADD row */}
-        <div className="mt-3 flex items-end justify-between gap-3">
-          <div className="flex items-baseline gap-2">
-            <p className="text-sm font-extrabold sm:text-base" style={{ color: "var(--sf-text)" }}>
+        {/* Price + Add row */}
+        <div className="mt-auto flex items-end justify-between gap-2 pt-3">
+          <div className="flex items-baseline gap-1.5">
+            <span className="text-sm font-extrabold sm:text-base" style={{ color: "var(--sf-text)" }}>
               {formatINR(item.price)}
-            </p>
+            </span>
             {hasDiscount && (
-              <p className="text-xs text-[var(--sf-text-muted)] line-through">
+              <span className="text-[11px] line-through" style={{ color: "var(--sf-text-muted)" }}>
                 {formatINR(item.originalPrice!)}
-              </p>
+              </span>
             )}
           </div>
 
-          {/* ADD button or Quantity stepper */}
           {cartQuantity > 0 && onQuantityChange ? (
             <Quantity compact value={cartQuantity} onChange={onQuantityChange} />
           ) : (
             <button
               disabled={unavailable}
               onClick={onAdd}
-              className="sf-add-btn shrink-0 disabled:cursor-not-allowed disabled:opacity-40"
+              className="grid h-9 w-9 shrink-0 place-items-center rounded-full text-white transition-transform active:scale-90 disabled:opacity-40"
+              style={{ background: "var(--sf-primary)" }}
+              aria-label={`Add ${item.name}`}
             >
-              {unavailable
-                ? "Unavailable"
-                : item.customizable
-                ? "CUSTOMISE"
-                : "ADD"}
+              <Plus className="h-4 w-4" />
             </button>
           )}
         </div>
-
-        {/* Unavailable note */}
-        {unavailable && (
-          <p
-            className="mt-2 inline-flex rounded-lg px-2 py-1 text-[11px] font-bold"
-            style={{
-              background: "var(--sf-bg-subtle)",
-              color: "var(--sf-red)",
-            }}
-          >
-            {item.availableNote || "Unavailable"}
-          </p>
-        )}
-
-        {/* Customizable hint */}
-        {item.customizable && !unavailable && cartQuantity === 0 && (
-          <p
-            className="mt-2 text-[11px] font-semibold"
-            style={{ color: "var(--sf-text-muted)" }}
-          >
-            Customizable
-          </p>
-        )}
       </div>
-
-      {/* Right column: image */}
-      {item.image && (
-        <div className="w-[110px] shrink-0 sm:w-[130px]">
-          <div className="relative overflow-hidden rounded-xl">
-            <img
-              src={item.image}
-              alt=""
-              className="aspect-[4/3] w-full object-cover transition-transform duration-300 group-hover:scale-105"
-            />
-            {unavailable && (
-              <div className="absolute inset-0 grid place-items-center rounded-xl bg-black/50 px-2 text-center text-[11px] font-extrabold text-white">
-                {item.availability === "SOLD_OUT" ? "Sold out" : "Unavailable"}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
     </article>
   );
 }

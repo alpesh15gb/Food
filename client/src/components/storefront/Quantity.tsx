@@ -11,10 +11,10 @@ export default function Quantity({
 }) {
   return (
     <div
-      className={`inline-flex items-center rounded-[var(--sf-radius-btn)] border bg-white ${
+      className={`inline-flex items-center rounded-[var(--sf-radius-btn)] border ${
         compact ? "h-9" : "h-11"
       }`}
-      style={{ borderColor: "var(--sf-primary)" }}
+      style={{ borderColor: "var(--sf-primary)", background: "var(--sf-surface)" }}
     >
       <button
         aria-label="Decrease quantity"

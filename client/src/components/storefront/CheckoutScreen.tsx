@@ -76,7 +76,7 @@ export default function CheckoutScreen({
         <div className="relative mx-auto flex min-h-16 max-w-5xl items-center gap-4 px-4 sm:px-6">
           <button
             onClick={onMenu}
-            className="grid h-10 w-10 shrink-0 place-items-center rounded-full border hover:bg-gray-50"
+            className="grid h-10 w-10 shrink-0 place-items-center rounded-full border hover:bg-white/10"
             style={{
               borderColor: "var(--sf-border)",
               color: "var(--sf-text-secondary)",

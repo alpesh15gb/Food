@@ -93,7 +93,7 @@ export default function CustomizationDrawer({
               </div>
               <button
                 onClick={onClose}
-                className="grid h-9 w-9 shrink-0 place-items-center rounded-full hover:bg-gray-100"
+                className="grid h-9 w-9 shrink-0 place-items-center rounded-full hover:bg-white/10"
                 style={{ color: "var(--sf-text-secondary)" }}
               >
                 <X className="h-4 w-4" />
@@ -130,7 +130,7 @@ export default function CustomizationDrawer({
                       borderColor: active
                         ? "var(--sf-primary)"
                         : "var(--sf-border)",
-                      background: active ? "var(--sf-primary-soft)" : "white",
+                      background: active ? "var(--sf-primary-soft)" : "var(--sf-surface)",
                       color: active
                         ? "var(--sf-text)"
                         : "var(--sf-text-secondary)",
@@ -173,9 +173,11 @@ export default function CustomizationDrawer({
               value={note}
               onChange={(event) => onNote(event.target.value)}
               placeholder="Less spicy, no onions..."
-              className="mt-2 min-h-20 w-full resize-none rounded-[var(--sf-radius-btn)] border bg-white p-3 text-sm outline-none focus:ring-2"
+              className="mt-2 min-h-20 w-full resize-none rounded-[var(--sf-radius-btn)] border p-3 text-sm outline-none focus:ring-2"
               style={{
                 borderColor: "var(--sf-border)",
+                background: "var(--sf-surface)",
+                color: "var(--sf-text)",
                 // @ts-ignore CSS custom property
                 "--tw-ring-color": "var(--sf-primary)",
               }}

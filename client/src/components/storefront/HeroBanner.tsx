@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Bike, Clock3, ShoppingBag, Star } from "lucide-react";
+import { Clock3, MapPin, Phone } from "lucide-react";
 
 type HeroBannerProps = {
   restaurant: {
@@ -12,120 +12,104 @@ type HeroBannerProps = {
     deliveryFee: number;
     minOrder: number;
     isOpen?: boolean;
+    address?: string;
+    contactPhone?: string | null;
   };
+  firstItemImage?: string;
 };
 
-function InfoBadge({ icon, label, value }: { icon: React.ReactNode; label?: string; value: string }) {
-  return (
-    <div
-      className="inline-flex items-center gap-2 rounded-xl px-3.5 py-2"
-      style={{
-        background: "var(--sf-bg-subtle)",
-        border: "1px solid var(--sf-border-subtle, var(--sf-border))",
-      }}
-    >
-      <span style={{ color: "var(--sf-primary)" }}>{icon}</span>
-      <div className="flex flex-col leading-none">
-        {label && (
-          <span className="text-[10px] font-medium uppercase tracking-wide" style={{ color: "var(--sf-text-muted)" }}>
-            {label}
-          </span>
-        )}
-        <span className="text-xs font-bold" style={{ color: "var(--sf-text)" }}>
-          {value}
-        </span>
-      </div>
-    </div>
-  );
-}
-
-export default function HeroBanner({ restaurant }: HeroBannerProps) {
-  const [bannerFailed, setBannerFailed] = useState(false);
-  const hasBanner = !!restaurant.bannerImage && !bannerFailed;
+export default function HeroBanner({ restaurant, firstItemImage }: HeroBannerProps) {
+  const [imgFailed, setImgFailed] = useState(false);
+  const heroImage = (!imgFailed && (restaurant.bannerImage || firstItemImage)) || "";
 
   return (
-    <section className="pb-2">
-      {/* Banner image or gradient fallback */}
-      {hasBanner ? (
-        <div className="relative overflow-hidden">
-          <img
-            src={restaurant.bannerImage!}
-            alt={restaurant.name}
-            className="h-[160px] w-full object-cover object-center sm:h-[200px]"
-            onError={() => setBannerFailed(true)}
-          />
-          <div className="absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-white to-transparent" />
-        </div>
-      ) : (
-        <div
-          className="relative h-[80px] overflow-hidden sm:h-[100px]"
-          style={{
-            background: "linear-gradient(135deg, var(--sf-primary-soft, #fef2f0) 0%, var(--sf-bg-subtle) 50%, var(--sf-bg) 100%)",
-          }}
-        >
-          <div
-            className="absolute -right-10 -top-10 h-48 w-48 rounded-full opacity-10"
-            style={{ background: "var(--sf-primary)" }}
-          />
-        </div>
-      )}
-
-      {/* Restaurant info (name already shown in TopBar) */}
+    <section className="relative overflow-hidden pb-8 pt-6 sm:pb-12 sm:pt-10">
       <div className="mx-auto max-w-[1440px] px-4 sm:px-6 lg:px-10">
-        <div className="mt-4">
-          {/* Cuisines */}
-          {restaurant.cuisines.length > 0 && (
-            <p className="text-sm font-semibold" style={{ color: "var(--sf-text-secondary)" }}>
-              {restaurant.cuisines.join(" \u2022 ")}
-            </p>
-          )}
-
-          {/* Description */}
-          {restaurant.description && (
-            <p
-              className="mt-2 max-w-xl text-[13px] leading-relaxed"
-              style={{ color: "var(--sf-text-muted)" }}
+        <div className="flex flex-col items-center gap-8 lg:flex-row lg:items-start lg:gap-16">
+          {/* Left: Text content */}
+          <div className="flex-1 text-center lg:text-left">
+            <h1
+              className="sf-heading text-3xl leading-tight sm:text-4xl lg:text-5xl"
+              style={{ color: "var(--sf-text)" }}
             >
-              {restaurant.description}
-            </p>
-          )}
+              {restaurant.name}
+            </h1>
 
-          {/* Info badges row */}
-          <div className="mt-4 flex flex-wrap gap-2.5">
-            <InfoBadge
-              icon={<Clock3 className="h-4 w-4" />}
-              label="Delivery"
-              value={restaurant.eta}
-            />
-            {restaurant.deliveryFee >= 0 && (
-              <InfoBadge
-                icon={<Bike className="h-4 w-4" />}
-                label="Fee"
-                value={restaurant.deliveryFee === 0 ? "Free" : `\u20B9${restaurant.deliveryFee}`}
-              />
+            {restaurant.cuisines.length > 0 && (
+              <p className="mt-3 text-sm font-medium sm:text-base" style={{ color: "var(--sf-text-secondary)" }}>
+                {restaurant.cuisines.join(" \u2022 ")}
+              </p>
             )}
-            {restaurant.minOrder > 0 && (
-              <InfoBadge
-                icon={<ShoppingBag className="h-4 w-4" />}
-                label="Min order"
-                value={`\u20B9${restaurant.minOrder}`}
-              />
+
+            {restaurant.description && (
+              <p className="mt-4 max-w-lg text-sm leading-relaxed sm:text-base" style={{ color: "var(--sf-text-muted)" }}>
+                {restaurant.description}
+              </p>
             )}
-            {!restaurant.isOpen && (
-              <div
-                className="inline-flex items-center gap-2 rounded-xl px-3.5 py-2"
+
+            {/* CTA Buttons */}
+            <div className="mt-6 flex flex-wrap justify-center gap-3 lg:justify-start">
+              <a
+                href="#menu"
+                className="inline-flex items-center rounded-full px-7 py-3 text-sm font-extrabold text-white transition-transform active:scale-95"
+                style={{ background: "var(--sf-primary)" }}
+              >
+                View menu
+              </a>
+              <button
+                className="inline-flex items-center rounded-full border px-7 py-3 text-sm font-extrabold transition-transform active:scale-95"
                 style={{
-                  background: "var(--sf-gold-soft, #FFF4DC)",
-                  border: "1px solid var(--sf-gold, #EEA61B)",
+                  borderColor: "rgba(255,255,255,0.3)",
+                  color: "var(--sf-text)",
                 }}
               >
-                <Star className="h-4 w-4" style={{ color: "var(--sf-gold)" }} />
-                <span className="text-xs font-bold" style={{ color: "var(--sf-gold)" }}>
+                Order now
+              </button>
+            </div>
+
+            {/* Info strip */}
+            <div className="mt-6 flex flex-wrap justify-center gap-4 text-xs font-semibold sm:gap-6 lg:justify-start">
+              <span className="inline-flex items-center gap-1.5" style={{ color: "var(--sf-text-secondary)" }}>
+                <Clock3 className="h-3.5 w-3.5" />
+                {restaurant.eta}
+              </span>
+              {restaurant.deliveryFee === 0 && (
+                <span className="inline-flex items-center gap-1.5" style={{ color: "var(--sf-green)" }}>
+                  Free delivery
+                </span>
+              )}
+              {restaurant.minOrder > 0 && (
+                <span className="inline-flex items-center gap-1.5" style={{ color: "var(--sf-text-secondary)" }}>
+                  Min \u20B9{restaurant.minOrder}
+                </span>
+              )}
+              {!restaurant.isOpen && (
+                <span
+                  className="inline-flex items-center rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase"
+                  style={{ background: "var(--sf-gold-soft)", color: "var(--sf-gold)" }}
+                >
                   Closed now
                 </span>
-              </div>
-            )}
+              )}
+            </div>
           </div>
+
+          {/* Right: Circular dish image */}
+          {heroImage && (
+            <div className="shrink-0">
+              <div
+                className="relative h-48 w-48 overflow-hidden rounded-full sm:h-64 sm:w-64 lg:h-80 lg:w-80"
+                style={{ boxShadow: "0 0 60px rgba(230, 126, 34, 0.15)" }}
+              >
+                <img
+                  src={heroImage}
+                  alt={restaurant.name}
+                  className="h-full w-full object-cover"
+                  onError={() => setImgFailed(true)}
+                />
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </section>

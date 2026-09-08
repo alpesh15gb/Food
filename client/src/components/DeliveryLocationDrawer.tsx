@@ -326,13 +326,13 @@ export default function DeliveryLocationDrawer({
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="max-w-md rounded-[1.5rem] border-gray-200 bg-white p-0 max-h-[90vh] overflow-y-auto">
-        <div className="rounded-t-[1.5rem] border-b border-gray-200 p-6">
+      <DialogContent className="storefront max-w-md rounded-[1.5rem] p-0 max-h-[90vh] overflow-y-auto" style={{ background: "var(--sf-bg)", borderColor: "var(--sf-border)" }}>
+        <div className="rounded-t-[1.5rem] border-b p-6" style={{ borderColor: "var(--sf-border)" }}>
           <DialogHeader>
-            <DialogTitle className="font-extrabold tracking-tight text-3xl text-gray-900">
+            <DialogTitle className="font-extrabold tracking-tight text-3xl" style={{ color: "var(--sf-text)" }}>
               Delivery Location
             </DialogTitle>
-            <DialogDescription className="text-gray-500">
+            <DialogDescription style={{ color: "var(--sf-text-muted)" }}>
               {step === "confirmed" && existingLocation
                 ? "Your delivery location is confirmed."
                 : "Choose how to set your delivery location."}
@@ -361,10 +361,10 @@ export default function DeliveryLocationDrawer({
 
               <div className="relative">
                 <div className="absolute inset-0 flex items-center">
-                  <div className="w-full border-t border-gray-200" />
+                  <div className="w-full border-t border-[var(--sf-border)]" />
                 </div>
                 <div className="relative flex justify-center text-xs">
-                  <span className="bg-white px-2 text-gray-500">or</span>
+                  <span className="bg-[var(--sf-surface)] px-2" style={{ color: "var(--sf-text-muted)" }}>or</span>
                 </div>
               </div>
 
@@ -374,11 +374,13 @@ export default function DeliveryLocationDrawer({
                     placeholder="Search address..."
                     value={searchQuery}
                     onChange={(e) => handleSearchInput(e.target.value)}
-                    className="h-12 rounded-xl border-gray-200 bg-white text-gray-900"
+                    className="h-12 rounded-xl border-[var(--sf-border)] bg-[var(--sf-surface)]"
+                    style={{ color: "var(--sf-text)" }}
                   />
                   <Button
                     variant="outline"
-                    className="h-12 rounded-xl border-gray-200 bg-white font-bold text-gray-700"
+                    className="h-12 rounded-xl border-[var(--sf-border)] bg-[var(--sf-surface)] font-bold"
+                    style={{ color: "var(--sf-text)" }}
                     disabled={!searchQuery.trim()}
                   >
                     {searching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
@@ -386,12 +388,13 @@ export default function DeliveryLocationDrawer({
                 </div>
 
                 {searchResults.length > 0 && (
-                  <div className="absolute left-0 right-0 top-14 z-50 max-h-48 overflow-y-auto rounded-xl border border-gray-200 bg-white shadow-lg">
+                  <div className="absolute left-0 right-0 top-14 z-50 max-h-48 overflow-y-auto rounded-xl border border-[var(--sf-border)] bg-[var(--sf-surface)] shadow-lg">
                     {searchResults.map((result) => (
                       <button
                         key={result.placeId}
                         onClick={() => handlePlaceSelect(result.placeId, result.description)}
-                        className="w-full px-4 py-3 text-left text-sm text-gray-900 hover:bg-gray-50"
+                        className="w-full px-4 py-3 text-left text-sm hover:bg-white/10"
+                        style={{ color: "var(--sf-text)" }}
                       >
                         <MapPin className="mr-2 inline h-3 w-3 text-[#C84630]" />
                         {result.description}
@@ -411,7 +414,8 @@ export default function DeliveryLocationDrawer({
                   setStep("map_confirm");
                 }}
                 variant="outline"
-                className="h-11 w-full rounded-xl border-gray-200 bg-white font-bold text-gray-700"
+                className="h-11 w-full rounded-xl border-[var(--sf-border)] bg-[var(--sf-surface)] font-bold"
+                style={{ color: "var(--sf-text)" }}
               >
                 <MapPin className="mr-2 h-4 w-4" />
                 Place Pin on Map
@@ -423,19 +427,19 @@ export default function DeliveryLocationDrawer({
           {step === "loading" && (
             <div className="flex flex-col items-center gap-4 py-8">
               <Loader2 className="h-8 w-8 animate-spin text-[#C84630]" />
-              <p className="text-sm text-gray-500">Getting your location...</p>
+              <p className="text-sm" style={{ color: "var(--sf-text-muted)" }}>Getting your location...</p>
             </div>
           )}
 
           {/* Step: Map Confirm — real interactive map with fixed-center pin */}
           {step === "map_confirm" && (
             <>
-              <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
-                <p className="text-sm font-semibold text-gray-700">
+              <div className="rounded-xl border border-[var(--sf-border)] bg-[var(--sf-bg-subtle)] p-4">
+                <p className="text-sm font-semibold" style={{ color: "var(--sf-text)" }}>
                   <Crosshair className="mr-1 inline h-4 w-4 text-[#C84630]" />
                   Confirm your delivery pin
                 </p>
-                <p className="mt-1 text-xs text-gray-600">
+                <p className="mt-1 text-xs" style={{ color: "var(--sf-text-secondary)" }}>
                   Move the map so the pin points to your exact delivery location.
                 </p>
               </div>
@@ -455,7 +459,7 @@ export default function DeliveryLocationDrawer({
               )}
 
               {/* Interactive Map with fixed-center pin */}
-              <div className="relative overflow-hidden rounded-xl border border-gray-200">
+              <div className="relative overflow-hidden rounded-xl border border-[var(--sf-border)]">
                 <MapView
                   className="h-[300px]"
                   initialCenter={geoState ? { lat: geoState.latitude, lng: geoState.longitude } : DEFAULT_MAP_CENTER}
@@ -472,7 +476,7 @@ export default function DeliveryLocationDrawer({
               </div>
 
               {geoState && (
-                <div className="space-y-1 text-xs text-gray-600">
+                <div className="space-y-1 text-xs" style={{ color: "var(--sf-text-secondary)" }}>
                   <p>Pin: {geoState.latitude.toFixed(6)}, {geoState.longitude.toFixed(6)}</p>
                   {geoState.deviceAccuracyMeters && (
                     <p>Device accuracy: ~{Math.round(geoState.deviceAccuracyMeters)}m ({accuracyLevel})</p>
@@ -484,7 +488,8 @@ export default function DeliveryLocationDrawer({
                 <Button
                   onClick={() => setStep("choose_method")}
                   variant="outline"
-                  className="h-11 flex-1 rounded-xl border-gray-200 bg-white font-bold text-gray-700"
+                  className="h-11 flex-1 rounded-xl border-[var(--sf-border)] bg-[var(--sf-surface)] font-bold"
+                  style={{ color: "var(--sf-text)" }}
                 >
                   Back
                 </Button>
@@ -504,7 +509,7 @@ export default function DeliveryLocationDrawer({
           {step === "address_form" && (
             <>
               {geoState && (
-                <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 text-xs text-gray-600">
+                <div className="rounded-xl border border-[var(--sf-border)] bg-[var(--sf-bg-subtle)] p-3 text-xs" style={{ color: "var(--sf-text-secondary)" }}>
                   Location: {geoState.latitude.toFixed(6)}, {geoState.longitude.toFixed(6)}
                   {geoState.deviceAccuracyMeters && <> · Accuracy: ~{Math.round(geoState.deviceAccuracyMeters)}m</>}
                   {geoState.source === "map_pin" && <> · Source: Map pin</>}
@@ -516,45 +521,45 @@ export default function DeliveryLocationDrawer({
                   placeholder="Flat / House number *"
                   value={flatHouse}
                   onChange={(e) => setFlatHouse(e.target.value)}
-                  className="h-11 rounded-xl border-gray-200 bg-white text-gray-900"
+                  className="h-11 rounded-xl border-[var(--sf-border)] bg-[var(--sf-surface)]" style={{ color: "var(--sf-text)" }}
                 />
                 <Input
                   placeholder="Building / Apartment name"
                   value={building}
                   onChange={(e) => setBuilding(e.target.value)}
-                  className="h-11 rounded-xl border-gray-200 bg-white text-gray-900"
+                  className="h-11 rounded-xl border-[var(--sf-border)] bg-[var(--sf-surface)]" style={{ color: "var(--sf-text)" }}
                 />
                 <Input
                   placeholder="Street"
                   value={street}
                   onChange={(e) => setStreet(e.target.value)}
-                  className="h-11 rounded-xl border-gray-200 bg-white text-gray-900"
+                  className="h-11 rounded-xl border-[var(--sf-border)] bg-[var(--sf-surface)]" style={{ color: "var(--sf-text)" }}
                 />
                 <Input
                   placeholder="Landmark"
                   value={landmark}
                   onChange={(e) => setLandmark(e.target.value)}
-                  className="h-11 rounded-xl border-gray-200 bg-white text-gray-900"
+                  className="h-11 rounded-xl border-[var(--sf-border)] bg-[var(--sf-surface)]" style={{ color: "var(--sf-text)" }}
                 />
                 <Input
                   placeholder="Area / Locality *"
                   value={area}
                   onChange={(e) => setArea(e.target.value)}
-                  className="h-11 rounded-xl border-gray-200 bg-white text-gray-900"
+                  className="h-11 rounded-xl border-[var(--sf-border)] bg-[var(--sf-surface)]" style={{ color: "var(--sf-text)" }}
                 />
                 <div className="grid grid-cols-2 gap-2">
                   <Input
                     placeholder="City *"
                     value={city}
                     onChange={(e) => setCity(e.target.value)}
-                    className="h-11 rounded-xl border-gray-200 bg-white text-gray-900"
+                    className="h-11 rounded-xl border-[var(--sf-border)] bg-[var(--sf-surface)]" style={{ color: "var(--sf-text)" }}
                   />
                   <Input
                     placeholder="PIN code *"
                     value={postalCode}
                     onChange={(e) => setPostalCode(e.target.value)}
                     maxLength={6}
-                    className="h-11 rounded-xl border-gray-200 bg-white text-gray-900"
+                    className="h-11 rounded-xl border-[var(--sf-border)] bg-[var(--sf-surface)]" style={{ color: "var(--sf-text)" }}
                   />
                 </div>
               </div>
@@ -563,7 +568,8 @@ export default function DeliveryLocationDrawer({
                 <Button
                   onClick={() => setStep("map_confirm")}
                   variant="outline"
-                  className="h-11 flex-1 rounded-xl border-gray-200 bg-white font-bold text-gray-700"
+                  className="h-11 flex-1 rounded-xl border-[var(--sf-border)] bg-[var(--sf-surface)] font-bold"
+                  style={{ color: "var(--sf-text)" }}
                 >
                   Back
                 </Button>
@@ -598,7 +604,8 @@ export default function DeliveryLocationDrawer({
               <Button
                 onClick={reset}
                 variant="outline"
-                className="h-11 w-full rounded-xl border-gray-200 bg-white font-bold text-gray-700"
+                className="h-11 w-full rounded-xl border-[var(--sf-border)] bg-[var(--sf-surface)] font-bold"
+                style={{ color: "var(--sf-text)" }}
               >
                 Change Location
               </Button>

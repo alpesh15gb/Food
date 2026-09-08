@@ -4,10 +4,10 @@ import { kindCopy } from "./types";
 export default function FoodDot({ kind }: { kind: FoodKind }) {
   const colour =
     kind === "veg"
-      ? "#48AC68"
+      ? "var(--sf-green)"
       : kind === "egg"
-      ? "#EEA61B"
-      : "#E23744";
+      ? "var(--sf-gold)"
+      : "var(--sf-red)";
 
   return (
     <span

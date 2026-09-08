@@ -22,23 +22,14 @@ export default function MenuStream({
       <div className="sf-card mt-5 p-9 text-center">
         <div
           className="mx-auto grid h-14 w-14 place-items-center rounded-full"
-          style={{
-            background: "var(--sf-primary-soft)",
-            color: "var(--sf-primary)",
-          }}
+          style={{ background: "var(--sf-primary-soft)", color: "var(--sf-primary)" }}
         >
           <Utensils className="h-6 w-6" />
         </div>
-        <h2
-          className="sf-heading mt-4 text-xl"
-          style={{ color: "var(--sf-text)" }}
-        >
+        <h2 className="sf-heading mt-4 text-xl" style={{ color: "var(--sf-text)" }}>
           The menu is being prepared
         </h2>
-        <p
-          className="mt-2 text-sm"
-          style={{ color: "var(--sf-text-secondary)" }}
-        >
+        <p className="mt-2 text-sm" style={{ color: "var(--sf-text-secondary)" }}>
           The kitchen team will publish dishes shortly.
         </p>
       </div>
@@ -47,7 +38,9 @@ export default function MenuStream({
   const shown = query
     ? items
     : items.filter((item) =>
-        activeCategory === "Bestsellers"
+        activeCategory === "All"
+          ? true
+          : activeCategory === "Popular"
           ? item.isBestseller
           : item.category === activeCategory
       );
@@ -55,36 +48,37 @@ export default function MenuStream({
   const display = shown.length ? shown : items;
 
   return (
-    <div className="space-y-3 pb-3">
-      <div className="mb-4 flex items-end justify-between">
-        <div>
-          <h2
-            className="sf-heading text-xl"
-            style={{ color: "var(--sf-text)" }}
-          >
-            {query ? "Search results" : activeCategory}
+    <div className="pb-3">
+      {!query && activeCategory !== "All" && (
+        <div className="mb-4 flex items-end justify-between">
+          <h2 className="sf-heading text-lg sm:text-xl" style={{ color: "var(--sf-text)" }}>
+            {activeCategory}
+          </h2>
+          <span className="text-xs font-semibold" style={{ color: "var(--sf-text-muted)" }}>
+            {display.length} dish{display.length !== 1 ? "es" : ""}
+          </span>
+        </div>
+      )}
+      {query && (
+        <div className="mb-4">
+          <h2 className="sf-heading text-lg" style={{ color: "var(--sf-text)" }}>
+            Results for "{query}"
           </h2>
         </div>
-        <span
-          className="text-xs font-semibold"
-          style={{ color: "var(--sf-text-muted)" }}
-        >
-          {display.length} dish{display.length !== 1 ? "es" : ""}
-        </span>
+      )}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {display.map((item) => (
+          <MenuCard
+            key={item.id}
+            item={item}
+            onAdd={() => onAdd(item)}
+            cartQuantity={cartQuantities[item.id] ?? 0}
+            onQuantityChange={
+              onQuantityChange ? (next) => onQuantityChange(item.id, next) : undefined
+            }
+          />
+        ))}
       </div>
-      {display.map((item) => (
-        <MenuCard
-          key={item.id}
-          item={item}
-          onAdd={() => onAdd(item)}
-          cartQuantity={cartQuantities[item.id] ?? 0}
-          onQuantityChange={
-            onQuantityChange
-              ? (next) => onQuantityChange(item.id, next)
-              : undefined
-          }
-        />
-      ))}
     </div>
   );
 }

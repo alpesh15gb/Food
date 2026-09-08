@@ -39,7 +39,7 @@ export default function OptionGroup({
               className={`flex items-center gap-3 rounded-[var(--sf-radius-btn)] border px-3.5 py-3 text-left text-sm font-semibold transition-colors ${
                 active
                   ? "bg-[var(--sf-primary-soft)]"
-                  : "bg-white"
+                  : "bg-[var(--sf-surface)]"
               }`}
               style={{
                 borderColor: active
