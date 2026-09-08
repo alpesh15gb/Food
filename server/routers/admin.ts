@@ -244,6 +244,7 @@ export const adminRouter = router({
     cuisineSummary: z.string().trim().min(2).max(255),
     description: z.string().max(2000).optional(),
     logoUrl: z.string().max(500).optional(),
+    bannerImageUrl: z.string().max(500).optional(),
     primaryColor: z.string().regex(/^#[0-9A-Fa-f]{6}$/),
     deliveryFeePaise: z.number().int().nonnegative(),
     packagingFeePaise: z.number().int().nonnegative(),

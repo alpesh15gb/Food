@@ -8,7 +8,7 @@ import { useLocation } from "wouter";
 import { toast } from "sonner";
 import {
   BarChart3, CheckCircle2, ClipboardList, Clock3, CookingPot,
-  ExternalLink, FileUp, LockKeyhole, Plus, Save, Store,
+  ExternalLink, FileUp, ImagePlus, LockKeyhole, Plus, Save, Store,
   TicketPercent, UtensilsCrossed, X, Users, TrendingUp,
   Package, AlertCircle, RefreshCw, Search,
 } from "lucide-react";
@@ -346,6 +346,9 @@ function AdminWorkspace({ section, slug }: { section: string; slug?: string }) {
     onSuccess: () => utils.admin.dashboard.invalidate(),
   });
   const uploadImage = trpc.admin.uploadMenuImage.useMutation();
+  const uploadBrand = trpc.admin.uploadBrandImage.useMutation({
+    onSuccess: () => utils.admin.dashboard.invalidate(),
+  });
   const deleteItem = trpc.admin.deleteMenuItem.useMutation({
     onSuccess: () => {
       utils.admin.dashboard.invalidate();
@@ -496,6 +499,12 @@ function AdminWorkspace({ section, slug }: { section: string; slug?: string }) {
           <RestaurantPanel
             restaurant={data.restaurant}
             onSave={(next) => updateSettings.mutate(next)}
+            onUploadBrand={(input) =>
+              uploadBrand.mutateAsync({
+                restaurantId: data.restaurant.id,
+                ...input,
+              })
+            }
           />
         ) : section === "integrations" ? (
           <IntegrationPanel />
@@ -1718,14 +1727,22 @@ function CustomersPanel({ restaurantId }: { restaurantId: string }) {
 function RestaurantPanel({
   restaurant,
   onSave,
+  onUploadBrand,
 }: {
   restaurant: any;
   onSave: (value: any) => void;
+  onUploadBrand: (input: {
+    kind: "logo" | "banner";
+    data: string;
+    contentType: "image/jpeg" | "image/png" | "image/webp";
+  }) => Promise<{ url: string }>;
 }) {
   const [form, setForm] = useState({
     name: restaurant.name,
     cuisineSummary: restaurant.cuisineSummary,
     description: restaurant.description ?? "",
+    logoUrl: restaurant.logoUrl ?? "",
+    bannerUrl: restaurant.bannerImageUrl ?? "",
     primaryColor: restaurant.primaryColor,
     deliveryFee: String(restaurant.deliveryFeePaise / 100),
     packagingFee: String(restaurant.packagingFeePaise / 100),
@@ -1734,21 +1751,56 @@ function RestaurantPanel({
     allowScheduledOrders: restaurant.allowScheduledOrders,
     preparationMinutes: String(restaurant.preparationMinutes ?? 25),
   });
+  const [uploadingKind, setUploadingKind] = useState<"logo" | "banner" | null>(null);
 
-  const save = () =>
-    onSave({
-      id: restaurant.id,
-      name: form.name,
-      cuisineSummary: form.cuisineSummary,
-      description: form.description,
-      primaryColor: form.primaryColor,
-      deliveryFeePaise: Math.round(Number(form.deliveryFee) * 100),
-      packagingFeePaise: Math.round(Number(form.packagingFee) * 100),
-      minOrderPaise: Math.round(Number(form.minOrder) * 100),
-      isOpen: form.isOpen,
-      allowScheduledOrders: form.allowScheduledOrders,
-      preparationMinutes: Number(form.preparationMinutes) || 25,
-    });
+  const payload = (f: typeof form) => ({
+    id: restaurant.id,
+    restaurantId: restaurant.id,
+    name: f.name,
+    cuisineSummary: f.cuisineSummary,
+    description: f.description,
+    logoUrl: f.logoUrl || undefined,
+    bannerImageUrl: f.bannerUrl || undefined,
+    primaryColor: f.primaryColor,
+    deliveryFeePaise: Math.round(Number(f.deliveryFee) * 100),
+    packagingFeePaise: Math.round(Number(f.packagingFee) * 100),
+    minOrderPaise: Math.round(Number(f.minOrder) * 100),
+    isOpen: f.isOpen,
+    allowScheduledOrders: f.allowScheduledOrders,
+    preparationMinutes: Number(f.preparationMinutes) || 25,
+  });
+
+  const save = () => onSave(payload(form));
+
+  const handleBrandUpload = (kind: "logo" | "banner", file: File) => {
+    if (!["image/jpeg", "image/png", "image/webp"].includes(file.type))
+      return toast.error("Use a JPG, PNG or WebP image.");
+    if (file.size > 2 * 1024 * 1024)
+      return toast.error("Image must be under 2 MB.");
+    setUploadingKind(kind);
+    const reader = new FileReader();
+    reader.onloadend = async () => {
+      const base64 = (reader.result as string).split(",")[1];
+      try {
+        const result = await onUploadBrand({
+          kind,
+          data: base64,
+          contentType: file.type as "image/jpeg" | "image/png" | "image/webp",
+        });
+        const next = {
+          ...form,
+          [kind === "logo" ? "logoUrl" : "bannerUrl"]: result.url,
+        };
+        setForm(next);
+        onSave(payload(next));
+        toast.success(kind === "logo" ? "Logo uploaded" : "Banner uploaded");
+      } catch {
+        toast.error("Upload failed. Try a smaller image.");
+      }
+      setUploadingKind(null);
+    };
+    reader.readAsDataURL(file);
+  };
 
   return (
     <section className="max-w-3xl rounded-2xl bg-white p-5 shadow-sm">
@@ -1758,6 +1810,54 @@ function RestaurantPanel({
       <h2 className="font-extrabold tracking-tight mt-1 text-2xl">
         How guests meet your kitchen
       </h2>
+
+      <div className="mt-6 grid gap-4 sm:grid-cols-2">
+        {(["logo", "banner"] as const).map((kind) => {
+          const url = kind === "logo" ? form.logoUrl : form.bannerUrl;
+          return (
+            <div key={kind} className="rounded-xl border border-gray-200 p-3">
+              <p className="text-sm font-extrabold text-gray-900">
+                {kind === "logo" ? "Logo" : "Banner image"}
+              </p>
+              <div className="mt-2 flex items-center gap-3">
+                {url ? (
+                  <img
+                    src={url}
+                    alt={kind}
+                    className={`h-14 w-14 shrink-0 object-cover ${
+                      kind === "logo" ? "rounded-full" : "rounded-lg"
+                    }`}
+                  />
+                ) : (
+                  <span className="grid h-14 w-14 shrink-0 place-items-center rounded-lg bg-gray-50 text-gray-400">
+                    <ImagePlus className="h-5 w-5" />
+                  </span>
+                )}
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-xs text-gray-500">
+                    {url || `No ${kind} yet — guests see a placeholder.`}
+                  </p>
+                  <label className="mt-2 inline-flex h-9 cursor-pointer items-center rounded-lg border border-gray-200 bg-white px-3 text-xs font-extrabold text-gray-700 hover:bg-gray-50">
+                    {uploadingKind === kind ? "Uploading..." : `Upload ${kind}`}
+                    <input
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp"
+                      className="hidden"
+                      disabled={uploadingKind !== null}
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) handleBrandUpload(kind, file);
+                        e.target.value = "";
+                      }}
+                    />
+                  </label>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
       <div className="mt-6 grid gap-4 sm:grid-cols-2">
         <Field label="Restaurant name">
           <Input
