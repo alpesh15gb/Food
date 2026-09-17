@@ -29,6 +29,7 @@ import MobileCartBar from "./MobileCartBar";
 import CustomizationDrawer from "./CustomizationDrawer";
 import AuthDrawer from "./AuthDrawer";
 import CheckoutScreen from "./CheckoutScreen";
+import TrackingScreen from "./TrackingScreen";
 
 export default function OrderingApp({ slug, trackingNumber }: { slug?: string; trackingNumber?: string }) {
   const [, navigate] = useLocation();
@@ -436,8 +437,12 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
               providerPaymentId: response.razorpay_payment_id,
               signature: response.razorpay_signature,
             });
+            // Persist the tracking token so confirmation/tracking can authenticate.
+            const paidToken =
+              (created as { trackingToken?: string }).trackingToken ?? "";
             navigate(
-              `/${storefrontSlug}/confirmation?order=${created.orderNumber}`
+              `/${storefrontSlug}/confirmation?order=${created.orderNumber}` +
+                (paidToken ? `&token=${paidToken}` : "")
             );
           } catch (error) {
             toast.error(
@@ -495,8 +500,31 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
 
   const goMenu = () => navigate(`/${storefrontSlug}`);
 
-  // --- Cart / Checkout / Confirmation screens ---
-  if (["cart", "checkout", "confirmation", "tracking"].includes(screen)) {
+  // --- Cart / Checkout / Confirmation / Tracking screens ---
+  // Confirmation + tracking authenticate via ?order=&token= (or the
+  // /order/:number path) and render the live status timeline. The tracking
+  // token is required — without it the order stays private.
+  const orderQuery = new URLSearchParams(window.location.search);
+  const confirmationOrder = orderQuery.get("order") ?? "";
+  const confirmationToken = orderQuery.get("token") ?? "";
+  const trackingOrder =
+    screen === "tracking" ? (trackingNumber || confirmationOrder) : confirmationOrder;
+
+  if (screen === "confirmation" || screen === "tracking") {
+    return (
+      <div className="storefront">
+        <TrackingScreen
+          orderNumber={trackingOrder}
+          trackingToken={confirmationToken}
+          restaurantName={restaurant?.name}
+          onMenu={goMenu}
+          variant={screen === "tracking" ? "tracking" : "confirmation"}
+        />
+      </div>
+    );
+  }
+
+  if (["cart", "checkout"].includes(screen)) {
     return (
       <div className="storefront">
         <CheckoutScreen
