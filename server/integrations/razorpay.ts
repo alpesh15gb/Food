@@ -44,6 +44,16 @@ async function credentials(restaurantId?: string) {
   return { keyId, keySecret };
 }
 
+export type RazorpayKeyMode = "test" | "live" | "unknown";
+
+/** Test keys start with rzp_test_, live keys with rzp_live_. Anything else is unknown. */
+export function razorpayKeyMode(keyId: string | null | undefined): RazorpayKeyMode {
+  if (!keyId) return "unknown";
+  if (keyId.startsWith("rzp_test_")) return "test";
+  if (keyId.startsWith("rzp_live_")) return "live";
+  return "unknown";
+}
+
 export async function getRazorpayConfig(restaurantId?: string) {
   const [storedKeyId, storedKeySecret] = await Promise.all([
     restaurantId ? readIntegrationSecret(restaurantId, "razorpay", "RAZORPAY_KEY_ID") : Promise.resolve(null),
@@ -53,7 +63,54 @@ export async function getRazorpayConfig(restaurantId?: string) {
   return {
     enabled: Boolean(keyId && (storedKeySecret ?? process.env.RAZORPAY_KEY_SECRET)),
     keyId,
+    mode: razorpayKeyMode(keyId),
   };
+}
+
+/**
+ * Live credential check for test-key onboarding: performs a read-only
+ * `GET /v1/orders?count=1` with the resolved credentials. Never returns or
+ * logs the secret — only ok/mode/user-safe error. Safe to call with test
+ * keys (no charge, no mutation).
+ */
+export async function testRazorpayConnection(restaurantId?: string): Promise<{
+  ok: boolean;
+  mode: RazorpayKeyMode;
+  keyPrefix: string;
+  error?: string;
+}> {
+  let keyId: string;
+  let keySecret: string;
+  try {
+    ({ keyId, keySecret } = await credentials(restaurantId));
+  } catch {
+    return { ok: false, mode: "unknown", keyPrefix: "", error: "Razorpay keys are not configured for this restaurant." };
+  }
+  const mode = razorpayKeyMode(keyId);
+  const keyPrefix = keyId.slice(0, 13);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15000);
+  try {
+    const auth = Buffer.from(`${keyId}:${keySecret}`).toString("base64");
+    const res = await fetch("https://api.razorpay.com/v1/orders?count=1", {
+      headers: { Authorization: `Basic ${auth}` },
+      signal: controller.signal,
+    });
+    if (res.status === 401 || res.status === 403) {
+      return { ok: false, mode, keyPrefix, error: "Authentication failed — check RAZORPAY_KEY_ID / RAZORPAY_KEY_SECRET (test keys start with rzp_test_)." };
+    }
+    if (!res.ok) {
+      return { ok: false, mode, keyPrefix, error: `Razorpay API returned HTTP ${res.status}. Retry in a moment.` };
+    }
+    return { ok: true, mode, keyPrefix };
+  } catch (err) {
+    if (err instanceof Error && err.name === "AbortError") {
+      return { ok: false, mode, keyPrefix, error: "Razorpay request timed out. Check outbound network access." };
+    }
+    return { ok: false, mode, keyPrefix, error: "Could not reach Razorpay. Check outbound network access." };
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export async function createRazorpayLinkedAccount(input: {

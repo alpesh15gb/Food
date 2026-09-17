@@ -54,8 +54,13 @@ const orderStatus = z.enum([
 // Shadowfax Unified API uses ONLY the token + our callback secret — there is
 // deliberately no MERCHANT_ID / CLIENT_CODE (spec section 1).
 const INTEGRATION_KEY_WHITELIST: Record<string, string[]> = {
-  razorpay: ["RAZORPAY_KEY_ID", "RAZORPAY_KEY_SECRET", "RAZORPAY_WEBHOOK_SECRET"],
-  shadowfax: ["SHADOWFAX_TOKEN", "SHADOWFAX_WEBHOOK_SECRET"],
+  // Webhook secrets are intentionally EXCLUDED: inbound webhook routes are
+  // restaurant-agnostic and verify against server env only. Saving them in
+  // the per-restaurant vault would silently do nothing.
+  razorpay: ["RAZORPAY_KEY_ID", "RAZORPAY_KEY_SECRET"],
+  // SHADOWFAX_API_BASE_URL is an optional per-restaurant override so staging
+  // (https://dale.staging.shadowfax.in/api) can be tested without an env change.
+  shadowfax: ["SHADOWFAX_TOKEN", "SHADOWFAX_API_BASE_URL"],
   otp: ["OTP_PROVIDER_API_KEY"],
 };
 
@@ -852,6 +857,26 @@ export const adminRouter = router({
         pickupPincode: input.pickupPincode,
         deliveryPincode: input.deliveryPincode,
       });
+    }),
+
+  // Live credential checks for test-key onboarding. Read-only against the
+  // providers; secrets stay server-side and only ok/mode/user-safe errors return.
+  testRazorpayConnection: requirePermission("integrations:read").input(z.object({
+    restaurantId: z.string().min(4),
+  }))
+    .mutation(async ({ input }) => {
+      const { testRazorpayConnection } = await import("../integrations/razorpay");
+      return testRazorpayConnection(input.restaurantId);
+    }),
+
+  testDeliveryConnection: requirePermission("integrations:read").input(z.object({
+    restaurantId: z.string().min(4),
+    pickupPincode: z.string().regex(/^\d{6}$/).optional(),
+    deliveryPincode: z.string().regex(/^\d{6}$/).optional(),
+  }))
+    .mutation(async ({ input }) => {
+      const { testShadowfaxConnection } = await import("../integrations/shadowfax");
+      return testShadowfaxConnection(input);
     }),
 
   // Issue 12: Manual delivery dispatch — for when Shadowfax is unavailable

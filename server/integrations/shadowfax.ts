@@ -44,32 +44,111 @@ export function isShadowfaxEnabled(): boolean {
   return process.env.SHADOWFAX_ENABLED === "true";
 }
 
+export const SHADOWFAX_STAGING_BASE_URL = "https://dale.staging.shadowfax.in/api";
+export const SHADOWFAX_PROD_BASE_URL = "https://dale.shadowfax.in/api";
+
 export function shadowfaxBaseUrl(): string {
-  const raw = process.env.SHADOWFAX_API_BASE_URL
-    ?? process.env.SHADOWFAX_API_URL
-    ?? "https://dale.shadowfax.in/api";
+  // Docker compose interpolates unset vars as "" — treat blank as unset so an
+  // empty SHADOWFAX_API_BASE_URL can never produce a broken base URL.
+  const clean = (v: string | undefined) => (v && v.trim() ? v.trim() : undefined);
+  const raw = clean(process.env.SHADOWFAX_API_BASE_URL)
+    ?? clean(process.env.SHADOWFAX_API_URL)
+    ?? (process.env.SHADOWFAX_ENVIRONMENT === "staging" ? SHADOWFAX_STAGING_BASE_URL : SHADOWFAX_PROD_BASE_URL);
   return raw.replace(/\/+$/, "");
 }
 
-/** Resolve Token-auth config. Vault holds an optional per-restaurant override. */
+/** "staging" when the base URL points at the staging host, else "production". */
+export function shadowfaxEnvironment(baseUrl?: string): "staging" | "production" {
+  const url = (baseUrl ?? shadowfaxBaseUrl()).toLowerCase();
+  return url.includes("staging") ? "staging" : "production";
+}
+
+/** Resolve Token-auth config. Vault holds optional per-restaurant overrides. */
 export async function resolveShadowfaxConfig(restaurantId?: string): Promise<{
   enabled: boolean;
   baseUrl: string;
+  environment: "staging" | "production";
   token: string | null;
 }> {
-  const baseUrl = shadowfaxBaseUrl();
+  let baseUrl = shadowfaxBaseUrl();
   const enabled = isShadowfaxEnabled();
   let token: string | null = null;
   if (restaurantId) {
     try {
-      token = (await readIntegrationSecret(restaurantId, "shadowfax", "SHADOWFAX_TOKEN")) ?? null;
+      const [vaultToken, vaultBaseUrl] = await Promise.all([
+        readIntegrationSecret(restaurantId, "shadowfax", "SHADOWFAX_TOKEN"),
+        readIntegrationSecret(restaurantId, "shadowfax", "SHADOWFAX_API_BASE_URL"),
+      ]);
+      if (vaultToken) token = vaultToken;
+      if (vaultBaseUrl && vaultBaseUrl.trim()) baseUrl = vaultBaseUrl.trim().replace(/\/+$/, "");
     } catch {
-      token = null;
+      // Vault unavailable — fall through to env.
     }
   }
   token = token ?? process.env.SHADOWFAX_TOKEN ?? null;
   if (token && token.trim().length === 0) token = null;
-  return { enabled, baseUrl, token };
+  return { enabled, baseUrl, environment: shadowfaxEnvironment(baseUrl), token };
+}
+
+/**
+ * Live credential check for staging onboarding: runs the spec serviceability
+ * pair-check against the configured base URL (staging for tests). Distinguishes
+ * auth failures (bad token) from unserviceable pincodes. Never returns the token.
+ */
+export async function testShadowfaxConnection(input: {
+  restaurantId?: string;
+  pickupPincode?: string;
+  deliveryPincode?: string;
+}): Promise<{
+  ok: boolean;
+  environment: "staging" | "production";
+  baseUrl: string;
+  serviceable?: boolean;
+  error?: string;
+}> {
+  const cfg = await resolveShadowfaxConfig(input.restaurantId);
+  if (!cfg.enabled) {
+    return { ok: false, environment: cfg.environment, baseUrl: cfg.baseUrl, error: "Shadowfax dispatch is disabled (SHADOWFAX_ENABLED=false)." };
+  }
+  if (!cfg.token) {
+    return { ok: false, environment: cfg.environment, baseUrl: cfg.baseUrl, error: "SHADOWFAX_TOKEN is not configured for this restaurant." };
+  }
+  const pickup = validatePincode(input.pickupPincode ?? "");
+  const delivery = validatePincode(input.deliveryPincode ?? "");
+  if (!pickup || !delivery) {
+    // Auth-only probe: one lightweight serviceability read to validate the
+    // token without needing real pincodes yet.
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
+    try {
+      const qs = new URLSearchParams({ service: "customer_delivery", page: "1", count: "1", pincodes: "560034" });
+      const res = await fetch(`${cfg.baseUrl}/v1/clients/serviceability/?${qs.toString()}`, {
+        headers: shadowfaxAuthHeader(cfg.token),
+        signal: controller.signal,
+      });
+      if (res.status === 401 || res.status === 403) {
+        return { ok: false, environment: cfg.environment, baseUrl: cfg.baseUrl, error: "Authentication failed — check SHADOWFAX_TOKEN and that the base URL matches your account (staging vs production)." };
+      }
+      return { ok: true, environment: cfg.environment, baseUrl: cfg.baseUrl };
+    } catch (err) {
+      if (err instanceof Error && err.name === "AbortError") {
+        return { ok: false, environment: cfg.environment, baseUrl: cfg.baseUrl, error: "Shadowfax request timed out." };
+      }
+      return { ok: false, environment: cfg.environment, baseUrl: cfg.baseUrl, error: "Could not reach Shadowfax. Check the base URL and outbound network access." };
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  try {
+    const provider = getDeliveryProvider(input.restaurantId);
+    const result = await provider.checkPincodeServiceability({ pickupPincode: pickup, deliveryPincode: delivery });
+    return { ok: true, environment: cfg.environment, baseUrl: cfg.baseUrl, serviceable: result.serviceable };
+  } catch (err) {
+    if (err instanceof ShadowfaxAuthenticationError) {
+      return { ok: false, environment: cfg.environment, baseUrl: cfg.baseUrl, error: "Authentication failed — check SHADOWFAX_TOKEN and that the base URL matches your account (staging vs production)." };
+    }
+    return { ok: false, environment: cfg.environment, baseUrl: cfg.baseUrl, error: err instanceof Error ? err.message : "Serviceability check failed." };
+  }
 }
 
 /** Canonical "can we dispatch" gate used by serviceability + dispatch paths. */

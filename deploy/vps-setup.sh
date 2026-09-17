@@ -101,6 +101,16 @@ if ! grep -q "OTP_HMAC_SECRET=" "$ENV_FILE"; then
   echo "✅ Added OTP_HMAC_SECRET to config"
 fi
 
+# Add Unified-API Shadowfax keys if missing (older templates used the
+# SHADOWFAX_API_KEY / SHADOWFAX_MERCHANT_ID names, which the app never reads)
+for sf_key in "SHADOWFAX_ENABLED=false" "SHADOWFAX_TOKEN=" "SHADOWFAX_API_BASE_URL=https://dale.shadowfax.in/api" "SHADOWFAX_ENVIRONMENT=production" "SHADOWFAX_WEBHOOK_SECRET=" "DELIVERY_DISPATCH_TRIGGER=READY_FOR_PICKUP"; do
+  sf_name="${sf_key%%=*}"
+  if ! grep -q "^${sf_name}=" "$ENV_FILE"; then
+    echo "$sf_key" >> "$ENV_FILE"
+    echo "✅ Added ${sf_name} to config"
+  fi
+done
+
 # =============================================================================
 # 5. Nginx configuration
 # =============================================================================

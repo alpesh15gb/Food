@@ -13,7 +13,7 @@ export async function persistShadowfaxWebhookEvent(
   if (!db) throw new Error("Database unavailable.");
   const { deliveries, deliveryStatusHistory, orders, orderStatusHistory, webhookEvents } =
     await import("../../drizzle/schema");
-  const { eq, and } = await import("drizzle-orm");
+  const { eq, and, sql } = await import("drizzle-orm");
   const { nanoid } = await import("nanoid");
   const { buildWebhookDedupeKey, mapDeliveryStatusToOrderStatus } = await import("./shadowfax");
 
@@ -121,6 +121,22 @@ export async function persistShadowfaxWebhookEvent(
         note: `Delivery update: ${update.status}${update.riderName ? ` (rider ${update.riderName})` : ""}`,
       });
       orderAdvanced = true;
+    }
+
+    // Mirror updateOrderStatus() bookkeeping for webhook-driven delivery:
+    // deliveredAt + customer lifetime stats. Previously Shadowfax-delivered
+    // orders never counted toward the customer's totals. orderAdvanced is only
+    // true on a genuine forward transition, so repeats can't double-count.
+    if (mapped === "DELIVERED" && orderAdvanced && order) {
+      await tx.update(orders).set({ deliveredAt: update.timestamp }).where(eq(orders.id, order.id));
+      if (order.customerId) {
+        await tx.execute(sql`
+          UPDATE customer_profiles
+          SET total_orders = total_orders + 1,
+              total_spent_paise = total_spent_paise + ${order.totalPaise}
+          WHERE id = ${order.customerId}
+        `);
+      }
     }
 
     await tx.update(webhookEvents).set({ processed: true })
