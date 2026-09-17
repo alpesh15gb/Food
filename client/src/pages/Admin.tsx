@@ -507,7 +507,7 @@ function AdminWorkspace({ section, slug }: { section: string; slug?: string }) {
             }
           />
         ) : section === "integrations" ? (
-          <IntegrationPanel />
+          <IntegrationPanel restaurantId={data.restaurant.id} />
         ) : section === "domains" ? (
           <DomainsPanel restaurantId={data.restaurant.id} />
         ) : section === "kds" ? (
