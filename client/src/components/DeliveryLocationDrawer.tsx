@@ -200,9 +200,16 @@ export default function DeliveryLocationDrawer({
     }
     setSearching(true);
     searchTimerRef.current = setTimeout(async () => {
-      const results = await searchPlaces(value);
-      setSearchResults(results);
-      setSearching(false);
+      // Any throw (Maps not loaded yet, blocked request) must still clear
+      // the spinner — otherwise it circles forever with no error shown.
+      try {
+        const results = await searchPlaces(value);
+        setSearchResults(results);
+      } catch {
+        setSearchResults([]);
+      } finally {
+        setSearching(false);
+      }
     }, 300);
   }, []);
 
