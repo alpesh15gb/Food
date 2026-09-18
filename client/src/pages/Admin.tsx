@@ -1002,6 +1002,7 @@ function MenuPanel({
         const base64 = (reader.result as string).split(",")[1];
         try {
           const result = await onUploadImage.mutateAsync({
+            restaurantId: data.restaurant.id,
             data: base64,
             filename: file.name,
             contentType: file.type as "image/jpeg" | "image/png" | "image/webp",
