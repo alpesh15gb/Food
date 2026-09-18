@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { formatINR } from "@/lib/types";
 import type { CartLine } from "./types";
 import Quantity from "./Quantity";
+import PhoneField from "./PhoneField";
 
 export default function CartSidebar({
   cart,
@@ -15,6 +16,8 @@ export default function CartSidebar({
   onCheckout,
   processing,
   restaurant,
+  customerPhone,
+  onCustomerPhone,
 }: {
   cart: CartLine[];
   total: number;
@@ -26,6 +29,8 @@ export default function CartSidebar({
   onCheckout: () => void;
   processing: boolean;
   restaurant: any;
+  customerPhone: string;
+  onCustomerPhone: (v: string) => void;
 }) {
   return (
     <div
@@ -128,6 +133,9 @@ export default function CartSidebar({
                 order
               </p>
             )}
+
+            {/* Contact number — same requirement as the checkout page */}
+            <PhoneField compact value={customerPhone} onChange={onCustomerPhone} />
 
             {/* Checkout button */}
             <Button

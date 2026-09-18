@@ -121,6 +121,14 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
   const [customerPhone, setCustomerPhone] = useState(
     () => localStorage.getItem("ck_phone_prefill") ?? ""
   );
+  const persistPhone = (v: string) => {
+    setCustomerPhone(v);
+    try {
+      localStorage.setItem("ck_phone_prefill", v);
+    } catch {
+      /* private mode — prefill skipped */
+    }
+  };
 
   // Auth state
   const [authOpen, setAuthOpen] = useState(false);
@@ -546,14 +554,7 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
           processing={processing}
           restaurant={restaurant}
           customerPhone={customerPhone}
-          onCustomerPhone={(v) => {
-            setCustomerPhone(v);
-            try {
-              localStorage.setItem("ck_phone_prefill", v);
-            } catch {
-              /* private mode — prefill skipped */
-            }
-          }}
+          onCustomerPhone={persistPhone}
         />
       </div>
     );
@@ -687,6 +688,8 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
               onCheckout={startSecurePayment}
               processing={processing}
               restaurant={restaurant}
+              customerPhone={customerPhone}
+              onCustomerPhone={persistPhone}
             />
           </div>
         </div>
