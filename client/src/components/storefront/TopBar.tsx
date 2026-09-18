@@ -78,7 +78,7 @@ export default function TopBar({
           </a>
           <button
             onClick={() => setSearchOpen((open) => !open)}
-            className="grid h-9 w-9 place-items-center rounded-full transition-colors hover:bg-white/10"
+            className="grid h-9 min-h-[44px] w-9 min-w-[44px] place-items-center rounded-full outline-none transition-colors hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-[var(--sf-primary)]"
             aria-label="Search dishes"
             style={{ color: "var(--sf-text-secondary)" }}
           >
@@ -86,7 +86,7 @@ export default function TopBar({
           </button>
           <button
             onClick={onAccount}
-            className="grid h-9 w-9 place-items-center rounded-full transition-colors hover:bg-white/10"
+            className="grid h-9 min-h-[44px] w-9 min-w-[44px] place-items-center rounded-full outline-none transition-colors hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-[var(--sf-primary)]"
             aria-label="Account"
             style={{ color: "var(--sf-text-secondary)" }}
           >
@@ -94,7 +94,7 @@ export default function TopBar({
           </button>
           <button
             onClick={onCart}
-            className="relative grid h-9 w-9 place-items-center rounded-full transition-colors hover:bg-white/10"
+            className="relative grid h-9 min-h-[44px] w-9 min-w-[44px] place-items-center rounded-full outline-none transition-colors hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-[var(--sf-primary)]"
             aria-label="Open cart"
             style={{ color: "var(--sf-text)" }}
           >

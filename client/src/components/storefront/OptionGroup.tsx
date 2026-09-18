@@ -36,7 +36,7 @@ export default function OptionGroup({
             <button
               key={value}
               onClick={() => onSelect(value)}
-              className={`flex items-center gap-3 rounded-[var(--sf-radius-btn)] border px-3.5 py-3 text-left text-sm font-semibold transition-colors ${
+              className={`flex items-center gap-3 rounded-[var(--sf-radius-btn)] border px-3.5 py-3 text-left text-sm font-semibold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-[var(--sf-primary)] ${
                 active
                   ? "bg-[var(--sf-primary-soft)]"
                   : "bg-[var(--sf-surface)]"

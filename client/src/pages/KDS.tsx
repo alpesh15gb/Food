@@ -224,7 +224,7 @@ function KDSBoard({
           <button
             key={s.id}
             onClick={() => setStation(s.id)}
-            className={`px-4 py-1.5 rounded-lg text-sm font-medium whitespace-nowrap transition-colors ${
+            className={`min-h-[44px] px-4 py-1.5 rounded-lg text-sm font-medium whitespace-nowrap outline-none transition-colors focus-visible:ring-2 focus-visible:ring-orange-400 ${
               station === s.id
                 ? "bg-orange-500/20 text-orange-400 border border-orange-500/30"
                 : "text-gray-400 hover:text-gray-200 hover:bg-[#2a2a2a]"
@@ -242,7 +242,7 @@ function KDSBoard({
             <LoaderCircle className="w-8 h-8 animate-spin text-gray-500" />
           </div>
         ) : ordersQuery.isError ? (
-          <div className="mx-auto max-w-md [&_main]:min-h-0 [&_main]:bg-transparent [&_main]:p-0">
+          <div className="mx-auto max-w-md [&_main]:min-h-0 [&_main]:bg-transparent [&_main]:p-0 [&>main>div]:!border-red-500/40 [&>main>div]:!bg-[#2a1a1a] [&_p]:!text-red-200 [&_svg]:!text-red-400">
             <AdminError
               message="We couldn't load the kitchen feed. Live updates are paused."
               onRetry={() => {

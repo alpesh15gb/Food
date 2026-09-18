@@ -1248,7 +1248,7 @@ function MenuPanel({
             {imagePreview ? (
               <div className="relative h-16 w-16 shrink-0 overflow-hidden rounded-xl border border-white/20">
                 <img src={imagePreview} alt="Preview" className="h-full w-full object-cover" />
-                <button onClick={() => { setImagePreview(null); setItemForm({ ...itemForm, imageUrl: undefined }); }} className="absolute -right-1 -top-1 grid h-5 w-5 place-items-center rounded-full bg-red-500 text-white"><X className="h-3 w-3" /></button>
+                <button aria-label="Remove dish photo" onClick={() => { setImagePreview(null); setItemForm({ ...itemForm, imageUrl: undefined }); }} className="absolute -right-1 -top-1 grid h-5 w-5 place-items-center rounded-full bg-red-500 text-white"><X className="h-3 w-3" /></button>
               </div>
             ) : (
               <label className="flex h-16 w-16 cursor-pointer items-center justify-center rounded-xl border-2 border-dashed border-white/30 hover:border-white/60">
@@ -1438,8 +1438,8 @@ function MenuPanel({
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
-                    <button onClick={() => startEdit(item)} className="rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-[10px] font-bold text-gray-700 hover:bg-gray-50">Edit</button>
-                    <button onClick={() => onDelete(item.id)} className="rounded-lg border border-red-200 bg-white px-2 py-1.5 text-[10px] font-bold text-red-600 hover:bg-red-50">Delete</button>
+                    <button onClick={() => startEdit(item)} className="min-h-[44px] rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-[10px] font-bold text-gray-700 hover:bg-gray-50">Edit</button>
+                    <button onClick={() => onDelete(item.id)} className="min-h-[44px] rounded-lg border border-red-200 bg-white px-3 py-1.5 text-[10px] font-bold text-red-600 hover:bg-red-50">Delete</button>
                     <label className="relative inline-flex cursor-pointer items-center">
                       <input type="checkbox" checked={item.isOpen} onChange={(e) => onToggle(item.id, e.target.checked)} className="peer sr-only" />
                       <div className="h-6 w-11 rounded-full bg-gray-200 after:absolute after:left-[2px] after:top-[2px] after:h-5 after:w-5 after:rounded-full after:bg-white after:transition-all peer-checked:bg-[#c84630] after:peer-checked:translate-x-full" />

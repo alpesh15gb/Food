@@ -85,7 +85,7 @@ export default function MenuCard({
           <button
             disabled={unavailable}
             onClick={onAdd}
-            className="grid h-9 w-9 place-items-center rounded-full text-white transition-transform active:scale-90 disabled:opacity-40"
+            className="grid h-9 min-h-[44px] w-9 min-w-[44px] place-items-center rounded-full text-white outline-none transition-transform active:scale-90 disabled:opacity-40 focus-visible:ring-2 focus-visible:ring-[var(--sf-primary)] focus-visible:ring-offset-2"
             style={{ background: "var(--sf-primary)" }}
             aria-label={`Add ${item.name}`}
           >

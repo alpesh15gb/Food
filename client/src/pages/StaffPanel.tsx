@@ -90,7 +90,7 @@ export default function StaffPanel({ restaurantId }: { restaurantId: string }) {
             </div>
             <div className="space-y-1">
               <Label>Role</Label>
-              <select className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm" value={inviteForm.role} onChange={e => setInviteForm({ ...inviteForm, role: e.target.value as RoleValue })}>
+              <select aria-label="Invite role" className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm" value={inviteForm.role} onChange={e => setInviteForm({ ...inviteForm, role: e.target.value as RoleValue })}>
                 {ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
               </select>
             </div>
@@ -118,7 +118,8 @@ export default function StaffPanel({ restaurantId }: { restaurantId: string }) {
         </div>
       ) : (
       <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-        <table className="w-full text-sm">
+        <div className="overflow-x-auto">
+        <table className="w-full min-w-[640px] text-sm">
           <thead className="bg-gray-50 text-left">
             <tr>
               <th className="px-4 py-2.5 font-semibold text-gray-600">Name</th>
@@ -141,6 +142,7 @@ export default function StaffPanel({ restaurantId }: { restaurantId: string }) {
                 <td className="px-4 py-2.5">{m.userEmail ?? "—"}</td>
                 <td className="px-4 py-2.5">
                   <select
+                    aria-label={`Change role for ${m.userEmail ?? m.userName ?? "team member"}`}
                     className="text-xs font-bold px-2 py-1 rounded border border-gray-200 bg-transparent disabled:opacity-50"
                     value={m.role}
                     disabled={updateRole.isPending}
@@ -157,7 +159,7 @@ export default function StaffPanel({ restaurantId }: { restaurantId: string }) {
                 <td className="px-4 py-2.5 text-gray-600">{new Date(m.joinedAt).toLocaleDateString()}</td>
                 <td className="px-4 py-2.5 text-right">
                   {m.isActive && (
-                    <Button size="sm" variant="ghost" className="text-red-500 hover:text-red-700 hover:bg-red-50 h-7 px-2" disabled={deactivate.isPending} onClick={() => handleDeactivate(m)}>
+                    <Button size="sm" variant="ghost" aria-label={`Deactivate ${m.userEmail ?? m.userName ?? "team member"}`} className="text-red-500 hover:text-red-700 hover:bg-red-50 h-7 min-h-[44px] min-w-[44px] px-2" disabled={deactivate.isPending} onClick={() => handleDeactivate(m)}>
                       <UserMinus className="w-3 h-3" />
                     </Button>
                   )}
@@ -166,6 +168,7 @@ export default function StaffPanel({ restaurantId }: { restaurantId: string }) {
             ))}
           </tbody>
         </table>
+        </div>
       </div>
       )}
 

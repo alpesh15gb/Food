@@ -97,7 +97,7 @@ function MaterialsTab({ restaurantId }: { restaurantId: string }) {
             </div>
             <div className="space-y-1">
               <Label>Unit</Label>
-              <select className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm" value={form.unit} onChange={e => setForm({ ...form, unit: e.target.value })}>
+              <select aria-label="Unit" className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm" value={form.unit} onChange={e => setForm({ ...form, unit: e.target.value })}>
                 <option value="kg">kg</option>
                 <option value="ltr">ltr</option>
                 <option value="pcs">pcs</option>
@@ -133,7 +133,8 @@ function MaterialsTab({ restaurantId }: { restaurantId: string }) {
       )}
 
       <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-        <table className="w-full text-sm">
+        <div className="overflow-x-auto">
+        <table className="w-full min-w-[600px] text-sm">
           <thead className="bg-gray-50 text-left">
             <tr>
               <th className="px-4 py-2.5 font-semibold text-gray-600">Material</th>
@@ -162,6 +163,7 @@ function MaterialsTab({ restaurantId }: { restaurantId: string }) {
             })}
           </tbody>
         </table>
+        </div>
       </div>
     </div>
   );
@@ -225,7 +227,8 @@ function SuppliersTab({ restaurantId }: { restaurantId: string }) {
       )}
 
       <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-        <table className="w-full text-sm">
+        <div className="overflow-x-auto">
+        <table className="w-full min-w-[600px] text-sm">
           <thead className="bg-gray-50 text-left">
             <tr>
               <th className="px-4 py-2.5 font-semibold text-gray-600">Name</th>
@@ -245,6 +248,7 @@ function SuppliersTab({ restaurantId }: { restaurantId: string }) {
             ))}
           </tbody>
         </table>
+        </div>
       </div>
     </div>
   );
@@ -261,7 +265,8 @@ function PurchaseOrdersTab({ restaurantId }: { restaurantId: string }) {
   return (
     <div className="space-y-4">
       <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-        <table className="w-full text-sm">
+        <div className="overflow-x-auto">
+        <table className="w-full min-w-[600px] text-sm">
           <thead className="bg-gray-50 text-left">
             <tr>
               <th className="px-4 py-2.5 font-semibold text-gray-600">PO #</th>
@@ -295,6 +300,7 @@ function PurchaseOrdersTab({ restaurantId }: { restaurantId: string }) {
             ))}
           </tbody>
         </table>
+        </div>
       </div>
     </div>
   );
