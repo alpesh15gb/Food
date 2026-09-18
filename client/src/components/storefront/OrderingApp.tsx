@@ -462,13 +462,19 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
         longitude: svcLng,
         postalCode: dropPincode,
       });
+      // tRPC batch envelope: this server only answers batch=1 GETs — a bare
+      // ?input= gets a 400 that used to masquerade as "unserviceable".
       const svcRes = await fetch(
-        `/api/trpc/storefront.checkServiceability?input=${encodeURIComponent(
+        `/api/trpc/storefront.checkServiceability?batch=1&input=${encodeURIComponent(
           JSON.stringify({
-            slug: storefrontSlug,
-            latitude: svcLat,
-            longitude: svcLng,
-            ...(dropPincode ? { postalCode: dropPincode } : {}),
+            "0": {
+              json: {
+                slug: storefrontSlug,
+                latitude: svcLat,
+                longitude: svcLng,
+                ...(dropPincode ? { postalCode: dropPincode } : {}),
+              },
+            },
           })
         )}`,
         { credentials: "include" }
@@ -496,12 +502,13 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
       const envelope = svcJson as {
         result?: { data?: unknown };
         error?: unknown;
-      };
-      if (envelope.error) {
+      } | Array<{ result?: { data?: unknown }; error?: unknown }>;
+      const first = Array.isArray(envelope) ? envelope[0] : envelope;
+      if (!first || first.error) {
         failOpen();
         return;
       }
-      const serviceability = (envelope.result?.data ?? svcJson) as {
+      const serviceability = (first.result?.data ?? svcJson) as {
         serviceable?: unknown;
         reason?: unknown;
       } | null;
