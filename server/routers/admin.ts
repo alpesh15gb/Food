@@ -250,6 +250,7 @@ export const adminRouter = router({
     logoUrl: z.string().max(500).optional(),
     bannerImageUrl: z.string().max(500).optional(),
     primaryColor: z.string().regex(/^#[0-9A-Fa-f]{6}$/),
+    contactPhone: z.string().trim().max(24).nullish(),
     deliveryFeePaise: z.number().int().nonnegative(),
     packagingFeePaise: z.number().int().nonnegative(),
     minOrderPaise: z.number().int().nonnegative(),

@@ -1745,6 +1745,7 @@ function RestaurantPanel({
     logoUrl: restaurant.logoUrl ?? "",
     bannerUrl: restaurant.bannerImageUrl ?? "",
     primaryColor: restaurant.primaryColor,
+    contactPhone: restaurant.contactPhone ?? "",
     deliveryFee: String(restaurant.deliveryFeePaise / 100),
     packagingFee: String(restaurant.packagingFeePaise / 100),
     minOrder: String(restaurant.minOrderPaise / 100),
@@ -1763,6 +1764,7 @@ function RestaurantPanel({
     logoUrl: f.logoUrl || undefined,
     bannerImageUrl: f.bannerUrl || undefined,
     primaryColor: f.primaryColor,
+    contactPhone: f.contactPhone.trim() || null,
     deliveryFeePaise: Math.round(Number(f.deliveryFee) * 100),
     packagingFeePaise: Math.round(Number(f.packagingFee) * 100),
     minOrderPaise: Math.round(Number(f.minOrder) * 100),
@@ -1914,6 +1916,16 @@ function RestaurantPanel({
             value={form.minOrder}
             inputMode="numeric"
             onChange={(e) => setForm({ ...form, minOrder: e.target.value })}
+          />
+        </Field>
+        <Field label="Contact phone">
+          <Input
+            value={form.contactPhone}
+            inputMode="tel"
+            placeholder="+91 98765 43210"
+            onChange={(e) =>
+              setForm({ ...form, contactPhone: e.target.value })
+            }
           />
         </Field>
       </div>

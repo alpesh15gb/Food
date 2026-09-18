@@ -322,6 +322,7 @@ export async function updateRestaurant(input: {
   description?: string;
   logoUrl?: string;
   primaryColor: string;
+  contactPhone?: string | null;
   deliveryFeePaise: number;
   packagingFeePaise: number;
   minOrderPaise: number;
