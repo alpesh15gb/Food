@@ -508,7 +508,9 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
         failOpen();
         return;
       }
-      const serviceability = (first.result?.data ?? svcJson) as {
+      // SuperJSON batch payloads nest under result.data.json.
+      const rawData = first.result?.data as { json?: unknown } | undefined;
+      const serviceability = ((rawData && typeof rawData === "object" && "json" in rawData ? rawData.json : rawData) ?? svcJson) as {
         serviceable?: unknown;
         reason?: unknown;
       } | null;
