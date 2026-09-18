@@ -112,6 +112,23 @@ export default function DeliveryLocationDrawer({
   // Map state
   const mapRef = useRef<google.maps.Map | null>(null);
   const idleListenerRef = useRef<google.maps.MapsEventListener | null>(null);
+  const [mapError, setMapError] = useState<string | null>(null);
+
+  /** A pin is only confirmable with real coordinates — never the untouched
+   * India-center seed, (0,0), or non-finite values. Prevents ghost pins that
+   * pass validation but fail serviceability hundreds of km away. */
+  const hasUsablePin = (g: GeoLocationState | null): g is GeoLocationState => {
+    if (!g) return false;
+    const { latitude, longitude } = g;
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return false;
+    if (latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) return false;
+    if (latitude === 0 && longitude === 0) return false;
+    const nearDefault =
+      Math.abs(latitude - DEFAULT_MAP_CENTER.lat) < 0.000001 &&
+      Math.abs(longitude - DEFAULT_MAP_CENTER.lng) < 0.000001;
+    if (nearDefault && g.source === "map_pin" && !g.mapInteracted) return false;
+    return true;
+  };
 
   // Search state
   const [searchQuery, setSearchQuery] = useState("");
@@ -304,7 +321,7 @@ export default function DeliveryLocationDrawer({
   // --- Confirm address form ---
   const confirmAddress = useCallback(() => {
     if (!flatHouse.trim() || !area.trim() || !city.trim() || !/^\d{6}$/.test(postalCode)) return;
-    if (!geoState) return;
+    if (!hasUsablePin(geoState)) return;
 
     const location: DeliveryLocation = {
       flatHouse: flatHouse.trim(),
@@ -327,7 +344,7 @@ export default function DeliveryLocationDrawer({
     onOpenChange(false);
   }, [flatHouse, building, street, landmark, area, city, postalCode, geoState, onConfirm, onOpenChange]);
 
-  const formValid = flatHouse.trim() && area.trim() && city.trim() && /^\d{6}$/.test(postalCode) && geoState;
+  const formValid = Boolean(flatHouse.trim() && area.trim() && city.trim() && /^\d{6}$/.test(postalCode) && hasUsablePin(geoState));
 
   const accuracyLevel = geoState ? classifyAccuracy(geoState.deviceAccuracyMeters ?? geoState.accuracyMeters) : null;
 
@@ -471,8 +488,17 @@ export default function DeliveryLocationDrawer({
                   className="h-[300px]"
                   initialCenter={geoState ? { lat: geoState.latitude, lng: geoState.longitude } : DEFAULT_MAP_CENTER}
                   initialZoom={16}
-                  onMapReady={handleMapReady}
+                  onMapReady={(map) => {
+                    setMapError(null);
+                    handleMapReady(map);
+                  }}
+                  onLoadError={(message) => setMapError(message)}
                 />
+                {mapError && (
+                  <div role="alert" className="mt-2 rounded-xl border border-red-200 bg-red-50 p-3 text-xs font-bold text-red-700">
+                    Map failed to load ({mapError}). Check your connection and reopen this picker — the pin cannot be confirmed without the map.
+                  </div>
+                )}
                 {/* Fixed center pin overlay */}
                 <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
                   <div className="relative">
@@ -501,8 +527,15 @@ export default function DeliveryLocationDrawer({
                   Back
                 </Button>
                 <Button
-                  onClick={() => geoState && setStep("address_form")}
-                  disabled={!geoState}
+                  onClick={() => hasUsablePin(geoState) && setStep("address_form")}
+                  disabled={!hasUsablePin(geoState) || !!mapError}
+                  title={
+                    mapError
+                      ? "Map failed to load — reopen the picker and try again"
+                      : !hasUsablePin(geoState)
+                        ? "Move the map so the pin points to your exact location"
+                        : undefined
+                  }
                   className="h-11 flex-1 rounded-xl bg-[#C84630] font-bold text-white hover:bg-[#b03a28] disabled:opacity-50"
                 >
                   <Check className="mr-1 h-4 w-4" />

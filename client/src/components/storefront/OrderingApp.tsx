@@ -358,15 +358,21 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
       return toast.error("Please enter your phone number.");
     }
 
-    // Serviceability pre-check
+    // Serviceability pre-check (radius + Shadowfax pincode-pair when the
+    // provider is configured — catches pincode-unserviceable addresses
+    // BEFORE payment instead of failing late at dispatch).
     setProcessing(true);
     try {
+      const dropPincode = /^\d{6}$/.test(deliveryAddress.postalCode ?? "")
+        ? deliveryAddress.postalCode
+        : undefined;
       const svcRes = await fetch(
         `/api/trpc/storefront.checkServiceability?input=${encodeURIComponent(
           JSON.stringify({
             slug: storefrontSlug,
             latitude: deliveryAddress.latitude,
             longitude: deliveryAddress.longitude,
+            ...(dropPincode ? { postalCode: dropPincode } : {}),
           })
         )}`,
         { credentials: "include" }
@@ -380,7 +386,9 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
           description:
             reason === "OUTSIDE_DELIVERY_RADIUS"
               ? "Your location is outside our current delivery area."
-              : "Please try a different address.",
+              : reason === "SHADOWFAX_NOT_SERVICEABLE"
+                ? "Our delivery partner doesn't serve this pincode yet."
+                : "Please try a different address.",
         });
         return;
       }

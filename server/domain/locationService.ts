@@ -131,11 +131,37 @@ type OutletCandidate = {
   postalCode: string | null;
   latitude: string | null;
   longitude: string | null;
+  /** Numeric mirrors (preferred when valid; varchar kept for compat). */
+  latitudeNum?: string | number | null;
+  longitudeNum?: string | number | null;
   preparationMinutes: number;
   isActive: boolean;
   isOpen: boolean;
   deliveryRadiusKm: string | null;
 };
+
+/**
+ * Canonical outlet coordinates: numeric mirrors win (exact DECIMAL from the
+ * DB, no parse drift); varchar falls back. Ordering and dispatch must never
+ * read different columns again.
+ */
+export function outletCoordinates(outlet: OutletCandidate): { latitude: number; longitude: number } | null {
+  const num = validateGeoLocation({ latitude: outlet.latitudeNum ?? undefined, longitude: outlet.longitudeNum ?? undefined });
+  if (num.valid && num.latitude !== undefined && num.longitude !== undefined) {
+    return { latitude: num.latitude, longitude: num.longitude };
+  }
+  const legacy = validateGeoLocation({ latitude: outlet.latitude, longitude: outlet.longitude });
+  if (legacy.valid && legacy.latitude !== undefined && legacy.longitude !== undefined) {
+    return { latitude: legacy.latitude, longitude: legacy.longitude };
+  }
+  return null;
+}
+
+/** Parse a radius knob; non-numeric garbage fails closed to the default. */
+export function parseRadiusKm(value: unknown, fallback: number): number {
+  const n = typeof value === "number" ? value : parseFloat(String(value ?? ""));
+  return Number.isFinite(n) && n > 0 && n <= 100 ? n : fallback;
+}
 
 /**
  * Select the best outlet for a delivery destination.
@@ -157,12 +183,10 @@ export function selectBestOutlet(
 
   for (const outlet of outlets) {
     if (!outlet.isActive || !outlet.isOpen) continue;
-    const loc = validateGeoLocation({ latitude: outlet.latitude, longitude: outlet.longitude });
-    if (!loc.valid || loc.latitude === undefined || loc.longitude === undefined) continue;
+    const loc = outletCoordinates(outlet);
+    if (!loc) continue;
 
-    const radiusKm = outlet.deliveryRadiusKm
-      ? parseFloat(outlet.deliveryRadiusKm)
-      : defaultRadiusKm;
+    const radiusKm = parseRadiusKm(outlet.deliveryRadiusKm, defaultRadiusKm);
     const distanceKm = haversineDistanceKm(customerLat, customerLng, loc.latitude, loc.longitude);
 
     if (distanceKm <= radiusKm) {
@@ -212,8 +236,7 @@ export async function checkServiceability(
   // Distinct misconfiguration: outlets exist but none have usable coordinates.
   const hasUsableOutlet = outlets.some(o => {
     if (!o.isActive || !o.isOpen) return false;
-    const loc = validateGeoLocation({ latitude: o.latitude, longitude: o.longitude });
-    return loc.valid;
+    return outletCoordinates(o) !== null;
   });
   if (!hasUsableOutlet) {
     const anyActive = outlets.some(o => o.isActive && o.isOpen);
@@ -234,11 +257,8 @@ export async function checkServiceability(
   let providerVerification: "VERIFIED" | "NOT_CHECKED" | "FAILED" = "NOT_CHECKED";
   let estimatedMinutes = selection.outlet.preparationMinutes + 15;
   if (shadowfaxCheckFn) {
-    const outletLoc = validateGeoLocation({
-      latitude: selection.outlet.latitude,
-      longitude: selection.outlet.longitude,
-    });
-    if (outletLoc.valid && outletLoc.latitude !== undefined && outletLoc.longitude !== undefined) {
+    const outletLoc = outletCoordinates(selection.outlet);
+    if (outletLoc) {
       try {
         const providerResult = await shadowfaxCheckFn(
           { lat: outletLoc.latitude, lng: outletLoc.longitude },

@@ -9,6 +9,8 @@ import {
   classifyAccuracy,
   haversineDistanceKm,
   selectBestOutlet,
+  outletCoordinates,
+  parseRadiusKm,
 } from "./locationService";
 
 // =============================================================================
@@ -268,5 +270,85 @@ describe("Outlet Selection", () => {
     // Customer at Koramangala — outlet_1 is 25min prep but closer
     const result = selectBestOutlet(outlets, 12.9352, 77.6245);
     expect(result!.outlet.id).toBe("outlet_1");
+  });
+});
+
+describe("outletCoordinates (numeric-first unification)", () => {
+  const base = {
+    id: "o1",
+    name: "Outlet",
+    address: "1 Main St",
+    city: "Hyderabad",
+    postalCode: "500034",
+    preparationMinutes: 25,
+    isActive: true,
+    isOpen: true,
+    deliveryRadiusKm: "15",
+  };
+
+  it("prefers numeric mirrors over varchar", () => {
+    const loc = outletCoordinates({
+      ...base,
+      latitude: "17.0000",
+      longitude: "78.0000",
+      latitudeNum: "17.417200",
+      longitudeNum: "78.442800",
+    });
+    expect(loc).toEqual({ latitude: 17.4172, longitude: 78.4428 });
+  });
+
+  it("falls back to varchar when numerics are absent", () => {
+    const loc = outletCoordinates({
+      ...base,
+      latitude: "17.4172",
+      longitude: "78.4428",
+      latitudeNum: null,
+      longitudeNum: null,
+    });
+    expect(loc).toEqual({ latitude: 17.4172, longitude: 78.4428 });
+  });
+
+  it("returns null when both are unusable", () => {
+    expect(
+      outletCoordinates({ ...base, latitude: null, longitude: null, latitudeNum: null, longitudeNum: null })
+    ).toBeNull();
+    // Numeric garbage must not rescue invalid varchar (and vice versa)
+    expect(
+      outletCoordinates({ ...base, latitude: "abc", longitude: "78.4", latitudeNum: "nan", longitudeNum: null })
+    ).toBeNull();
+  });
+
+  it("selectBestOutlet uses numeric coords (ordering == dispatch source)", () => {
+    const outlet = {
+      ...base,
+      latitude: "12.0000", // stale varchar far away (Chennai-ish latitude)
+      longitude: "80.2707",
+      latitudeNum: "17.417200", // real Hyderabad position
+      longitudeNum: "78.442800",
+    };
+    // Customer next to the real outlet → selected via numerics, not varchar.
+    const result = selectBestOutlet([outlet], 17.4172, 78.4428);
+    expect(result).not.toBeNull();
+    expect(result!.distanceKm).toBeLessThan(0.01);
+  });
+});
+
+describe("parseRadiusKm (fail-closed radius parsing)", () => {
+  it("accepts numbers and numeric strings within (0, 100]", () => {
+    expect(parseRadiusKm(15, 5)).toBe(15);
+    expect(parseRadiusKm("15.00", 5)).toBe(15);
+    expect(parseRadiusKm("5", 5)).toBe(5);
+    expect(parseRadiusKm(100, 5)).toBe(100);
+  });
+
+  it("falls back on garbage, zero, negative, or >100", () => {
+    expect(parseRadiusKm("abc", 5)).toBe(5);
+    expect(parseRadiusKm("", 5)).toBe(5);
+    expect(parseRadiusKm(null, 5)).toBe(5);
+    expect(parseRadiusKm(undefined, 5)).toBe(5);
+    expect(parseRadiusKm(NaN, 5)).toBe(5);
+    expect(parseRadiusKm(0, 5)).toBe(5);
+    expect(parseRadiusKm(-3, 5)).toBe(5);
+    expect(parseRadiusKm(101, 5)).toBe(5);
   });
 });

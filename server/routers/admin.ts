@@ -994,6 +994,27 @@ export const adminRouter = router({
         throw new Error("Outlet/restaurant contact phone is invalid. Fix it before Shadowfax dispatch.");
       }
 
+      // 4b. Radius re-check at dispatch time: the outlet may have moved or
+      // its ring shrunk since checkout. Same canonical helpers as the order
+      // path so both gates agree; pincode-pair serviceability follows below.
+      {
+        const { outletCoordinates, parseRadiusKm, haversineDistanceKm } = await import("../domain/locationService");
+        const dispatchOutletLoc = outletCoordinates(outlet as never);
+        const custLat = typeof addrSnapshot.latitude === "number" ? addrSnapshot.latitude : NaN;
+        const custLng = typeof addrSnapshot.longitude === "number" ? addrSnapshot.longitude : NaN;
+        const dispatchRadius = parseRadiusKm(
+          outlet.deliveryRadiusKm,
+          parseRadiusKm((restaurant as { deliveryRadiusKm?: unknown }).deliveryRadiusKm, 5),
+        );
+        if (!dispatchOutletLoc || !Number.isFinite(custLat) || !Number.isFinite(custLng)) {
+          throw new Error("Outlet/customer coordinates are incomplete. Re-confirm the outlet location before dispatch.");
+        }
+        const dispatchDistance = haversineDistanceKm(custLat, custLng, dispatchOutletLoc.latitude, dispatchOutletLoc.longitude);
+        if (dispatchDistance > dispatchRadius) {
+          throw new Error(`Delivery address is ${dispatchDistance.toFixed(1)} km from the outlet (limit ${dispatchRadius} km).`);
+        }
+      }
+
       // 4. Provider serviceability: BOTH sides (spec section 6).
       const provider = getDeliveryProvider(order.restaurantId);
       try {
