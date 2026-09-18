@@ -1031,7 +1031,10 @@ export const adminRouter = router({
       // 5. Create delivery record BEFORE external API call (idempotency).
       // Status REQUESTED satisfies the deliveries CHECK constraint; the live
       // unique index on orderId backs the concurrent-dispatch guard.
-      const deliveryId = nanoid(18);
+      // Retry-safe: a previous FAILED/CANCELLED attempt reuses its row
+      // instead of dying on the unique index (the old code poisoned every
+      // retry after the first provider error).
+      let deliveryId = nanoid(18);
       try {
         await db.transaction(async (tx) => {
           await tx.insert(deliveries).values({
@@ -1050,9 +1053,30 @@ export const adminRouter = router({
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
         if (msg.includes("23505") || msg.toLowerCase().includes("duplicate") || msg.toLowerCase().includes("unique")) {
-          throw new Error("Delivery already dispatched or in progress for this order.");
+          const prior = (await db.select().from(deliveries).where(eq(deliveries.orderId, order.id)).limit(1))[0];
+          if (prior && ["FAILED", "CANCELLED"].includes(prior.status ?? "")) {
+            deliveryId = prior.id;
+            await db.transaction(async (tx) => {
+              await tx.update(deliveries).set({
+                status: "REQUESTED",
+                providerAwb: null,
+                providerDeliveryId: null,
+                trackingUrl: null,
+                providerPayload: null,
+              }).where(eq(deliveries.id, prior.id));
+              await tx.insert(deliveryStatusHistory).values({
+                id: nanoid(18),
+                deliveryId: prior.id,
+                status: "REQUESTED",
+                note: "Dispatch retried after previous failure — awaiting provider response.",
+              });
+            });
+          } else {
+            throw new Error("Delivery already dispatched or in progress for this order.");
+          }
+        } else {
+          throw err;
         }
-        throw err;
       }
 
       // 6. Build Unified parties + financials + items from authoritative rows.

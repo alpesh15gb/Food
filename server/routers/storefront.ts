@@ -125,7 +125,10 @@ export const storefrontRouter = router({
         throw new Error(`Please wait ${sendLimit.retryAfterSeconds} seconds before requesting a new code.`);
       }
       // --- IP-level rate limit for OTP sends (protects against SMS bombing) ---
-      const clientIp = (ctx.req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || "unknown";
+      // XFF is attacker-controlled: resolve via the trusted-proxy helper so
+      // header rotation can't bypass the limit.
+      const { getRateLimitClientIp } = await import("../security/rateLimit");
+      const clientIp = getRateLimitClientIp(ctx.req as never);
       const ipLimit = checkIpOtpLimit(clientIp);
       if (!ipLimit.allowed) {
         throw new Error(`Too many requests. Please try again in ${ipLimit.retryAfterSeconds} seconds.`);
@@ -156,7 +159,8 @@ export const storefrontRouter = router({
         throw new Error(`Too many verification attempts. Please try again in ${verifyLimit.retryAfterSeconds} seconds.`);
       }
       // --- Per-IP verify rate limit (protects brute-force across phones) ---
-      const clientIp = (ctx.req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || "unknown";
+      const { getRateLimitClientIp } = await import("../security/rateLimit");
+      const clientIp = getRateLimitClientIp(ctx.req as never);
       const { checkIpOtpLimit } = await import("../security/rateLimit");
       const ipVerifyLimit = checkIpOtpLimit(`verify:${clientIp}`);
       if (!ipVerifyLimit.allowed) {
@@ -457,12 +461,31 @@ export const storefrontRouter = router({
         };
       }
 
-      const provider = await createRazorpayPaymentOrder({
-        localOrderId: localOrder.id,
-        orderNumber: localOrder.orderNumber,
-        amountPaise: localOrder.totalPaise,
-        restaurantId: localOrder.restaurantId,
-      });
+      let provider;
+      try {
+        provider = await createRazorpayPaymentOrder({
+          localOrderId: localOrder.id,
+          orderNumber: localOrder.orderNumber,
+          amountPaise: localOrder.totalPaise,
+          restaurantId: localOrder.restaurantId,
+        });
+      } catch (err) {
+        // Compensate the local hold: without this the order strands at
+        // PENDING_PAYMENT with decremented stock and a coupon burn.
+        // CANCELLED restores stock and releases the burn everywhere.
+        try {
+          const { updateOrderStatus } = await import("../db");
+          await updateOrderStatus(
+            localOrder.id,
+            "CANCELLED",
+            undefined,
+            "Payment provider unreachable — hold released automatically."
+          );
+        } catch {
+          // Compensation is best-effort; the original error still surfaces.
+        }
+        throw new Error("Razorpay could not start this payment. Please try again.");
+      }
 
       return {
         orderId: localOrder.id,
@@ -572,8 +595,8 @@ export const storefrontRouter = router({
       signature: z.string().min(32).max(128),
     }))
     .mutation(async ({ ctx, input }) => {
-      const { checkIpOtpLimit } = await import("../security/rateLimit");
-      const clientIp = (ctx.req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || "unknown";
+      const { checkIpOtpLimit, getRateLimitClientIp } = await import("../security/rateLimit");
+      const clientIp = getRateLimitClientIp(ctx.req as never);
       const limit = checkIpOtpLimit(`payment:${clientIp}`);
       if (!limit.allowed) {
         throw new Error(`Too many payment attempts. Please try again in ${limit.retryAfterSeconds} seconds.`);
@@ -611,7 +634,10 @@ export const storefrontRouter = router({
       const { isValidShadowfaxCallbackSecret } = await import("../integrations/webhookVerify");
       const { persistShadowfaxWebhookEvent } = await import("../integrations/shadowfaxWebhook");
       const configuredSecret = process.env.SHADOWFAX_WEBHOOK_SECRET ?? "";
-      if (configuredSecret && !isValidShadowfaxCallbackSecret(input.secret, configuredSecret)) {
+      if (!configuredSecret) {
+        throw new Error("Webhook authentication not configured.");
+      }
+      if (!isValidShadowfaxCallbackSecret(input.secret, configuredSecret)) {
         throw new Error("Invalid webhook authentication.");
       }
       const update = normalizeShadowfaxWebhook(input.payload);

@@ -113,14 +113,29 @@ export async function persistShadowfaxWebhookEvent(
     const mapped = mapDeliveryStatusToOrderStatus(update.status);
     let orderAdvanced = false;
     if (mapped && order && (["DELIVERY_REQUESTED", "RIDER_ASSIGNED", "PICKED_UP", "OUT_FOR_DELIVERY"] as string[]).includes(order.status)) {
-      await tx.update(orders).set({ status: mapped as typeof order.status }).where(eq(orders.id, order.id));
-      await tx.insert(orderStatusHistory).values({
-        id: nanoid(18),
-        orderId: order.id,
-        status: mapped as typeof order.status,
-        note: `Delivery update: ${update.status}${update.riderName ? ` (rider ${update.riderName})` : ""}`,
-      });
-      orderAdvanced = true;
+      // Machine-gated like every other writer: out-of-order or duplicate
+      // provider events move the delivery row but must never corrupt the
+      // order timeline (e.g. DELIVERY_REQUESTED straight to DELIVERED, or a
+      // late PICKED_UP regressing OUT_FOR_DELIVERY). Rejected jumps still
+      // mark processed + notify below — only the order write is skipped.
+      const { validateTransition } = await import("../domain/orderStateMachine");
+      let machineAllows = false;
+      try {
+        validateTransition(order.status as never, mapped as never);
+        machineAllows = true;
+      } catch {
+        console.warn(`[Webhook] refusing order jump ${order.status} → ${mapped} (awb=${update.awbNumber}); delivery row still updated.`);
+      }
+      if (machineAllows) {
+        await tx.update(orders).set({ status: mapped as typeof order.status }).where(eq(orders.id, order.id));
+        await tx.insert(orderStatusHistory).values({
+          id: nanoid(18),
+          orderId: order.id,
+          status: mapped as typeof order.status,
+          note: `Delivery update: ${update.status}${update.riderName ? ` (rider ${update.riderName})` : ""}`,
+        });
+        orderAdvanced = true;
+      }
     }
 
     // Mirror updateOrderStatus() bookkeeping for webhook-driven delivery:

@@ -99,15 +99,19 @@ export function registerWebhookRoutes(app: Express) {
       if (!Buffer.isBuffer(raw)) return jsonError(res, 400, "Raw body required.");
 
       const configuredSecret = process.env.SHADOWFAX_WEBHOOK_SECRET ?? "";
-      if (configuredSecret) {
+      if (!configuredSecret) {
+        // Fail closed: an unauthenticated delivery endpoint lets anyone forge
+        // DELIVERED/rider events. Set SHADOWFAX_WEBHOOK_SECRET on the server.
+        console.error("[Webhook] SHADOWFAX_WEBHOOK_SECRET unset — rejecting Shadowfax callback.");
+        return res.status(401).json({ received: false, error: "Webhook authentication not configured." });
+      }
+      {
         const presented = (req.headers.authorization as string | undefined)
           ?? (req.query.secret as string | undefined);
         if (!isValidShadowfaxCallbackSecret(presented, configuredSecret)) {
           console.warn("[Webhook][metric=webhook_invalid_auth] shadowfax callback rejected (bad secret).");
           return res.status(401).json({ received: false, error: "Invalid webhook authentication." });
         }
-      } else {
-        console.warn("[Webhook] SHADOWFAX_WEBHOOK_SECRET unset — Shadowfax webhook authentication DISABLED. Set it in production.");
       }
 
       const parsed = parseRawJsonBody(raw);

@@ -222,6 +222,9 @@ export async function createRazorpayPaymentOrder(input: {
   }
 
   const providerOrder = (await response.json()) as RazorpayOrder;
+  if (!providerOrder?.id || providerOrder.amount !== input.amountPaise) {
+    throw new Error("Razorpay could not create a payment order. Please try again.");
+  }
   const db = await getDb();
   if (!db) throw new Error("The database connection is not available.");
 
@@ -294,14 +297,15 @@ export async function confirmPayment(input: {
   if (!order) return { success: false, error: "Order not found." };
 
   // Verify signature with tenant credentials — skip only when pre-verified by webhook HMAC check
+  const { keyId: tenantKeyId, keySecret: tenantKeySecret } = await credentials(order.restaurantId).catch(() => ({ keyId: "", keySecret: "" }));
   if (!input.preVerified) {
-    const { keySecret } = await credentials(order.restaurantId);
     if (
+      !tenantKeySecret ||
       !isValidRazorpaySignature({
         providerOrderId: input.providerOrderId,
         providerPaymentId: input.providerPaymentId,
         signature: input.signature,
-        keySecret,
+        keySecret: tenantKeySecret,
       })
     ) {
       return { success: false, error: "Payment signature verification failed." };
@@ -318,6 +322,22 @@ export async function confirmPayment(input: {
   if (storedPayment.amountPaise !== order.totalPaise) {
     console.warn(`[Razorpay] amount mismatch for order ${input.localOrderId}: payment ${storedPayment.amountPaise} vs order ${order.totalPaise}`);
     return { success: false, error: "Payment amount mismatch." };
+  }
+
+  // Authoritative captured-amount check: ask Razorpay what was actually
+  // captured for this payment id (status + amount + order binding). A
+  // mismatch fails closed; an unreachable API fails open with a warning
+  // (the HMAC signature above already proves authenticity — stranding a
+  // genuinely-paid customer on a provider blip is worse).
+  if (tenantKeyId && tenantKeySecret) {
+    const live = await fetchRazorpayPayment(tenantKeyId, tenantKeySecret, input.providerPaymentId, {
+      amountPaise: order.totalPaise,
+      providerOrderId: storedPayment.providerOrderId,
+    });
+    if (live === "mismatch") {
+      console.warn(`[Razorpay] live capture mismatch for order ${input.localOrderId}, payment ${input.providerPaymentId}`);
+      return { success: false, error: "Paid amount does not match this order." };
+    }
   }
 
   // --- Idempotency: Already confirmed by same payment ---
@@ -355,13 +375,32 @@ export async function confirmPayment(input: {
   }
 
   // --- Issue 18: Atomic transaction for payment confirmation ---
-  // SELECT FOR UPDATE locks the order row; rowCount check detects concurrent confirms.
+  // SELECT FOR UPDATE locks the order row, then state is RE-READ inside the
+  // lock: a concurrent cancel/reject or confirm between our pre-checks and
+  // this write must win, not be overwritten.
+  const ALREADY_CONFIRMED = "ALREADY_CONFIRMED_SAME_PAYMENT";
+  try {
   await db.transaction(async (tx) => {
     const locked = await tx.execute(sql`SELECT id, status, payment_status FROM orders WHERE id = ${input.localOrderId} FOR UPDATE`);
     const lockedRows = (locked as unknown as { rows?: unknown[] }).rows ?? [];
     // Drizzle pg returns rows; empty means the order vanished concurrently.
     if (Array.isArray(lockedRows) && lockedRows.length === 0) {
       throw new Error("Order was modified concurrently.");
+    }
+    const fresh = (await tx.select({
+      status: orders.status,
+      paymentStatus: orders.paymentStatus,
+    }).from(orders).where(eq(orders.id, input.localOrderId)).limit(1))[0];
+    if (!fresh) throw new Error("Order was modified concurrently.");
+    if (fresh.status === "CANCELLED" || fresh.status === "REJECTED") {
+      throw new Error("Order has been cancelled or rejected.");
+    }
+    if (fresh.paymentStatus === "PAID" && fresh.status !== "PENDING_PAYMENT") {
+      const same = (await tx.select({ id: payments.id }).from(payments).where(
+        and(eq(payments.orderId, input.localOrderId), eq(payments.providerPaymentId, input.providerPaymentId))
+      ).limit(1))[0];
+      if (same) throw new Error(ALREADY_CONFIRMED);
+      throw new Error("Order already confirmed with a different payment.");
     }
     // Update payment record with rowCount check
     const paid = await tx
@@ -401,8 +440,49 @@ export async function confirmPayment(input: {
       });
     }
   });
+  } catch (err) {
+    if (err instanceof Error && err.message === ALREADY_CONFIRMED) {
+      return { success: true, alreadyConfirmed: true };
+    }
+    return { success: false, error: err instanceof Error ? err.message : "Payment confirmation failed." };
+  }
 
   return { success: true };
+}
+
+/**
+ * Fetch the live payment from Razorpay and bind it to this order.
+ * Returns "match" | "mismatch" | "unknown" (API unreachable — caller decides).
+ */
+async function fetchRazorpayPayment(
+  keyId: string,
+  keySecret: string,
+  providerPaymentId: string,
+  expected: { amountPaise: number; providerOrderId: string | null }
+): Promise<"match" | "mismatch" | "unknown"> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 10000);
+  try {
+    const auth = Buffer.from(`${keyId}:${keySecret}`).toString("base64");
+    const res = await fetch(
+      `https://api.razorpay.com/v1/payments/${encodeURIComponent(providerPaymentId)}`,
+      { headers: { Authorization: `Basic ${auth}` }, signal: controller.signal }
+    );
+    if (res.status === 401 || res.status === 403) return "unknown"; // creds wrong — signature path already decided
+    if (res.status === 404) return "mismatch"; // no such payment
+    if (!res.ok) return "unknown";
+    const p = (await res.json()) as {
+      id?: string; amount?: number; currency?: string; status?: string; order_id?: string;
+    };
+    if (p.status !== "captured") return "mismatch"; // only settled money confirms (auto-capture default)
+    if (typeof p.amount !== "number" || p.amount !== expected.amountPaise) return "mismatch";
+    if (expected.providerOrderId && p.order_id && p.order_id !== expected.providerOrderId) return "mismatch";
+    return "match";
+  } catch {
+    return "unknown";
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /**
@@ -755,15 +835,40 @@ export async function initiateRefund(input: {
     throw new Error("Refund amount must be greater than zero.");
   }
 
-  const alreadyRefundedRaw = (await db.select({ total: sql<number>`COALESCE(SUM(${refunds.amountPaise}), 0)` })
-    .from(refunds)
-    .where(and(eq(refunds.paymentId, input.paymentId), sql`${refunds.status} != 'FAILED'`)))[0]?.total ?? 0;
-  const alreadyRefunded = Number(alreadyRefundedRaw);
-
-  if (input.amountPaise + alreadyRefunded > payment.amountPaise) {
-    const remaining = payment.amountPaise - alreadyRefunded;
-    throw new Error(`Refund amount exceeds remaining refundable amount. Maximum refundable: ₹${remaining / 100}.`);
-  }
+  // Serialize concurrent refunds: lock the payment row, re-check status +
+  // remaining amount, and pre-insert a PENDING reservation (counted by the
+  // SUM) BEFORE calling Razorpay. Two racing callers can't both pass.
+  const reservationId = nanoid(18);
+  let alreadyRefunded = 0;
+  await db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT id FROM payments WHERE id = ${input.paymentId} FOR UPDATE`);
+    const locked = (await tx.select().from(payments).where(eq(payments.id, input.paymentId)).limit(1))[0];
+    if (!locked || !locked.providerPaymentId) {
+      throw new Error("Payment not found or not yet captured.");
+    }
+    if (locked.status !== "CAPTURED") {
+      throw new Error(`Cannot refund a payment with status "${locked.status}". Only captured payments can be refunded.`);
+    }
+    const sumRaw = (await tx.select({ total: sql<number>`COALESCE(SUM(${refunds.amountPaise}), 0)` })
+      .from(refunds)
+      .where(and(eq(refunds.paymentId, input.paymentId), sql`${refunds.status} != 'FAILED'`)))[0]?.total ?? 0;
+    alreadyRefunded = Number(sumRaw);
+    if (input.amountPaise + alreadyRefunded > locked.amountPaise) {
+      const remaining = locked.amountPaise - alreadyRefunded;
+      throw new Error(`Refund amount exceeds remaining refundable amount. Maximum refundable: ₹${remaining / 100}.`);
+    }
+    await tx.insert(refunds).values({
+      id: reservationId,
+      paymentId: input.paymentId,
+      orderId: input.orderId,
+      providerRefundId: null,
+      amountPaise: input.amountPaise,
+      reason: input.reason,
+      status: "PENDING",
+      initiatedBy: input.initiatedBy,
+      providerPayload: { reserved: true },
+    });
+  });
 
   const auth = Buffer.from(`${keyId}:${keySecret}`).toString("base64");
   const response = await fetch(
@@ -779,6 +884,8 @@ export async function initiateRefund(input: {
   );
 
   if (!response.ok) {
+    // Release the reservation so it neither blocks nor counts.
+    await db.update(refunds).set({ status: "FAILED" }).where(eq(refunds.id, reservationId)).catch(() => undefined);
     const errorText = await response.text().catch(() => response.statusText);
     throw new Error(`Razorpay refund failed: ${errorText}`);
   }
@@ -787,17 +894,10 @@ export async function initiateRefund(input: {
 
   const isFullRefund = input.amountPaise + alreadyRefunded >= payment.amountPaise;
   await db.transaction(async (tx) => {
-    await tx.insert(refunds).values({
-      id: nanoid(18),
-      paymentId: input.paymentId,
-      orderId: input.orderId,
+    await tx.update(refunds).set({
       providerRefundId: refundData.id,
-      amountPaise: input.amountPaise,
-      reason: input.reason,
-      status: "PENDING",
-      initiatedBy: input.initiatedBy,
       providerPayload: refundData,
-    });
+    }).where(eq(refunds.id, reservationId));
 
     // P0: partial refunds must not flip orders.status; only paymentStatus.
     // Full refunds are machine-gated (validateTransition) before touching orders.status.
