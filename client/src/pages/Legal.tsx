@@ -1,6 +1,7 @@
 /** Legal + trust pages (MP-005, payment-gateway compliance).
  * Static, no PII beyond the business's own published support contacts.
  * Refund wording matches the actual order state machine. */
+import { useEffect } from "react";
 import { Link } from "wouter";
 import { ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -21,6 +22,13 @@ export const BUSINESS = {
 } as const;
 
 function Shell({ title, updated, children }: { title: string; updated: string; children: React.ReactNode }) {
+  useEffect(() => {
+    const prev = document.title;
+    document.title = `${title} — MunchPro`;
+    return () => {
+      document.title = prev;
+    };
+  }, [title]);
   return (
     <main className="min-h-screen bg-[#fffaf3] text-[#382719]">
       <header className="mx-auto flex max-w-3xl items-center gap-3 px-4 py-5 sm:px-6">
