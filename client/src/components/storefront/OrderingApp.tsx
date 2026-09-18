@@ -30,6 +30,7 @@ import CustomizationDrawer from "./CustomizationDrawer";
 import AuthDrawer from "./AuthDrawer";
 import CheckoutScreen from "./CheckoutScreen";
 import TrackingScreen from "./TrackingScreen";
+import StorefrontSeo from "./StorefrontSeo";
 
 export default function OrderingApp({ slug, trackingNumber }: { slug?: string; trackingNumber?: string }) {
   const [, navigate] = useLocation();
@@ -523,9 +524,23 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
   const trackingOrder =
     screen === "tracking" ? (trackingNumber || confirmationOrder) : confirmationOrder;
 
+  const seo = (
+    <StorefrontSeo
+      slug={storefrontSlug}
+      name={restaurant?.name ?? null}
+      description={restaurant?.description}
+      cuisines={restaurant?.cuisines ?? []}
+      city={storefront?.outlet?.city}
+      address={restaurant?.address}
+      phone={restaurant?.contactPhone}
+      image={restaurant?.bannerImage || restaurant?.logo}
+    />
+  );
+
   if (screen === "confirmation" || screen === "tracking") {
     return (
       <div className="storefront">
+        {seo}
         <TrackingScreen
           orderNumber={trackingOrder}
           trackingToken={confirmationToken}
@@ -540,6 +555,7 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
   if (["cart", "checkout"].includes(screen)) {
     return (
       <div className="storefront">
+        {seo}
         <CheckoutScreen
           screen={screen}
           cart={cart}
@@ -563,6 +579,7 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
   // --- Menu screen ---
   return (
     <div className="storefront">
+      {seo}
       <main className="min-h-screen pb-28 lg:pb-16" style={{ background: "var(--sf-bg)" }}>
         {/* Header */}
         <TopBar
