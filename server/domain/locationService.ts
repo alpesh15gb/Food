@@ -246,7 +246,7 @@ export async function checkServiceability(
   restaurantId: string,
   getOutletsFn: (restaurantId: string) => Promise<OutletCandidate[]>,
   shadowfaxCheckFn?: (pickup: { lat: number; lng: number }, drop: { lat: number; lng: number }) => Promise<{ serviceable: boolean; estimatedMinutes?: number }>,
-  opts?: { defaultRadiusKm?: number }
+  opts?: { defaultRadiusKm?: number; providerAdvisory?: boolean }
 ): Promise<ServiceabilityResult> {
   // Layer 1: Validate destination coordinates
   if (!isValidLatitude(customerLat) || !isValidLongitude(customerLng)) {
@@ -302,6 +302,24 @@ export async function checkServiceability(
           estimatedMinutes = providerResult.estimatedMinutes;
         }
         if (!providerServiceable) {
+          // Staging coverage data is routinely narrower than production: in
+          // advisory mode a provider "no" downgrades to a warning (radius
+          // still gates) instead of blocking checkout. Dispatch itself still
+          // attempts and surfaces the provider's real verdict.
+          if (opts?.providerAdvisory) {
+            console.warn(`[serviceability] provider reports unserviceable but advisory mode: proceeding radius-only`);
+            return {
+              serviceable: true,
+              outletId: selection.outlet.id,
+              outletName: selection.outlet.name,
+              distanceKm: Math.round(selection.distanceKm * 100) / 100,
+              estimatedDeliveryMinutes: estimatedMinutes,
+              provider: "shadowfax",
+              localServiceable: true,
+              providerServiceable: false,
+              providerVerification: "VERIFIED",
+            };
+          }
           return {
             serviceable: false,
             reason: "SHADOWFAX_NOT_SERVICEABLE",

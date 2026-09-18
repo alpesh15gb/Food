@@ -362,8 +362,14 @@ export const storefrontRouter = router({
       // selection runs first; the provider then verifies outlet pincode
       // (seller_pickup) + customer pincode (customer_delivery) when both are
       // known and the provider is enabled. Otherwise radius-only (NOT_CHECKED).
-      const { getDeliveryProvider, isDeliveryProviderConfigured } = await import("../integrations/shadowfax");
+      const { getDeliveryProvider, isDeliveryProviderConfigured, resolveShadowfaxConfig } = await import("../integrations/shadowfax");
       const providerConfigured = await isDeliveryProviderConfigured(restaurant.id).catch(() => false);
+      // Staging coverage data is narrower than production: there the pair
+      // check is advisory (radius gates, dispatch gives the real verdict).
+      // Production stays strict — an explicit provider "no" blocks checkout.
+      const providerAdvisory = providerConfigured
+        ? (await resolveShadowfaxConfig(restaurant.id).catch(() => null))?.environment === "staging"
+        : false;
       // Pre-select the nearest outlet so the provider pair-check can use its
       // pincode (radius gate still runs authoritatively inside the service).
       let outletPincode: string | null = null;
@@ -406,7 +412,7 @@ export const storefrontRouter = router({
               }
             }
           : undefined,
-        { defaultRadiusKm: effectiveDefaultRadiusKm },
+        { defaultRadiusKm: effectiveDefaultRadiusKm, providerAdvisory },
       );
 
       const diagSelection = (() => {
