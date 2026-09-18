@@ -78,11 +78,11 @@ export default function StaffPanel({ restaurantId }: { restaurantId: string }) {
       </div>
 
       {!showInvite ? (
-        <Button onClick={() => setShowInvite(true)} className="bg-gray-900 hover:bg-gray-800 text-white gap-2">
+        <Button onClick={() => setShowInvite(true)} className="h-11 min-h-[44px] cursor-pointer rounded-xl bg-[#c84630] font-extrabold text-white transition-colors hover:bg-[#b03a28] gap-2">
           <Plus className="w-4 h-4" /> Invite Member
         </Button>
       ) : (
-        <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-3">
+        <div className="bg-white rounded-2xl border border-gray-200 p-4 space-y-3">
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1">
               <Label>Email</Label>
@@ -96,54 +96,58 @@ export default function StaffPanel({ restaurantId }: { restaurantId: string }) {
             </div>
           </div>
           <div className="flex gap-2 pt-2">
-            <Button onClick={() => { if (!inviteForm.email) { toast.error("Email required"); return; } inviteMember.mutate({ restaurantId, email: inviteForm.email, role: inviteForm.role }); }} disabled={inviteMember.isPending} className="bg-gray-900 hover:bg-gray-800 text-white">
+            <Button onClick={() => { if (!inviteForm.email) { toast.error("Email required"); return; } inviteMember.mutate({ restaurantId, email: inviteForm.email, role: inviteForm.role }); }} disabled={inviteMember.isPending} className="h-11 min-h-[44px] cursor-pointer rounded-xl bg-[#c84630] font-extrabold text-white transition-colors hover:bg-[#b03a28] disabled:opacity-50">
               {inviteMember.isPending ? <LoaderCircle className="w-4 h-4 animate-spin mr-1" /> : null} Send Invite
             </Button>
-            <Button variant="outline" onClick={() => setShowInvite(false)}>Cancel</Button>
+            <Button variant="outline" onClick={() => setShowInvite(false)} className="h-11 min-h-[44px] cursor-pointer rounded-xl transition-colors">Cancel</Button>
           </div>
         </div>
       )}
 
       {members.isLoading ? (
-        <div className="bg-white rounded-xl border border-gray-200 p-8 text-center text-sm font-bold text-gray-500">
+        <div className="bg-white rounded-2xl border border-gray-200 p-8 text-center text-sm font-bold text-gray-500">
           <LoaderCircle className="w-5 h-5 animate-spin mx-auto mb-2" />
           Loading team members...
         </div>
       ) : members.isError ? (
-        <div className="bg-red-50 rounded-xl border border-red-200 p-6 text-center">
+        <div className="bg-red-50 rounded-2xl border border-red-200 p-6 text-center">
           <p className="text-sm font-bold text-red-700">Could not load team members.</p>
-          <Button size="sm" variant="outline" className="mt-3" onClick={() => members.refetch()}>
+          <Button size="sm" variant="outline" className="mt-3 h-11 min-h-[44px] cursor-pointer rounded-xl transition-colors" onClick={() => members.refetch()}>
             Retry
           </Button>
         </div>
       ) : (
-      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-        <div className="overflow-x-auto">
+      <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
+        <div className="max-h-[70vh] overflow-auto">
         <table className="w-full min-w-[640px] text-sm">
-          <thead className="bg-gray-50 text-left">
+          <thead className="sticky top-0 bg-gray-50 text-left">
             <tr>
-              <th className="px-4 py-2.5 font-semibold text-gray-600">Name</th>
-              <th className="px-4 py-2.5 font-semibold text-gray-600">Email</th>
-              <th className="px-4 py-2.5 font-semibold text-gray-600">Role</th>
-              <th className="px-4 py-2.5 font-semibold text-gray-600">Status</th>
-              <th className="px-4 py-2.5 font-semibold text-gray-600">Joined</th>
+              <th className="px-4 py-2.5 text-[10px] font-extrabold uppercase tracking-wide text-gray-500">Name</th>
+              <th className="px-4 py-2.5 text-[10px] font-extrabold uppercase tracking-wide text-gray-500">Email</th>
+              <th className="px-4 py-2.5 text-[10px] font-extrabold uppercase tracking-wide text-gray-500">Role</th>
+              <th className="px-4 py-2.5 text-[10px] font-extrabold uppercase tracking-wide text-gray-500">Status</th>
+              <th className="px-4 py-2.5 text-[10px] font-extrabold uppercase tracking-wide text-gray-500">Joined</th>
               <th className="px-4 py-2.5"></th>
             </tr>
           </thead>
           <tbody>
             {list.length === 0 ? (
-              <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-400">
+              <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-500">
                 <Users className="w-8 h-8 mx-auto mb-2 opacity-40" />
-                No team members yet
+                <p className="text-sm font-extrabold text-gray-900">No team members yet</p>
+                <p className="mt-1 text-xs text-gray-500">Invite your first team member to get started.</p>
+                <Button onClick={() => setShowInvite(true)} className="mt-4 h-11 min-h-[44px] cursor-pointer rounded-xl bg-[#c84630] font-extrabold text-white transition-colors hover:bg-[#b03a28]">
+                  <Plus className="w-4 h-4 mr-1" /> Invite Member
+                </Button>
               </td></tr>
             ) : list.map(m => (
-              <tr key={m.id} className={`border-t border-gray-100 ${!m.isActive ? "opacity-50" : ""}`}>
+              <tr key={m.id} className={`border-t border-gray-100 transition-colors hover:bg-gray-50 ${!m.isActive ? "opacity-50" : ""}`}>
                 <td className="px-4 py-2.5 font-medium">{m.userName ?? "—"}</td>
                 <td className="px-4 py-2.5">{m.userEmail ?? "—"}</td>
                 <td className="px-4 py-2.5">
                   <select
                     aria-label={`Change role for ${m.userEmail ?? m.userName ?? "team member"}`}
-                    className="text-xs font-bold px-2 py-1 rounded border border-gray-200 bg-transparent disabled:opacity-50"
+                    className="cursor-pointer text-xs font-bold px-2 py-1 rounded border border-gray-200 bg-transparent transition-colors disabled:opacity-50"
                     value={m.role}
                     disabled={updateRole.isPending}
                     onChange={e => handleRoleChange(m, e.target.value as RoleValue)}
@@ -152,14 +156,14 @@ export default function StaffPanel({ restaurantId }: { restaurantId: string }) {
                   </select>
                 </td>
                 <td className="px-4 py-2.5">
-                  <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${m.isActive ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-600"}`}>
+                  <span className={`rounded-full px-2.5 py-1 text-[10px] font-extrabold uppercase tracking-wide ${m.isActive ? "bg-green-50 text-green-700" : "bg-gray-100 text-gray-600"}`}>
                     {m.isActive ? "Active" : "Inactive"}
                   </span>
                 </td>
-                <td className="px-4 py-2.5 text-gray-600">{new Date(m.joinedAt).toLocaleDateString()}</td>
+                <td className="px-4 py-2.5 tabular-nums text-gray-500">{new Date(m.joinedAt).toLocaleDateString()}</td>
                 <td className="px-4 py-2.5 text-right">
                   {m.isActive && (
-                    <Button size="sm" variant="ghost" aria-label={`Deactivate ${m.userEmail ?? m.userName ?? "team member"}`} className="text-red-500 hover:text-red-700 hover:bg-red-50 h-7 min-h-[44px] min-w-[44px] px-2" disabled={deactivate.isPending} onClick={() => handleDeactivate(m)}>
+                    <Button size="sm" variant="ghost" aria-label={`Deactivate ${m.userEmail ?? m.userName ?? "team member"}`} className="cursor-pointer text-red-600 transition-colors hover:text-red-700 hover:bg-red-50 h-7 min-h-[44px] min-w-[44px] px-2 disabled:opacity-50" disabled={deactivate.isPending} onClick={() => handleDeactivate(m)}>
                       <UserMinus className="w-3 h-3" />
                     </Button>
                   )}
@@ -173,7 +177,7 @@ export default function StaffPanel({ restaurantId }: { restaurantId: string }) {
       )}
 
       {/* Role Reference */}
-      <div className="bg-white rounded-xl border border-gray-200 p-4">
+      <div className="bg-white rounded-2xl border border-gray-200 p-4">
         <h3 className="font-semibold text-gray-900 mb-3 flex items-center gap-2"><Shield className="w-4 h-4" /> Role Permissions</h3>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           {ROLES.map(r => (

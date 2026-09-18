@@ -131,7 +131,7 @@ export default function CustomizationDrawer({
               </div>
               <button
                 onClick={onClose}
-                className="grid h-9 w-9 shrink-0 place-items-center rounded-full hover:bg-white/10"
+                className="grid h-9 min-h-[44px] w-9 min-w-[44px] shrink-0 cursor-pointer touch-manipulation place-items-center rounded-full transition-colors duration-200 hover:bg-white/10 active:scale-95 [-webkit-tap-highlight-color:transparent]"
                 style={{ color: "var(--sf-text-secondary)" }}
               >
                 <X className="h-4 w-4" />
@@ -155,7 +155,7 @@ export default function CustomizationDrawer({
                       <button
                         key={v.id}
                         onClick={() => onVariant(active ? null : v.id)}
-                        className="flex items-center justify-between rounded-[var(--sf-radius-btn)] border px-3.5 py-3 text-left text-sm font-semibold transition-colors"
+                        className="flex min-w-0 cursor-pointer touch-manipulation items-center justify-between gap-3 rounded-[var(--sf-radius-btn)] border px-3.5 py-3 text-left text-sm font-semibold transition-colors duration-200 active:scale-[0.99] [-webkit-tap-highlight-color:transparent]"
                         style={{
                           borderColor: active
                             ? "var(--sf-primary)"
@@ -168,7 +168,7 @@ export default function CustomizationDrawer({
                             : "var(--sf-text-secondary)",
                         }}
                       >
-                        <span className="flex items-center gap-3">
+                        <span className="flex min-w-0 items-center gap-3">
                           <span
                             className="grid h-5 w-5 shrink-0 place-items-center rounded-full border"
                             style={{
@@ -184,10 +184,10 @@ export default function CustomizationDrawer({
                               />
                             )}
                           </span>
-                          {v.name}
+                          <span className="line-clamp-2 min-w-0">{v.name}</span>
                         </span>
                         <span
-                          className="text-xs"
+                          className="shrink-0 text-xs tabular-nums"
                           style={{ color: "var(--sf-text-muted)" }}
                         >
                           {v.pricePaise > 0
@@ -226,7 +226,7 @@ export default function CustomizationDrawer({
                       <button
                         key={opt.id}
                         onClick={() => toggleOption(group, opt.id)}
-                        className="flex items-center justify-between rounded-[var(--sf-radius-btn)] border px-3.5 py-3 text-left text-sm font-semibold transition-colors"
+                        className="flex min-w-0 cursor-pointer touch-manipulation items-center justify-between gap-3 rounded-[var(--sf-radius-btn)] border px-3.5 py-3 text-left text-sm font-semibold transition-colors duration-200 active:scale-[0.99] [-webkit-tap-highlight-color:transparent]"
                         style={{
                           borderColor: active
                             ? "var(--sf-primary)"
@@ -239,9 +239,9 @@ export default function CustomizationDrawer({
                             : "var(--sf-text-secondary)",
                         }}
                       >
-                        <span className="flex items-center gap-3">
+                        <span className="flex min-w-0 items-center gap-3">
                           <span
-                            className={`grid h-5 w-5 place-items-center border ${
+                            className={`grid h-5 w-5 shrink-0 place-items-center border ${
                               group.selectionType === "single"
                                 ? "rounded-full"
                                 : "rounded-[5px]"
@@ -266,10 +266,10 @@ export default function CustomizationDrawer({
                                 <Check className="h-3.5 w-3.5 text-white" />
                               ))}
                           </span>
-                          {opt.name}
+                          <span className="line-clamp-2 min-w-0">{opt.name}</span>
                         </span>
                         <span
-                          className="text-xs"
+                          className="shrink-0 text-xs tabular-nums"
                           style={{ color: "var(--sf-text-muted)" }}
                         >
                           {opt.pricePaise > 0
@@ -340,7 +340,7 @@ export default function CustomizationDrawer({
           <Button
             onClick={onAdd}
             disabled={missingRequired.length > 0}
-            className="h-13 w-full rounded-[var(--sf-radius-btn)] text-sm font-extrabold text-white"
+            className="h-13 w-full cursor-pointer touch-manipulation rounded-[var(--sf-radius-btn)] text-sm font-extrabold tabular-nums text-white transition-all duration-200 hover:brightness-110 active:scale-95 disabled:cursor-not-allowed [-webkit-tap-highlight-color:transparent]"
             style={{ background: "var(--sf-primary)" }}
           >
             Add item{" "}

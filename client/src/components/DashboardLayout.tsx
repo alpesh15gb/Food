@@ -166,7 +166,7 @@ export function AdminError({ message, onRetry }: { message: string; onRetry?: ()
           <Button
             onClick={onRetry}
             variant="outline"
-            className="mt-4 h-10 rounded-xl border-gray-200 bg-white text-xs font-extrabold text-gray-700"
+            className="mt-4 h-11 min-h-[44px] cursor-pointer rounded-xl border-gray-200 bg-white text-xs font-extrabold text-gray-700 transition-colors hover:bg-gray-50"
           >
             <RefreshCw className="mr-2 h-3.5 w-3.5" aria-hidden />
             Retry
@@ -225,7 +225,7 @@ export default function DashboardLayout({
 
   if (!user) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
+      <div className="flex items-center justify-center min-h-dvh bg-gray-50">
         <div className="flex flex-col items-center gap-8 p-8 max-w-md w-full">
           <div className="flex flex-col items-center gap-6">
             <h1 className="text-2xl font-semibold tracking-tight text-center">
@@ -328,7 +328,7 @@ function DashboardLayoutContent({
             <div className="flex items-center gap-3 px-2 transition-all w-full">
               <button
                 onClick={toggleSidebar}
-                className="h-8 w-8 flex items-center justify-center hover:bg-accent rounded-lg transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-ring shrink-0"
+                className="h-8 w-8 flex cursor-pointer items-center justify-center hover:bg-accent rounded-lg transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-ring shrink-0"
                 aria-label="Toggle navigation"
               >
                 <PanelLeft className="h-4 w-4 text-muted-foreground" />
@@ -348,7 +348,7 @@ function DashboardLayoutContent({
                       isActive={isActive}
                       onClick={() => setLocation(item.path)}
                       tooltip={item.label}
-                      className={`h-11 rounded-xl transition-all font-semibold ${isActive ? "bg-red-50 text-[#c84630] hover:bg-red-50" : "text-gray-600 hover:bg-gray-50"}`}
+                      className={`h-11 cursor-pointer rounded-xl transition-colors font-semibold ${isActive ? "bg-red-50 text-[#c84630] hover:bg-red-50" : "text-gray-600 hover:bg-gray-50"}`}
                     >
                       <item.icon
                         className={`h-4 w-4 ${isActive ? "text-primary" : ""}`}
@@ -364,7 +364,7 @@ function DashboardLayoutContent({
           <SidebarFooter className="p-3">
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <button className="flex items-center gap-3 rounded-lg px-1 py-1 hover:bg-accent/50 transition-colors w-full text-left group-data-[collapsible=icon]:justify-center focus:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                <button className="flex cursor-pointer items-center gap-3 rounded-xl border border-transparent px-1 py-1 hover:bg-gray-50 transition-colors w-full text-left group-data-[collapsible=icon]:justify-center focus:outline-none focus-visible:ring-2 focus-visible:ring-ring">
                   <Avatar className="h-9 w-9 border shrink-0">
                     <AvatarFallback className="text-xs font-medium">
                       {user?.name?.charAt(0).toUpperCase()}
@@ -402,7 +402,7 @@ function DashboardLayoutContent({
         />
       </div>
 
-      <SidebarInset className="min-h-screen bg-[#F8F9FA]">
+      <SidebarInset className="min-h-dvh bg-gray-50">
         {isMobile && (
           <div className="sticky top-0 z-40 flex h-16 items-center justify-between border-b border-gray-200 bg-white/95 px-4 backdrop-blur">
             <div className="min-w-0"><p className="text-[9px] font-extrabold uppercase tracking-[0.16em] text-gray-500">Kitchen Admin</p><span className="font-bold block truncate text-xl text-gray-900">{activeMenuItem?.label ?? "Operations"}</span></div>
@@ -410,7 +410,7 @@ function DashboardLayoutContent({
           </div>
         )}
         <main className="flex-1 p-0 pb-24 md:p-0 md:pb-0">{children}</main>
-        {isMobile && <nav aria-label="Primary operations navigation" className="fixed inset-x-0 bottom-0 z-40 border-t border-gray-200 bg-white/95 px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur"><div className="mx-auto grid max-w-lg grid-cols-4 gap-1">{mobilePrimaryItems.map(item => { const active = location === item.path; return <button key={item.path} onClick={() => setLocation(item.path)} className={`flex min-h-14 flex-col items-center justify-center gap-1 rounded-xl text-[10px] font-extrabold transition-colors ${active ? "bg-red-50 text-[#c84630]" : "text-gray-500"}`}><item.icon className="h-4 w-4" />{item.label}</button>; })}<button onClick={toggleSidebar} className="flex min-h-14 flex-col items-center justify-center gap-1 rounded-xl text-[10px] font-extrabold text-gray-500"><PanelLeft className="h-4 w-4" />More</button></div></nav>}
+        {isMobile && <nav aria-label="Primary operations navigation" className="fixed inset-x-0 bottom-0 z-40 border-t border-gray-200 bg-white/95 px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur"><div className="mx-auto grid max-w-lg grid-cols-4 gap-1">{mobilePrimaryItems.map(item => { const active = location === item.path; return <button key={item.path} onClick={() => setLocation(item.path)} className={`flex min-h-14 cursor-pointer flex-col items-center justify-center gap-1 rounded-xl text-[10px] font-extrabold uppercase tracking-wide transition-colors ${active ? "bg-red-50 text-[#c84630]" : "text-gray-500 hover:bg-gray-50"}`}><item.icon className="h-4 w-4" />{item.label}</button>; })}<button onClick={toggleSidebar} className="flex min-h-14 cursor-pointer flex-col items-center justify-center gap-1 rounded-xl text-[10px] font-extrabold uppercase tracking-wide text-gray-500 transition-colors hover:bg-gray-50"><PanelLeft className="h-4 w-4" />More</button></div></nav>}
       </SidebarInset>
     </>
   );

@@ -1,7 +1,7 @@
 export default function MenuSkeleton() {
   return (
     <div className="storefront">
-      <main className="sf-hero-bg min-h-screen" style={{ background: "var(--sf-bg)" }}>
+      <main className="sf-hero-bg min-h-dvh" style={{ background: "var(--sf-bg)" }}>
         {/* Nav skeleton */}
         <div className="mx-auto flex h-16 max-w-[1440px] items-center justify-between px-4 sm:px-6 lg:px-10">
           <div className="flex items-center gap-2.5">

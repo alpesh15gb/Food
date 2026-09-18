@@ -28,9 +28,9 @@ import OutletsPanel from "@/pages/OutletsPanel";
 import LoyaltyPanel from "@/pages/LoyaltyPanel";
 import ComboBuilderPanel from "@/pages/ComboBuilderPanel";
 import MenuImportPanel from "@/components/MenuImportPanel";
+import { formatINR } from "@/lib/types";
 
-const money = (paise: number) =>
-  `₹${(paise / 100).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
+const money = (paise: number) => formatINR(paise / 100);
 
 const statusLabel: Record<string, string> = {
   PENDING_PAYMENT: "Awaiting payment",
@@ -120,12 +120,12 @@ export default function Admin() {
   }, [restaurantSlug, restaurants.data, restaurants.isSuccess, section, setLocation]);
 
   if (loading)
-    return <div className="min-h-screen bg-[#F8F9FA]" />;
+    return <div className="min-h-dvh bg-gray-50" />;
   if (!user || user.role !== "admin") return <AdminAccess />;
 
   // Still resolving slug — show loading
   if (!restaurantSlug) {
-    if (restaurants.isLoading) return <div className="min-h-screen bg-[#F8F9FA]" />;
+    if (restaurants.isLoading) return <div className="min-h-dvh bg-gray-50" />;
     return (
       <DashboardLayout>
         <main className="grid min-h-[70vh] place-items-center">
@@ -174,7 +174,7 @@ function AdminAccess() {
   });
 
   return (
-    <main className="grid min-h-screen place-items-center bg-[#F8F9FA] p-5">
+    <main className="grid min-h-dvh place-items-center bg-gray-50 p-5">
       <section className="max-w-md rounded-[2rem] bg-white p-8 text-center shadow-xl shadow-gray-200/10">
         <span className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-gray-50 text-[#c84630]">
           <LockKeyhole className="h-6 w-6" />
@@ -217,7 +217,7 @@ function AdminAccess() {
             <Button
               type="submit"
               disabled={localLogin.isPending || !token.trim()}
-              className="mt-3 h-11 w-full rounded-xl bg-[#c84630] font-extrabold hover:bg-[#b03a28]"
+              className="mt-3 h-11 min-h-[44px] w-full rounded-xl bg-[#c84630] font-extrabold transition-colors hover:bg-[#b03a28] disabled:opacity-50"
             >
               {localLogin.isPending ? "Checking access..." : "Open operations"}
             </Button>
@@ -267,7 +267,7 @@ function AdminAccess() {
             <Button
               type="submit"
               disabled={emailLogin.isPending || !email.trim() || !password}
-              className="mt-3 h-11 w-full rounded-xl bg-[#c84630] font-extrabold hover:bg-[#b03a28]"
+              className="mt-3 h-11 min-h-[44px] w-full rounded-xl bg-[#c84630] font-extrabold transition-colors hover:bg-[#b03a28] disabled:opacity-50"
             >
               {emailLogin.isPending ? "Signing in..." : "Sign in"}
             </Button>
@@ -287,15 +287,23 @@ function MenuImportWorkspace({ slug }: { slug?: string }) {
   if (dashboard.isLoading) return <AdminLoading />;
   if (dashboard.isError || !dashboard.data)
     return (
-      <main className="grid min-h-[70vh] place-items-center">
-        <p className="rounded-xl bg-red-50 px-4 py-3 text-sm font-bold text-red-700">
-          We couldn't load restaurant configuration for this import.
-        </p>
+      <main className="grid min-h-[70vh] place-items-center p-6">
+        <div className="w-full max-w-md rounded-2xl border border-red-200 bg-red-50 p-6 text-center">
+          <p className="text-sm font-bold leading-relaxed text-red-700">
+            We couldn't load restaurant configuration for this import.
+          </p>
+          <button
+            onClick={() => dashboard.refetch()}
+            className="mt-4 h-11 min-h-[44px] cursor-pointer rounded-xl border border-gray-200 bg-white px-4 text-xs font-extrabold text-gray-700 transition-colors hover:bg-gray-50"
+          >
+            Retry
+          </button>
+        </div>
       </main>
     );
 
   return (
-    <div className="min-h-screen bg-[#F8F9FA] p-5 text-gray-900 lg:p-8">
+    <div className="min-h-dvh bg-gray-50 p-5 text-gray-900 lg:p-8">
       <div className="mx-auto max-w-7xl">
         <div className="mb-6 flex items-center gap-3">
           <span className="grid h-10 w-10 place-items-center rounded-xl bg-gray-50 text-[#c84630]">
@@ -419,10 +427,18 @@ function AdminWorkspace({ section, slug }: { section: string; slug?: string }) {
   if (dashboard.isLoading) return <AdminLoading />;
   if (dashboard.isError || !dashboard.data)
     return (
-      <main className="grid min-h-[70vh] place-items-center">
-        <p className="rounded-xl bg-red-50 px-4 py-3 text-sm font-bold text-red-700">
-          We couldn't load the restaurant workspace. Please retry.
-        </p>
+      <main className="grid min-h-[70vh] place-items-center p-6">
+        <div className="w-full max-w-md rounded-2xl border border-red-200 bg-red-50 p-6 text-center">
+          <p className="text-sm font-bold leading-relaxed text-red-700">
+            We couldn't load the restaurant workspace. Please retry.
+          </p>
+          <button
+            onClick={() => dashboard.refetch()}
+            className="mt-4 h-11 min-h-[44px] cursor-pointer rounded-xl border border-gray-200 bg-white px-4 text-xs font-extrabold text-gray-700 transition-colors hover:bg-gray-50"
+          >
+            Retry
+          </button>
+        </div>
       </main>
     );
 
@@ -474,7 +490,7 @@ function AdminWorkspace({ section, slug }: { section: string; slug?: string }) {
   };
 
   return (
-    <div className="min-h-screen bg-[#F8F9FA] text-gray-900">
+    <div className="min-h-dvh bg-gray-50 text-gray-900">
       <header className="border-b border-gray-200 bg-white px-5 py-5 lg:px-8">
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-4">
           <div>
@@ -502,7 +518,7 @@ function AdminWorkspace({ section, slug }: { section: string; slug?: string }) {
           <Button
             onClick={() => window.open("/", "_blank")}
             variant="outline"
-            className="rounded-xl border-gray-200 bg-white text-xs font-extrabold text-gray-600"
+            className="cursor-pointer rounded-xl border-gray-200 bg-white text-xs font-extrabold text-gray-600 transition-colors hover:bg-gray-50"
           >
             View storefront <ExternalLink className="ml-2 h-3.5 w-3.5" />
           </Button>
@@ -614,21 +630,21 @@ function OverviewPanel({ data }: { data: any }) {
       value: money(m.todaySalesPaise),
       detail: "Captured payments",
       icon: BarChart3,
-      tone: "bg-[#e6f0e5] text-[#47754d]",
+      tone: "bg-green-50 text-green-700",
     },
     {
       label: "Average order",
       value: money(m.averageOrderValue),
       detail: "Across all paid orders",
       icon: TrendingUp,
-      tone: "bg-[#eee8f6] text-[#695b9c]",
+      tone: "bg-purple-50 text-purple-700",
     },
     {
       label: "Available dishes",
       value: `${m.availableItems}/${m.totalItems}`,
       detail: "Shown to customers",
       icon: UtensilsCrossed,
-      tone: "bg-[#f5ecd8] text-[#9e692a]",
+      tone: "bg-amber-50 text-amber-700",
     },
   ];
 
@@ -672,7 +688,7 @@ function OverviewPanel({ data }: { data: any }) {
         {cards.map((card) => (
           <article
             key={card.label}
-            className="rounded-2xl bg-white p-5 shadow-sm"
+            className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm"
           >
             <span
               className={`grid h-10 w-10 place-items-center rounded-xl ${card.tone}`}
@@ -689,7 +705,7 @@ function OverviewPanel({ data }: { data: any }) {
       </section>
 
       {/* Status Summary */}
-      <section className="rounded-2xl bg-white p-5 shadow-sm">
+      <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
         <p className="text-[10px] font-extrabold uppercase tracking-[0.16em] text-gray-500">
           Order pipeline
         </p>
@@ -710,7 +726,7 @@ function OverviewPanel({ data }: { data: any }) {
       </section>
 
       {/* Recent Orders */}
-      <section className="rounded-2xl bg-white p-5 shadow-sm">
+      <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
         <div className="flex items-center justify-between">
           <div>
             <p className="text-[10px] font-extrabold uppercase tracking-[0.16em] text-gray-500">
@@ -720,7 +736,7 @@ function OverviewPanel({ data }: { data: any }) {
               Latest activity
             </h2>
           </div>
-          <span className="rounded-full bg-gray-50 px-3 py-1 text-xs font-extrabold text-[#c84630]">
+          <span className="rounded-full bg-gray-50 px-2.5 py-1 text-[10px] font-extrabold uppercase tracking-wide text-[#c84630]">
             {m.openOrders} open
           </span>
         </div>
@@ -738,7 +754,7 @@ function OverviewPanel({ data }: { data: any }) {
                 </p>
               </div>
               <span
-                className={`rounded-full px-2.5 py-1 text-[10px] font-extrabold ${
+                className={`rounded-full px-2.5 py-1 text-[10px] font-extrabold uppercase tracking-wide ${
                   statusColor[order.status] ?? "bg-gray-100 text-gray-700"
                 }`}
               >
@@ -776,7 +792,7 @@ function OverviewPanel({ data }: { data: any }) {
           </div>
         </article>
 
-        <article className="rounded-2xl bg-white p-5 shadow-sm">
+        <article className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
           <p className="text-[10px] font-extrabold uppercase tracking-[0.16em] text-gray-500">
             Quick actions
           </p>
@@ -784,7 +800,7 @@ function OverviewPanel({ data }: { data: any }) {
           <div className="mt-5 space-y-3">
             <button
               onClick={() => window.location.assign("/admin/orders")}
-              className="flex w-full items-center gap-3 rounded-xl border border-gray-200 bg-white p-3 text-left hover:bg-gray-50"
+              className="flex w-full cursor-pointer items-center gap-3 rounded-xl border border-gray-200 bg-white p-3 text-left transition-colors hover:bg-gray-50"
             >
               <ClipboardList className="h-5 w-5 text-[#c84630]" />
               <div>
@@ -796,7 +812,7 @@ function OverviewPanel({ data }: { data: any }) {
             </button>
             <button
               onClick={() => window.location.assign("/admin/menu")}
-              className="flex w-full items-center gap-3 rounded-xl border border-gray-200 bg-white p-3 text-left hover:bg-gray-50"
+              className="flex w-full cursor-pointer items-center gap-3 rounded-xl border border-gray-200 bg-white p-3 text-left transition-colors hover:bg-gray-50"
             >
               <UtensilsCrossed className="h-5 w-5 text-[#c84630]" />
               <div>
@@ -808,7 +824,7 @@ function OverviewPanel({ data }: { data: any }) {
             </button>
             <button
               onClick={() => window.location.assign("/admin/integrations")}
-              className="flex w-full items-center gap-3 rounded-xl border border-gray-200 bg-white p-3 text-left hover:bg-gray-50"
+              className="flex w-full cursor-pointer items-center gap-3 rounded-xl border border-gray-200 bg-white p-3 text-left transition-colors hover:bg-gray-50"
             >
               <AlertCircle className="h-5 w-5 text-[#c84630]" />
               <div>
@@ -914,7 +930,7 @@ function OrdersPanel({
   };
 
   return (
-    <section className="overflow-hidden rounded-2xl bg-white shadow-sm">
+    <section className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
       <div className="border-b border-gray-200 p-5">
         <div className="flex items-center justify-between">
           <div>
@@ -923,7 +939,7 @@ function OrdersPanel({
             </p>
             <h2 className="font-extrabold tracking-tight mt-1 text-2xl">Order queue</h2>
           </div>
-          <span className="text-sm font-bold text-gray-500">
+          <span className="text-sm font-bold tabular-nums text-gray-500">
             {filtered.length} orders
           </span>
         </div>
@@ -940,10 +956,10 @@ function OrdersPanel({
             <button
               key={value}
               onClick={() => setFilter(value)}
-              className={`whitespace-nowrap rounded-full px-3 py-1.5 text-xs font-extrabold ${
+              className={`cursor-pointer whitespace-nowrap rounded-full px-3 py-1.5 text-xs font-extrabold transition-colors ${
                 filter === value
                   ? "bg-gray-900 text-white"
-                  : "border border-gray-200 bg-white text-gray-600"
+                  : "border border-gray-200 bg-white text-gray-600 hover:bg-gray-50"
               }`}
             >
               {label}
@@ -962,9 +978,9 @@ function OrdersPanel({
       </div>
 
       {filtered.length ? (
-        <div className="overflow-x-auto">
+        <div className="max-h-[70vh] overflow-auto">
           <table className="w-full min-w-[800px] text-left text-sm">
-            <thead className="bg-gray-50 text-[10px] uppercase tracking-[0.14em] text-gray-500">
+            <thead className="sticky top-0 bg-gray-50 text-[10px] font-extrabold uppercase tracking-[0.14em] text-gray-500">
               <tr>
                 <th className="px-5 py-3 font-extrabold">Order</th>
                 <th className="px-5 py-3 font-extrabold">Customer</th>
@@ -976,22 +992,22 @@ function OrdersPanel({
             </thead>
             <tbody>
               {filtered.map((order: any) => (
-                <tr key={order.id} className="border-t border-gray-100">
+                <tr key={order.id} className="border-t border-gray-100 transition-colors hover:bg-gray-50">
                   <td className="px-5 py-4">
                     <p className="font-extrabold">{order.orderNumber}</p>
                     <div className="mt-1 flex items-center gap-2">
-                      <p className="text-xs text-gray-500">
+                      <p className="text-xs tabular-nums text-gray-500">
                         {new Date(order.createdAt).toLocaleString("en-IN", {
                           dateStyle: "medium",
                           timeStyle: "short",
                         })}
                       </p>
                       {order.orderSource && order.orderSource !== "DIRECT" && (
-                        <span className={`rounded px-1.5 py-0.5 text-[9px] font-bold uppercase ${
-                          order.orderSource === "ZOMATO" ? "bg-red-100 text-red-700" :
-                          order.orderSource === "SWIGGY" ? "bg-orange-100 text-orange-700" :
-                          order.orderSource === "PHONE" ? "bg-blue-100 text-blue-700" :
-                          "bg-green-100 text-green-700"
+                        <span className={`rounded-full px-2.5 py-1 text-[10px] font-extrabold uppercase tracking-wide ${
+                          order.orderSource === "ZOMATO" ? "bg-red-50 text-red-700" :
+                          order.orderSource === "SWIGGY" ? "bg-orange-50 text-orange-700" :
+                          order.orderSource === "PHONE" ? "bg-blue-50 text-blue-700" :
+                          "bg-green-50 text-green-700"
                         }`}>
                           {order.orderSource}
                         </span>
@@ -1000,27 +1016,27 @@ function OrdersPanel({
                   </td>
                   <td className="px-5 py-4">
                     <p className="text-sm font-bold">{order.customerName || "Guest"}</p>
-                    <p className="text-xs text-gray-500">{order.customerPhone || "-"}</p>
+                    <p className="text-xs tabular-nums text-gray-500">{order.customerPhone || "-"}</p>
                   </td>
                   <td className="px-5 py-4">
                     <span
-                      className={`rounded-full px-2.5 py-1 text-xs font-extrabold ${
+                      className={`rounded-full px-2.5 py-1 text-[10px] font-extrabold uppercase tracking-wide ${
                         order.paymentStatus === "PAID"
-                          ? "bg-[#e5f1e5] text-[#42774b]"
+                          ? "bg-green-50 text-green-700"
                           : order.paymentStatus === "FAILED"
                           ? "bg-red-50 text-red-700"
-                          : "bg-red-50 text-amber-600"
+                          : "bg-amber-50 text-amber-700"
                       }`}
                     >
                       {order.paymentStatus}
                     </span>
                   </td>
-                  <td className="px-5 py-4 font-extrabold">
+                  <td className="px-5 py-4 font-extrabold tabular-nums">
                     {money(order.totalPaise)}
                   </td>
                   <td className="px-5 py-4">
                     <span
-                      className={`rounded-full px-2.5 py-1 text-[10px] font-extrabold ${
+                      className={`rounded-full px-2.5 py-1 text-[10px] font-extrabold uppercase tracking-wide ${
                         statusColor[order.status] ?? "bg-gray-100 text-gray-700"
                       }`}
                     >
@@ -1052,7 +1068,7 @@ function OrdersPanel({
                             placeholder="Status note (optional)"
                             maxLength={500}
                             disabled={pendingIds.has(order.id)}
-                            className="h-8 rounded-lg border-gray-200 text-xs"
+                            className="h-8 rounded-lg border-gray-200 text-xs disabled:opacity-50"
                           />
                         </>
                       ) : (
@@ -1066,21 +1082,21 @@ function OrdersPanel({
                                 value={refundAmounts[order.id] ?? ""}
                                 onChange={(e) => setRefundAmounts((prev) => ({ ...prev, [order.id]: e.target.value }))}
                                 inputMode="numeric"
-                                placeholder={`Amount in ₹ (max ${(order.totalPaise / 100).toFixed(0)})`}
+                                placeholder={`Amount in ${formatINR(order.totalPaise / 100)} max`}
                                 disabled={pendingIds.has(order.id)}
-                                className="h-8 rounded-lg border-gray-200 bg-white text-xs"
+                                className="h-8 rounded-lg border-gray-200 bg-white text-xs disabled:opacity-50"
                               />
                               <div className="flex gap-2">
                                 <button
                                   onClick={() => handleRefund(order)}
                                   disabled={pendingIds.has(order.id)}
-                                  className="flex-1 rounded-lg bg-red-600 px-2 py-1.5 text-[11px] font-extrabold text-white hover:bg-red-700 disabled:opacity-50"
+                                  className="flex-1 cursor-pointer rounded-lg bg-red-600 px-2 py-1.5 text-[11px] font-extrabold uppercase tracking-wide text-white transition-colors hover:bg-red-700 disabled:opacity-50"
                                 >
                                   Confirm refund
                                 </button>
                                 <button
                                   onClick={() => setConfirmRefundId(null)}
-                                  className="rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-[11px] font-bold text-gray-600"
+                                  className="cursor-pointer rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-[11px] font-bold uppercase tracking-wide text-gray-600 transition-colors hover:bg-gray-50"
                                 >
                                   Cancel
                                 </button>
@@ -1093,7 +1109,7 @@ function OrdersPanel({
                                 setConfirmRefundId(order.id);
                               }}
                               disabled={pendingIds.has(order.id)}
-                              className="w-full rounded-lg border border-red-200 bg-white px-2 py-1.5 text-[11px] font-extrabold text-red-600 hover:bg-red-50 disabled:opacity-50"
+                              className="w-full cursor-pointer rounded-lg border border-red-200 bg-white px-2 py-1.5 text-[11px] font-extrabold uppercase tracking-wide text-red-600 transition-colors hover:bg-red-50 disabled:opacity-50"
                             >
                               Refund
                             </button>
@@ -1111,8 +1127,19 @@ function OrdersPanel({
           </table>
         </div>
       ) : (
-        <div className="p-8">
+        <div className="space-y-3 p-8 text-center">
           <EmptyKitchen />
+          {(search.trim() || filter !== "all") && (
+            <button
+              onClick={() => {
+                setSearch("");
+                setFilter("all");
+              }}
+              className="cursor-pointer rounded-xl border border-gray-200 bg-white px-4 py-2 text-xs font-extrabold text-gray-600 transition-colors hover:bg-gray-50"
+            >
+              Clear search & filters
+            </button>
+          )}
         </div>
       )}
     </section>
@@ -1318,7 +1345,7 @@ function MenuPanel({
           <Button
             onClick={onCreate}
             disabled={uploading}
-            className="h-11 w-full rounded-xl bg-gray-50 font-extrabold text-gray-900 hover:bg-white"
+            className="h-11 min-h-[44px] w-full rounded-xl bg-gray-50 font-extrabold text-gray-900 transition-colors hover:bg-white disabled:opacity-50"
           >
             <Plus className="mr-2 h-4 w-4" />
             Add to menu
@@ -1327,7 +1354,7 @@ function MenuPanel({
       </aside>
 
       {/* Menu Items List */}
-      <section className="overflow-hidden rounded-2xl bg-white shadow-sm">
+      <section className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
         <div className="border-b border-gray-200 p-5">
           <div className="flex items-center justify-between">
             <div>
@@ -1336,7 +1363,7 @@ function MenuPanel({
               </p>
               <h2 className="font-extrabold tracking-tight mt-1 text-2xl">Availability controls</h2>
             </div>
-            <span className="text-sm font-bold text-gray-500">
+            <span className="text-sm font-bold tabular-nums text-gray-500">
               {(data.items ?? []).length} dishes
             </span>
           </div>
@@ -1351,7 +1378,7 @@ function MenuPanel({
               />
             </div>
             {items.length > 0 && (
-              <label className="flex cursor-pointer items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 text-xs font-bold text-gray-500">
+              <label className="flex cursor-pointer items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 text-xs font-bold text-gray-500 transition-colors hover:bg-gray-50">
                 <input type="checkbox" checked={selectedIds.size === items.length && items.length > 0} onChange={toggleAll} className="accent-[#c84630]" />
                 All
               </label>
@@ -1362,14 +1389,28 @@ function MenuPanel({
           {selectedIds.size > 0 && (
             <div className="mt-3 flex flex-wrap items-center gap-2 rounded-xl bg-gray-900 px-4 py-2.5">
               <span className="text-xs font-bold text-white">{selectedIds.size} selected</span>
-              <button onClick={() => onBulkUpdate({ itemIds: Array.from(selectedIds), availability: "AVAILABLE" })} className="rounded-lg bg-white/10 px-2.5 py-1 text-[10px] font-bold text-white hover:bg-white/20">Set available</button>
-              <button onClick={() => onBulkUpdate({ itemIds: Array.from(selectedIds), availability: "SOLD_OUT" })} className="rounded-lg bg-white/10 px-2.5 py-1 text-[10px] font-bold text-white hover:bg-white/20">Sold out</button>
-              <button onClick={() => onBulkUpdate({ itemIds: Array.from(selectedIds), isOpen: false, availability: "DISABLED" })} className="rounded-lg bg-white/10 px-2.5 py-1 text-[10px] font-bold text-white hover:bg-white/20">Disable</button>
-              <button onClick={() => { setSelectedIds(new Set()); }} className="ml-auto text-[10px] font-bold text-white/60 hover:text-white">Clear</button>
+              <button onClick={() => onBulkUpdate({ itemIds: Array.from(selectedIds), availability: "AVAILABLE" })} className="cursor-pointer rounded-lg bg-white/10 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-white transition-colors hover:bg-white/20">Set available</button>
+              <button onClick={() => onBulkUpdate({ itemIds: Array.from(selectedIds), availability: "SOLD_OUT" })} className="cursor-pointer rounded-lg bg-white/10 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-white transition-colors hover:bg-white/20">Sold out</button>
+              <button onClick={() => onBulkUpdate({ itemIds: Array.from(selectedIds), isOpen: false, availability: "DISABLED" })} className="cursor-pointer rounded-lg bg-white/10 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-white transition-colors hover:bg-white/20">Disable</button>
+              <button onClick={() => { setSelectedIds(new Set()); }} className="ml-auto cursor-pointer text-[10px] font-bold uppercase tracking-wide text-white/60 transition-colors hover:text-white">Clear</button>
             </div>
           )}
         </div>
         <div className="divide-y divide-gray-100">
+          {items.length === 0 && (
+            <div className="p-10 text-center">
+              <p className="text-sm font-extrabold text-gray-900">No dishes match your search</p>
+              <p className="mt-1 text-xs text-gray-500">Add a dish from the panel on the left, or clear your search to see the full menu.</p>
+              {search.trim() && (
+                <button
+                  onClick={() => setSearch("")}
+                  className="mt-4 cursor-pointer rounded-xl border border-gray-200 bg-white px-4 py-2 text-xs font-extrabold text-gray-600 transition-colors hover:bg-gray-50"
+                >
+                  Clear search
+                </button>
+              )}
+            </div>
+          )}
           {items.map((item: any) => (
             <article key={item.id} className="p-4">
               {editingId === item.id ? (
@@ -1381,7 +1422,7 @@ function MenuPanel({
                         <img src={editForm.imageUrl} alt="" className="h-full w-full object-cover" />
                       </div>
                     ) : (
-                      <label className="flex h-14 w-14 shrink-0 cursor-pointer items-center justify-center rounded-lg border-2 border-dashed border-gray-200 hover:border-[#c84630]">
+                      <label className="flex h-14 w-14 shrink-0 cursor-pointer items-center justify-center rounded-lg border-2 border-dashed border-gray-200 transition-colors hover:border-[#c84630]">
                         <Plus className="h-4 w-4 text-gray-500" />
                         <input type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={(e) => e.target.files?.[0] && handleImageUpload(e.target.files[0], "edit")} />
                       </label>
@@ -1406,8 +1447,8 @@ function MenuPanel({
                       Bestseller
                     </label>
                     <div className="ml-auto flex gap-2">
-                      <Button onClick={() => setEditingId(null)} variant="outline" className="h-8 rounded-lg border-gray-200 text-xs font-bold">Cancel</Button>
-                      <Button onClick={saveEdit} className="h-8 rounded-lg bg-[#C84630] text-xs font-bold text-white">Save</Button>
+                      <Button onClick={() => setEditingId(null)} variant="outline" className="h-8 rounded-lg border-gray-200 text-xs font-bold transition-colors">Cancel</Button>
+                      <Button onClick={saveEdit} className="h-8 rounded-lg bg-[#c84630] text-xs font-bold text-white transition-colors hover:bg-[#b03a28]">Save</Button>
                     </div>
                   </div>
                 </div>
@@ -1428,18 +1469,18 @@ function MenuPanel({
                     <div className="flex items-center gap-2">
                       <p className="text-sm font-extrabold">{item.name}</p>
                       {item.isBestseller && (
-                        <span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[9px] font-extrabold text-amber-700">BESTSELLER</span>
+                        <span className="rounded-full bg-amber-100 px-2.5 py-1 text-[10px] font-extrabold uppercase tracking-wide text-amber-700">Bestseller</span>
                       )}
                     </div>
                     <p className="mt-0.5 truncate text-xs text-gray-500">{item.description}</p>
-                    <div className="mt-0.5 flex items-center gap-2 text-xs font-bold">
+                    <div className="mt-0.5 flex items-center gap-2 text-xs font-bold tabular-nums">
                       <span>{money(item.pricePaise)}</span>
-                      {item.offerPricePaise && <span className="text-green-600">Offer: {money(item.offerPricePaise)}</span>}
+                      {item.offerPricePaise && <span className="text-green-700">Offer: {money(item.offerPricePaise)}</span>}
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
-                    <button onClick={() => startEdit(item)} className="min-h-[44px] rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-[10px] font-bold text-gray-700 hover:bg-gray-50">Edit</button>
-                    <button onClick={() => onDelete(item.id)} className="min-h-[44px] rounded-lg border border-red-200 bg-white px-3 py-1.5 text-[10px] font-bold text-red-600 hover:bg-red-50">Delete</button>
+                    <button onClick={() => startEdit(item)} className="min-h-[44px] cursor-pointer rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-[10px] font-bold uppercase tracking-wide text-gray-700 transition-colors hover:bg-gray-50">Edit</button>
+                    <button onClick={() => onDelete(item.id)} className="min-h-[44px] cursor-pointer rounded-lg border border-red-200 bg-white px-3 py-1.5 text-[10px] font-bold uppercase tracking-wide text-red-600 transition-colors hover:bg-red-50">Delete</button>
                     <label className="relative inline-flex cursor-pointer items-center">
                       <input type="checkbox" checked={item.isOpen} onChange={(e) => onToggle(item.id, e.target.checked)} className="peer sr-only" />
                       <div className="h-6 w-11 rounded-full bg-gray-200 after:absolute after:left-[2px] after:top-[2px] after:h-5 after:w-5 after:rounded-full after:bg-white after:transition-all peer-checked:bg-[#c84630] after:peer-checked:translate-x-full" />
@@ -1521,7 +1562,7 @@ function CategoriesPanel({
           <Button
             onClick={handleCreate}
             disabled={!newName.trim()}
-            className="h-11 w-full rounded-xl bg-gray-50 font-extrabold text-gray-900 hover:bg-white"
+            className="h-11 min-h-[44px] w-full rounded-xl bg-gray-50 font-extrabold text-gray-900 transition-colors hover:bg-white disabled:opacity-50"
           >
             <Plus className="mr-2 h-4 w-4" />
             Add category
@@ -1530,7 +1571,7 @@ function CategoriesPanel({
       </aside>
 
       {/* Category List */}
-      <section className="overflow-hidden rounded-2xl bg-white shadow-sm">
+      <section className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
         <div className="border-b border-gray-200 p-5">
           <p className="text-[10px] font-extrabold uppercase tracking-[0.16em] text-gray-500">
             All categories
@@ -1556,14 +1597,14 @@ function CategoriesPanel({
                     {cat.description && (
                       <p className="mt-0.5 truncate text-xs text-gray-500">{cat.description}</p>
                     )}
-                    <p className="mt-0.5 text-[10px] font-bold text-gray-500">
+                    <p className="mt-0.5 text-[10px] font-bold uppercase tracking-wide text-gray-500">
                       {catItems.length} {catItems.length === 1 ? "item" : "items"}
                       {cat.sortOrder != null ? ` · Order ${cat.sortOrder}` : ""}
                     </p>
                   </div>
                   <div className="flex items-center gap-3">
-                    <label className="flex flex-col items-center gap-1">
-                      <span className="text-[9px] font-extrabold uppercase text-gray-500">Visible</span>
+                    <label className="flex cursor-pointer flex-col items-center gap-1">
+                      <span className="text-[9px] font-extrabold uppercase tracking-widest text-gray-500">Visible</span>
                       <label className="relative inline-flex cursor-pointer items-center">
                         <input
                           type="checkbox"
@@ -1574,8 +1615,8 @@ function CategoriesPanel({
                         <div className="h-6 w-11 rounded-full bg-gray-200 after:absolute after:left-[2px] after:top-[2px] after:h-5 after:w-5 after:rounded-full after:bg-white after:transition-all peer-checked:bg-[#c84630] after:peer-checked:translate-x-full" />
                       </label>
                     </label>
-                    <label className="flex flex-col items-center gap-1">
-                      <span className="text-[9px] font-extrabold uppercase text-gray-500">Open</span>
+                    <label className="flex cursor-pointer flex-col items-center gap-1">
+                      <span className="text-[9px] font-extrabold uppercase tracking-widest text-gray-500">Open</span>
                       <label className="relative inline-flex cursor-pointer items-center">
                         <input
                           type="checkbox"
@@ -1614,7 +1655,7 @@ function CouponsPanel({
 }) {
   return (
     <div className="grid gap-5 lg:grid-cols-[0.8fr_1.2fr]">
-      <section className="rounded-2xl bg-white p-5 shadow-sm">
+      <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
         <p className="text-[10px] font-extrabold uppercase tracking-[0.16em] text-gray-500">
           New offer
         </p>
@@ -1664,7 +1705,7 @@ function CouponsPanel({
           />
           <Button
             onClick={onSave}
-            className="h-11 w-full rounded-xl bg-[#c84630] font-extrabold hover:bg-[#b03a28]"
+            className="h-11 min-h-[44px] w-full rounded-xl bg-[#c84630] font-extrabold transition-colors hover:bg-[#b03a28]"
           >
             <TicketPercent className="mr-2 h-4 w-4" />
             Save offer
@@ -1672,7 +1713,7 @@ function CouponsPanel({
         </div>
       </section>
 
-      <section className="rounded-2xl bg-white p-5 shadow-sm">
+      <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
         <p className="text-[10px] font-extrabold uppercase tracking-[0.16em] text-gray-500">
           Live offers
         </p>
@@ -1682,24 +1723,24 @@ function CouponsPanel({
             (data.offers ?? []).map((coupon: any) => (
               <article
                 key={coupon.id}
-                className="rounded-xl border border-gray-200 bg-white p-4"
+                className="rounded-xl border border-gray-200 bg-white p-4 transition-colors"
               >
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <p className="font-extrabold tracking-wide text-[#c84630]">
                       {coupon.code}
                     </p>
-                    <p className="mt-1 text-sm text-gray-600">
+                    <p className="mt-1 text-sm text-gray-500">
                       {coupon.description}
                     </p>
                   </div>
-                  <span className="rounded-full bg-[#e5f1e5] px-2.5 py-1 text-xs font-extrabold text-[#42774b]">
+                  <span className="rounded-full bg-green-50 px-2.5 py-1 text-[10px] font-extrabold uppercase tracking-wide text-green-700">
                     Live
                   </span>
                 </div>
-                <p className="mt-3 text-xs font-bold text-gray-500">
+                <p className="mt-3 text-xs font-bold tabular-nums text-gray-500">
                   {coupon.discountType === "flat"
-                    ? `₹${coupon.discountValue / 100} off`
+                    ? `${formatINR(coupon.discountValue / 100)} off`
                     : `${coupon.discountValue > 100 ? Math.round(coupon.discountValue / 100) : coupon.discountValue}% off`}{" "}
                   · Min {money(coupon.minOrderPaise)}
                 </p>
@@ -1765,7 +1806,7 @@ function CustomersPanel({ restaurantId }: { restaurantId: string }) {
       <div className="space-y-5">
         <button
           onClick={() => { setSelectedId(null); setNotes(""); setNotesInitializedFor(null); }}
-          className="flex items-center gap-2 text-sm font-extrabold text-[#c84630] hover:underline"
+          className="flex cursor-pointer items-center gap-2 text-sm font-extrabold text-[#c84630] transition-colors hover:underline"
         >
           ← Back to customers
         </button>
@@ -1779,22 +1820,22 @@ function CustomersPanel({ restaurantId }: { restaurantId: string }) {
                 {detail.mobileNumber ?? "No phone"} · {detail.userEmail ?? "No email"}
               </p>
             </div>
-            <span className="rounded-full bg-gray-100 px-3 py-1 text-[10px] font-extrabold text-gray-500">
+            <span className="rounded-full bg-gray-100 px-2.5 py-1 text-[10px] font-extrabold uppercase tracking-wide text-gray-600">
               {detail.totalOrders ?? 0} orders
             </span>
           </div>
           <div className="mt-5 grid gap-4 sm:grid-cols-3">
-            <div className="rounded-xl bg-white p-4">
-              <p className="text-[10px] font-extrabold uppercase tracking-wider text-gray-500">Lifetime value</p>
-              <p className="mt-1 text-xl font-extrabold text-gray-900">₹{((detail.totalSpentPaise ?? 0) / 100).toLocaleString("en-IN")}</p>
+            <div className="rounded-xl border border-gray-200 bg-white p-4">
+              <p className="text-[10px] font-extrabold uppercase tracking-wide text-gray-500">Lifetime value</p>
+              <p className="mt-1 text-xl font-extrabold tabular-nums text-gray-900">{formatINR((detail.totalSpentPaise ?? 0) / 100)}</p>
             </div>
-            <div className="rounded-xl bg-white p-4">
-              <p className="text-[10px] font-extrabold uppercase tracking-wider text-gray-500">Total orders</p>
-              <p className="mt-1 text-xl font-extrabold text-gray-900">{detail.totalOrders ?? 0}</p>
+            <div className="rounded-xl border border-gray-200 bg-white p-4">
+              <p className="text-[10px] font-extrabold uppercase tracking-wide text-gray-500">Total orders</p>
+              <p className="mt-1 text-xl font-extrabold tabular-nums text-gray-900">{detail.totalOrders ?? 0}</p>
             </div>
-            <div className="rounded-xl bg-white p-4">
-              <p className="text-[10px] font-extrabold uppercase tracking-wider text-gray-500">Registered</p>
-              <p className="mt-1 text-sm font-bold text-gray-900">
+            <div className="rounded-xl border border-gray-200 bg-white p-4">
+              <p className="text-[10px] font-extrabold uppercase tracking-wide text-gray-500">Registered</p>
+              <p className="mt-1 text-sm font-bold tabular-nums text-gray-900">
                 {detail.createdAt ? new Date(detail.createdAt).toLocaleDateString("en-IN") : "—"}
               </p>
             </div>
@@ -1803,7 +1844,7 @@ function CustomersPanel({ restaurantId }: { restaurantId: string }) {
 
         {/* Admin Notes */}
         <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
-          <p className="text-[10px] font-extrabold uppercase tracking-wider text-gray-500">Admin notes</p>
+          <p className="text-[10px] font-extrabold uppercase tracking-wide text-gray-500">Admin notes</p>
           <textarea
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
@@ -1813,7 +1854,7 @@ function CustomersPanel({ restaurantId }: { restaurantId: string }) {
           <Button
             onClick={handleSaveNotes}
             disabled={updateNotes.isPending || !notesChanged}
-            className="mt-3 h-10 rounded-xl bg-[#c84630] px-4 text-xs font-extrabold hover:bg-[#b03a28] disabled:opacity-50"
+            className="mt-3 h-11 min-h-[44px] rounded-xl bg-[#c84630] px-4 text-xs font-extrabold transition-colors hover:bg-[#b03a28] disabled:opacity-50"
           >
             <Save className="mr-1.5 h-3.5 w-3.5" /> {updateNotes.isPending ? "Saving..." : "Save notes"}
           </Button>
@@ -1825,21 +1866,21 @@ function CustomersPanel({ restaurantId }: { restaurantId: string }) {
         {/* Order History */}
         <div className="rounded-2xl border border-gray-200 bg-white shadow-sm">
           <div className="border-b border-gray-200 px-6 py-4">
-            <p className="text-[10px] font-extrabold uppercase tracking-wider text-gray-500">Order history</p>
+            <p className="text-[10px] font-extrabold uppercase tracking-wide text-gray-500">Order history</p>
           </div>
           {detail.orderHistory?.length ? (
             <div className="divide-y divide-gray-100">
               {detail.orderHistory.map((order: any) => (
-                <div key={order.id} className="flex items-center justify-between px-6 py-4">
+                <div key={order.id} className="flex items-center justify-between px-6 py-4 transition-colors hover:bg-gray-50">
                   <div>
                     <p className="text-sm font-bold text-gray-900">{order.orderNumber}</p>
-                    <p className="mt-0.5 text-xs text-gray-500">
+                    <p className="mt-0.5 text-xs tabular-nums text-gray-500">
                       {new Date(order.createdAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
                     </p>
                   </div>
                   <div className="text-right">
-                    <p className="text-sm font-extrabold text-gray-900">₹{((order.totalPaise ?? 0) / 100).toLocaleString("en-IN")}</p>
-                    <span className={`inline-block rounded-full px-2 py-0.5 text-[10px] font-extrabold ${
+                    <p className="text-sm font-extrabold tabular-nums text-gray-900">{formatINR((order.totalPaise ?? 0) / 100)}</p>
+                    <span className={`inline-block rounded-full px-2.5 py-1 text-[10px] font-extrabold uppercase tracking-wide ${
                       order.status === "DELIVERED" ? "bg-green-50 text-green-700"
                       : order.status === "CANCELLED" ? "bg-red-50 text-red-700"
                       : "bg-amber-50 text-amber-700"
@@ -1875,25 +1916,43 @@ function CustomersPanel({ restaurantId }: { restaurantId: string }) {
       {customers.isLoading ? (
         <div className="space-y-3">
           {[1, 2, 3].map(i => (
-            <div key={i} className="h-16 animate-pulse rounded-xl bg-gray-100" />
+            <div key={i} className="h-16 animate-pulse rounded-2xl bg-gray-100" />
           ))}
         </div>
+      ) : customers.isError ? (
+        <div className="rounded-2xl border border-red-200 bg-red-50 p-6 text-center">
+          <p className="text-sm font-bold text-red-700">We couldn't load customers. Please retry.</p>
+          <button
+            onClick={() => customers.refetch()}
+            className="mt-3 h-11 min-h-[44px] cursor-pointer rounded-xl border border-gray-200 bg-white px-4 text-xs font-extrabold text-gray-700 transition-colors hover:bg-gray-50"
+          >
+            Retry
+          </button>
+        </div>
       ) : list.length === 0 ? (
-        <div className="rounded-2xl border border-dashed border-gray-300 bg-white p-10 text-center">
+        <div className="rounded-2xl border border-dashed border-gray-200 bg-white p-10 text-center">
           <Users className="mx-auto h-8 w-8 text-[#c84630]" />
           <p className="mt-3 font-extrabold tracking-tight text-xl text-gray-900">No customers yet</p>
           <p className="mt-1 text-sm text-gray-500">Customers will appear here once they place their first order.</p>
+          {search.trim() && (
+            <button
+              onClick={() => setSearch("")}
+              className="mt-4 h-11 min-h-[44px] cursor-pointer rounded-xl border border-gray-200 bg-white px-4 text-xs font-extrabold text-gray-600 transition-colors hover:bg-gray-50"
+            >
+              Clear search
+            </button>
+          )}
         </div>
       ) : (
-        <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
+        <div className="max-h-[70vh] overflow-auto rounded-2xl border border-gray-200 bg-white shadow-sm">
           <table className="w-full">
-            <thead>
-              <tr className="border-b border-gray-200 bg-gray-50">
-                <th className="px-5 py-3 text-left text-[10px] font-extrabold uppercase tracking-wider text-gray-500">Customer</th>
-                <th className="px-5 py-3 text-left text-[10px] font-extrabold uppercase tracking-wider text-gray-500">Phone</th>
-                <th className="px-5 py-3 text-left text-[10px] font-extrabold uppercase tracking-wider text-gray-500">Orders</th>
-                <th className="px-5 py-3 text-left text-[10px] font-extrabold uppercase tracking-wider text-gray-500">Lifetime value</th>
-                <th className="px-5 py-3 text-left text-[10px] font-extrabold uppercase tracking-wider text-gray-500">Joined</th>
+            <thead className="sticky top-0 bg-gray-50">
+              <tr className="border-b border-gray-200">
+                <th className="px-5 py-3 text-left text-[10px] font-extrabold uppercase tracking-wide text-gray-500">Customer</th>
+                <th className="px-5 py-3 text-left text-[10px] font-extrabold uppercase tracking-wide text-gray-500">Phone</th>
+                <th className="px-5 py-3 text-left text-[10px] font-extrabold uppercase tracking-wide text-gray-500">Orders</th>
+                <th className="px-5 py-3 text-left text-[10px] font-extrabold uppercase tracking-wide text-gray-500">Lifetime value</th>
+                <th className="px-5 py-3 text-left text-[10px] font-extrabold uppercase tracking-wide text-gray-500">Joined</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
@@ -1905,16 +1964,16 @@ function CustomersPanel({ restaurantId }: { restaurantId: string }) {
                     setNotes("");
                     setNotesInitializedFor(null);
                   }}
-                  className="cursor-pointer hover:bg-white transition-colors"
+                  className="cursor-pointer transition-colors hover:bg-gray-50"
                 >
                   <td className="px-5 py-4">
                     <p className="text-sm font-bold text-gray-900">{c.userName || c.preferredName || "Guest"}</p>
                     <p className="mt-0.5 text-xs text-gray-500">{c.userEmail ?? "—"}</p>
                   </td>
-                  <td className="px-5 py-4 text-sm text-gray-900">{c.mobileNumber ?? "—"}</td>
-                  <td className="px-5 py-4 text-sm font-bold text-gray-900">{c.totalOrders ?? 0}</td>
-                  <td className="px-5 py-4 text-sm font-extrabold text-gray-900">₹{((c.totalSpentPaise ?? 0) / 100).toLocaleString("en-IN")}</td>
-                  <td className="px-5 py-4 text-xs text-gray-500">
+                  <td className="px-5 py-4 text-sm tabular-nums text-gray-900">{c.mobileNumber ?? "—"}</td>
+                  <td className="px-5 py-4 text-sm font-bold tabular-nums text-gray-900">{c.totalOrders ?? 0}</td>
+                  <td className="px-5 py-4 text-sm font-extrabold tabular-nums text-gray-900">{formatINR((c.totalSpentPaise ?? 0) / 100)}</td>
+                  <td className="px-5 py-4 text-xs tabular-nums text-gray-500">
                     {c.createdAt ? new Date(c.createdAt).toLocaleDateString("en-IN") : "—"}
                   </td>
                 </tr>
@@ -2026,7 +2085,7 @@ function RestaurantPanel({
   };
 
   return (
-    <section className="max-w-3xl rounded-2xl bg-white p-5 shadow-sm">
+    <section className="max-w-3xl rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
       <p className="text-[10px] font-extrabold uppercase tracking-[0.16em] text-gray-500">
         Restaurant identity & service
       </p>
@@ -2060,7 +2119,7 @@ function RestaurantPanel({
                   <p className="truncate text-xs text-gray-500">
                     {url || `No ${kind} yet — guests see a placeholder.`}
                   </p>
-                  <label className="mt-2 inline-flex h-9 cursor-pointer items-center rounded-lg border border-gray-200 bg-white px-3 text-xs font-extrabold text-gray-700 hover:bg-gray-50">
+                  <label className="mt-2 inline-flex h-9 cursor-pointer items-center rounded-lg border border-gray-200 bg-white px-3 text-xs font-extrabold text-gray-700 transition-colors hover:bg-gray-50">
                     {uploadingKind === kind ? "Uploading..." : `Upload ${kind}`}
                     <input
                       type="file"
@@ -2176,7 +2235,7 @@ function RestaurantPanel({
       <Button
         onClick={save}
         disabled={isSaving}
-        className="mt-6 h-11 rounded-xl bg-[#c84630] px-5 font-extrabold hover:bg-[#b03a28] disabled:opacity-50"
+        className="mt-6 h-11 min-h-[44px] rounded-xl bg-[#c84630] px-5 font-extrabold transition-colors hover:bg-[#b03a28] disabled:opacity-50"
       >
         <Save className="mr-2 h-4 w-4" />
         {isSaving ? "Saving..." : "Save restaurant"}
@@ -2253,7 +2312,7 @@ function InvoiceButton({ orderId }: { orderId: string }) {
     <button
       onClick={handlePrint}
       disabled={isLoading}
-      className="rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-[10px] font-bold text-[#c84630] hover:bg-gray-50 disabled:opacity-50"
+      className="cursor-pointer rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-[10px] font-bold uppercase tracking-wide text-[#c84630] transition-colors hover:bg-gray-50 disabled:opacity-50"
     >
       {isLoading ? "Loading..." : "Invoice"}
     </button>
@@ -2276,7 +2335,7 @@ function EmptyKitchen() {
 
 function AdminLoading() {
   return (
-    <main className="min-h-screen bg-[#F8F9FA] p-8">
+    <main className="min-h-dvh bg-gray-50 p-8">
       <div className="mx-auto max-w-7xl animate-pulse space-y-5">
         <div className="h-20 rounded-2xl bg-gray-100" />
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">

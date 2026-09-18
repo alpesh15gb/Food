@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { trpc } from "@/lib/trpc";
+import { formatINR } from "@/lib/types";
 
 type Tab = "materials" | "recipes" | "suppliers" | "purchase-orders";
 
@@ -14,8 +15,8 @@ export default function InventoryPanel({ restaurantId }: { restaurantId: string 
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-xl font-bold text-gray-900">Inventory & Recipes</h2>
-        <p className="text-sm text-gray-600 mt-1">Track raw materials, link ingredients to menu items, manage suppliers and purchase orders.</p>
+        <h2 className="text-xl font-extrabold text-gray-900">Inventory & Recipes</h2>
+        <p className="text-sm text-gray-500 mt-1">Track raw materials, link ingredients to menu items, manage suppliers and purchase orders.</p>
       </div>
 
       <div className="flex gap-1 border-b border-gray-200 pb-0">
@@ -28,10 +29,10 @@ export default function InventoryPanel({ restaurantId }: { restaurantId: string 
           <button
             key={t.id}
             onClick={() => setTab(t.id)}
-            className={`flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
+            className={`flex cursor-pointer items-center gap-1.5 px-4 py-2.5 text-sm font-bold border-b-2 transition-colors ${
               tab === t.id
-                ? "border-gray-900 text-gray-900"
-                : "border-transparent text-gray-600 hover:text-gray-900"
+                ? "border-[#c84630] text-gray-900"
+                : "border-transparent text-gray-500 hover:text-gray-900"
             }`}
           >
             <t.icon className="w-4 h-4" />
@@ -85,11 +86,11 @@ function MaterialsTab({ restaurantId }: { restaurantId: string }) {
       )}
 
       {!showForm ? (
-        <Button onClick={() => setShowForm(true)} className="bg-gray-900 hover:bg-gray-800 text-white gap-2">
+        <Button onClick={() => setShowForm(true)} className="h-11 min-h-[44px] cursor-pointer rounded-xl bg-[#c84630] font-extrabold text-white transition-colors hover:bg-[#b03a28] gap-2">
           <Plus className="w-4 h-4" /> Add Material
         </Button>
       ) : (
-        <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-3">
+        <div className="bg-white rounded-2xl border border-gray-200 p-4 space-y-3">
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1">
               <Label>Name</Label>
@@ -124,40 +125,59 @@ function MaterialsTab({ restaurantId }: { restaurantId: string }) {
                 costPerUnitPaise: form.costPerUnit ? Math.round(parseFloat(form.costPerUnit) * 100) : undefined,
                 category: form.category || undefined,
               });
-            }} disabled={createMaterial.isPending} className="bg-gray-900 hover:bg-gray-800 text-white">
+            }} disabled={createMaterial.isPending} className="h-11 min-h-[44px] cursor-pointer rounded-xl bg-[#c84630] font-extrabold text-white transition-colors hover:bg-[#b03a28] disabled:opacity-50">
               {createMaterial.isPending ? <LoaderCircle className="w-4 h-4 animate-spin mr-1" /> : null} Save
             </Button>
-            <Button variant="outline" onClick={() => setShowForm(false)}>Cancel</Button>
+            <Button variant="outline" onClick={() => setShowForm(false)} className="h-11 min-h-[44px] cursor-pointer rounded-xl transition-colors">Cancel</Button>
           </div>
         </div>
       )}
 
-      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-        <div className="overflow-x-auto">
+      {materials.isLoading ? (
+        <div className="flex items-center justify-center rounded-2xl border border-gray-200 bg-white py-12">
+          <LoaderCircle className="h-5 w-5 animate-spin text-gray-500" />
+          <span className="ml-2 text-sm font-bold text-gray-500">Loading materials…</span>
+        </div>
+      ) : materials.isError ? (
+        <div className="rounded-2xl border border-red-200 bg-red-50 p-6 text-center">
+          <p className="text-sm font-bold text-red-700">We couldn't load materials. Please retry.</p>
+          <Button size="sm" variant="outline" className="mt-3 h-11 min-h-[44px] cursor-pointer rounded-xl transition-colors" onClick={() => materials.refetch()}>
+            Retry
+          </Button>
+        </div>
+      ) : (
+      <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
+        <div className="max-h-[70vh] overflow-auto">
         <table className="w-full min-w-[600px] text-sm">
-          <thead className="bg-gray-50 text-left">
+          <thead className="sticky top-0 bg-gray-50 text-left">
             <tr>
-              <th className="px-4 py-2.5 font-semibold text-gray-600">Material</th>
-              <th className="px-4 py-2.5 font-semibold text-gray-600">Stock</th>
-              <th className="px-4 py-2.5 font-semibold text-gray-600">Min</th>
-              <th className="px-4 py-2.5 font-semibold text-gray-600">Cost/Unit</th>
-              <th className="px-4 py-2.5 font-semibold text-gray-600">Category</th>
+              <th className="px-4 py-2.5 text-[10px] font-extrabold uppercase tracking-wide text-gray-500">Material</th>
+              <th className="px-4 py-2.5 text-[10px] font-extrabold uppercase tracking-wide text-gray-500">Stock</th>
+              <th className="px-4 py-2.5 text-[10px] font-extrabold uppercase tracking-wide text-gray-500">Min</th>
+              <th className="px-4 py-2.5 text-[10px] font-extrabold uppercase tracking-wide text-gray-500">Cost/Unit</th>
+              <th className="px-4 py-2.5 text-[10px] font-extrabold uppercase tracking-wide text-gray-500">Category</th>
             </tr>
           </thead>
           <tbody>
             {list.length === 0 ? (
-              <tr><td colSpan={5} className="px-4 py-8 text-center text-gray-400">No materials added yet</td></tr>
+              <tr><td colSpan={5} className="px-4 py-8 text-center">
+                <p className="text-sm font-extrabold text-gray-900">No materials added yet</p>
+                <p className="mt-1 text-xs text-gray-500">Add your first raw material to start tracking stock.</p>
+                <Button onClick={() => setShowForm(true)} className="mt-4 h-11 min-h-[44px] cursor-pointer rounded-xl bg-[#c84630] font-extrabold text-white transition-colors hover:bg-[#b03a28]">
+                  <Plus className="w-4 h-4 mr-1" /> Add Material
+                </Button>
+              </td></tr>
             ) : list.map(m => {
               const stock = parseFloat(m.currentStock);
               const min = parseFloat(m.minStock);
               const isLow = stock <= min;
               return (
-                <tr key={m.id} className="border-t border-gray-100">
-                  <td className="px-4 py-2.5 font-medium">{m.name}</td>
-                  <td className={`px-4 py-2.5 ${isLow ? "text-red-600 font-bold" : ""}`}>{stock} {m.unit}</td>
-                  <td className="px-4 py-2.5 text-gray-600">{min} {m.unit}</td>
-                  <td className="px-4 py-2.5">₹{(m.costPerUnitPaise / 100).toFixed(2)}</td>
-                  <td className="px-4 py-2.5 text-gray-600">{m.category ?? "-"}</td>
+                <tr key={m.id} className="border-t border-gray-100 transition-colors hover:bg-gray-50">
+                  <td className="px-4 py-2.5 font-bold text-gray-900">{m.name}</td>
+                  <td className={`px-4 py-2.5 tabular-nums ${isLow ? "text-red-600 font-extrabold" : "text-gray-900"}`}>{stock} {m.unit}</td>
+                  <td className="px-4 py-2.5 tabular-nums text-gray-500">{min} {m.unit}</td>
+                  <td className="px-4 py-2.5 tabular-nums text-gray-900">{formatINR(m.costPerUnitPaise / 100)}</td>
+                  <td className="px-4 py-2.5 text-gray-500">{m.category ?? "-"}</td>
                 </tr>
               );
             })}
@@ -165,6 +185,7 @@ function MaterialsTab({ restaurantId }: { restaurantId: string }) {
         </table>
         </div>
       </div>
+      )}
     </div>
   );
 }
@@ -174,11 +195,12 @@ function MaterialsTab({ restaurantId }: { restaurantId: string }) {
 // =============================================================================
 
 function RecipesTab({ restaurantId }: { restaurantId: string }) {
+  void restaurantId;
   return (
-    <div className="text-center py-12 text-gray-400">
-      <UtensilsCrossed className="w-12 h-12 mx-auto mb-3 opacity-40" />
-      <p className="font-medium">Recipe Builder</p>
-      <p className="text-sm mt-1">Link menu items to raw material ingredients. Select a menu item from the Menu panel to configure its recipe.</p>
+    <div className="rounded-2xl border border-dashed border-gray-200 bg-white px-4 py-12 text-center">
+      <UtensilsCrossed className="w-12 h-12 mx-auto mb-3 text-gray-500 opacity-40" />
+      <p className="font-extrabold text-gray-900">Recipe Builder</p>
+      <p className="mx-auto mt-1 max-w-md text-sm text-gray-500">Link menu items to raw material ingredients. Select a menu item from the Menu panel to configure its recipe.</p>
     </div>
   );
 }
@@ -207,49 +229,69 @@ function SuppliersTab({ restaurantId }: { restaurantId: string }) {
   return (
     <div className="space-y-4">
       {!showForm ? (
-        <Button onClick={() => setShowForm(true)} className="bg-gray-900 hover:bg-gray-800 text-white gap-2">
+        <Button onClick={() => setShowForm(true)} className="h-11 min-h-[44px] cursor-pointer rounded-xl bg-[#c84630] font-extrabold text-white transition-colors hover:bg-[#b03a28] gap-2">
           <Plus className="w-4 h-4" /> Add Supplier
         </Button>
       ) : (
-        <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-3">
+        <div className="bg-white rounded-2xl border border-gray-200 p-4 space-y-3">
           <div className="grid grid-cols-3 gap-3">
             <div className="space-y-1"><Label>Name</Label><Input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} /></div>
             <div className="space-y-1"><Label>Phone</Label><Input value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} /></div>
             <div className="space-y-1"><Label>Email</Label><Input value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} /></div>
           </div>
           <div className="flex gap-2 pt-2">
-            <Button onClick={() => { if (!form.name) { toast.error("Name required"); return; } createSupplier.mutate({ restaurantId, ...form }); }} disabled={createSupplier.isPending} className="bg-gray-900 hover:bg-gray-800 text-white">
+            <Button onClick={() => { if (!form.name) { toast.error("Name required"); return; } createSupplier.mutate({ restaurantId, ...form }); }} disabled={createSupplier.isPending} className="h-11 min-h-[44px] cursor-pointer rounded-xl bg-[#c84630] font-extrabold text-white transition-colors hover:bg-[#b03a28] disabled:opacity-50">
               {createSupplier.isPending ? <LoaderCircle className="w-4 h-4 animate-spin mr-1" /> : null} Save
             </Button>
-            <Button variant="outline" onClick={() => setShowForm(false)}>Cancel</Button>
+            <Button variant="outline" onClick={() => setShowForm(false)} className="h-11 min-h-[44px] cursor-pointer rounded-xl transition-colors">Cancel</Button>
           </div>
         </div>
       )}
 
-      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-        <div className="overflow-x-auto">
+      {suppliers.isLoading ? (
+        <div className="flex items-center justify-center rounded-2xl border border-gray-200 bg-white py-12">
+          <LoaderCircle className="h-5 w-5 animate-spin text-gray-500" />
+          <span className="ml-2 text-sm font-bold text-gray-500">Loading suppliers…</span>
+        </div>
+      ) : suppliers.isError ? (
+        <div className="rounded-2xl border border-red-200 bg-red-50 p-6 text-center">
+          <p className="text-sm font-bold text-red-700">We couldn't load suppliers. Please retry.</p>
+          <Button size="sm" variant="outline" className="mt-3 h-11 min-h-[44px] cursor-pointer rounded-xl transition-colors" onClick={() => suppliers.refetch()}>
+            Retry
+          </Button>
+        </div>
+      ) : (
+      <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
+        <div className="max-h-[70vh] overflow-auto">
         <table className="w-full min-w-[600px] text-sm">
-          <thead className="bg-gray-50 text-left">
+          <thead className="sticky top-0 bg-gray-50 text-left">
             <tr>
-              <th className="px-4 py-2.5 font-semibold text-gray-600">Name</th>
-              <th className="px-4 py-2.5 font-semibold text-gray-600">Phone</th>
-              <th className="px-4 py-2.5 font-semibold text-gray-600">Email</th>
+              <th className="px-4 py-2.5 text-[10px] font-extrabold uppercase tracking-wide text-gray-500">Name</th>
+              <th className="px-4 py-2.5 text-[10px] font-extrabold uppercase tracking-wide text-gray-500">Phone</th>
+              <th className="px-4 py-2.5 text-[10px] font-extrabold uppercase tracking-wide text-gray-500">Email</th>
             </tr>
           </thead>
           <tbody>
             {list.length === 0 ? (
-              <tr><td colSpan={3} className="px-4 py-8 text-center text-gray-400">No suppliers added yet</td></tr>
+              <tr><td colSpan={3} className="px-4 py-8 text-center">
+                <p className="text-sm font-extrabold text-gray-900">No suppliers added yet</p>
+                <p className="mt-1 text-xs text-gray-500">Add your first supplier to raise purchase orders.</p>
+                <Button onClick={() => setShowForm(true)} className="mt-4 h-11 min-h-[44px] cursor-pointer rounded-xl bg-[#c84630] font-extrabold text-white transition-colors hover:bg-[#b03a28]">
+                  <Plus className="w-4 h-4 mr-1" /> Add Supplier
+                </Button>
+              </td></tr>
             ) : list.map(s => (
-              <tr key={s.id} className="border-t border-gray-100">
-                <td className="px-4 py-2.5 font-medium">{s.name}</td>
-                <td className="px-4 py-2.5">{s.phone ?? "-"}</td>
-                <td className="px-4 py-2.5">{s.email ?? "-"}</td>
+              <tr key={s.id} className="border-t border-gray-100 transition-colors hover:bg-gray-50">
+                <td className="px-4 py-2.5 font-bold text-gray-900">{s.name}</td>
+                <td className="px-4 py-2.5 tabular-nums text-gray-900">{s.phone ?? "-"}</td>
+                <td className="px-4 py-2.5 text-gray-500">{s.email ?? "-"}</td>
               </tr>
             ))}
           </tbody>
         </table>
         </div>
       </div>
+      )}
     </div>
   );
 }
@@ -262,40 +304,61 @@ function PurchaseOrdersTab({ restaurantId }: { restaurantId: string }) {
   const pos = trpc.inventory.listPurchaseOrders.useQuery({ restaurantId });
   const list = pos.data ?? [];
 
+  if (pos.isLoading) {
+    return (
+      <div className="flex items-center justify-center rounded-2xl border border-gray-200 bg-white py-12">
+        <LoaderCircle className="h-5 w-5 animate-spin text-gray-500" />
+        <span className="ml-2 text-sm font-bold text-gray-500">Loading purchase orders…</span>
+      </div>
+    );
+  }
+
+  if (pos.isError) {
+    return (
+      <div className="rounded-2xl border border-red-200 bg-red-50 p-6 text-center">
+        <p className="text-sm font-bold text-red-700">We couldn't load purchase orders. Please retry.</p>
+        <Button size="sm" variant="outline" className="mt-3 h-11 min-h-[44px] cursor-pointer rounded-xl transition-colors" onClick={() => pos.refetch()}>
+          Retry
+        </Button>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-4">
-      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-        <div className="overflow-x-auto">
+      <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
+        <div className="max-h-[70vh] overflow-auto">
         <table className="w-full min-w-[600px] text-sm">
-          <thead className="bg-gray-50 text-left">
+          <thead className="sticky top-0 bg-gray-50 text-left">
             <tr>
-              <th className="px-4 py-2.5 font-semibold text-gray-600">PO #</th>
-              <th className="px-4 py-2.5 font-semibold text-gray-600">Supplier</th>
-              <th className="px-4 py-2.5 font-semibold text-gray-600">Status</th>
-              <th className="px-4 py-2.5 font-semibold text-gray-600">Total</th>
-              <th className="px-4 py-2.5 font-semibold text-gray-600">Date</th>
+              <th className="px-4 py-2.5 text-[10px] font-extrabold uppercase tracking-wide text-gray-500">PO #</th>
+              <th className="px-4 py-2.5 text-[10px] font-extrabold uppercase tracking-wide text-gray-500">Supplier</th>
+              <th className="px-4 py-2.5 text-[10px] font-extrabold uppercase tracking-wide text-gray-500">Status</th>
+              <th className="px-4 py-2.5 text-[10px] font-extrabold uppercase tracking-wide text-gray-500">Total</th>
+              <th className="px-4 py-2.5 text-[10px] font-extrabold uppercase tracking-wide text-gray-500">Date</th>
             </tr>
           </thead>
           <tbody>
             {list.length === 0 ? (
-              <tr><td colSpan={5} className="px-4 py-8 text-center text-gray-400">
-                <Package className="w-8 h-8 mx-auto mb-2 opacity-40" />
-                No purchase orders yet
+              <tr><td colSpan={5} className="px-4 py-8 text-center">
+                <Package className="w-8 h-8 mx-auto mb-2 text-gray-500 opacity-40" />
+                <p className="text-sm font-extrabold text-gray-900">No purchase orders yet</p>
+                <p className="mt-1 text-xs text-gray-500">Purchase orders raised to suppliers will appear here.</p>
               </td></tr>
             ) : list.map(po => (
-              <tr key={po.id} className="border-t border-gray-100">
-                <td className="px-4 py-2.5 font-mono text-xs">{po.id.slice(-8)}</td>
-                <td className="px-4 py-2.5">{po.supplierName ?? "-"}</td>
+              <tr key={po.id} className="border-t border-gray-100 transition-colors hover:bg-gray-50">
+                <td className="px-4 py-2.5 font-mono text-xs tabular-nums">{po.id.slice(-8)}</td>
+                <td className="px-4 py-2.5 font-bold text-gray-900">{po.supplierName ?? "-"}</td>
                 <td className="px-4 py-2.5">
-                  <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
-                    po.status === "RECEIVED" ? "bg-green-100 text-green-700" :
-                    po.status === "SENT" ? "bg-blue-100 text-blue-700" :
+                  <span className={`rounded-full px-2.5 py-1 text-[10px] font-extrabold uppercase tracking-wide ${
+                    po.status === "RECEIVED" ? "bg-green-50 text-green-700" :
+                    po.status === "SENT" ? "bg-blue-50 text-blue-700" :
                     po.status === "CANCELLED" ? "bg-gray-100 text-gray-600" :
-                    "bg-yellow-100 text-yellow-700"
+                    "bg-amber-50 text-amber-700"
                   }`}>{po.status}</span>
                 </td>
-                <td className="px-4 py-2.5">₹{(po.totalPaise / 100).toLocaleString("en-IN")}</td>
-                <td className="px-4 py-2.5 text-gray-600">{new Date(po.createdAt).toLocaleDateString()}</td>
+                <td className="px-4 py-2.5 tabular-nums text-gray-900">{formatINR(po.totalPaise / 100)}</td>
+                <td className="px-4 py-2.5 tabular-nums text-gray-500">{new Date(po.createdAt).toLocaleDateString()}</td>
               </tr>
             ))}
           </tbody>

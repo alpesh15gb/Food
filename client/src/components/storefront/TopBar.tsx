@@ -33,13 +33,14 @@ export default function TopBar({
       <div className="mx-auto flex h-16 max-w-[1440px] items-center justify-between px-4 sm:px-6 lg:px-10">
         <button
           onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
-          className="flex min-w-0 items-center gap-2.5 text-left"
+          className="flex min-w-0 cursor-pointer touch-manipulation items-center gap-2.5 text-left [-webkit-tap-highlight-color:transparent]"
         >
           {showLogo ? (
             <img
               src={restaurantLogo}
               alt={restaurantName}
-              className="h-9 w-9 shrink-0 rounded-full object-cover ring-1 ring-white/20"
+              decoding="async"
+              className="aspect-square h-9 w-9 shrink-0 rounded-full object-cover ring-1 ring-white/20"
               onError={() => setLogoFailed(true)}
             />
           ) : (
@@ -64,21 +65,21 @@ export default function TopBar({
         <nav className="flex shrink-0 items-center gap-2 sm:gap-4">
           <button
             onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
-            className="hidden text-xs font-bold hover:opacity-80 md:block"
+            className="hidden min-h-[44px] cursor-pointer touch-manipulation items-center px-1 text-xs font-bold transition-opacity duration-200 hover:opacity-80 [-webkit-tap-highlight-color:transparent] md:block"
             style={{ color: "var(--sf-text-secondary)" }}
           >
             Home
           </button>
           <a
             href="#menu"
-            className="hidden text-xs font-bold hover:opacity-80 md:block"
+            className="hidden min-h-[44px] cursor-pointer touch-manipulation items-center px-1 text-xs font-bold transition-opacity duration-200 hover:opacity-80 [-webkit-tap-highlight-color:transparent] md:block"
             style={{ color: "var(--sf-text)" }}
           >
             Menu
           </a>
           <button
             onClick={() => setSearchOpen((open) => !open)}
-            className="grid h-9 min-h-[44px] w-9 min-w-[44px] place-items-center rounded-full outline-none transition-colors hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-[var(--sf-primary)]"
+            className="grid h-9 min-h-[44px] w-9 min-w-[44px] cursor-pointer touch-manipulation place-items-center rounded-full outline-none transition-colors duration-200 hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-[var(--sf-primary)] [-webkit-tap-highlight-color:transparent]"
             aria-label="Search dishes"
             style={{ color: "var(--sf-text-secondary)" }}
           >
@@ -86,7 +87,7 @@ export default function TopBar({
           </button>
           <button
             onClick={onAccount}
-            className="grid h-9 min-h-[44px] w-9 min-w-[44px] place-items-center rounded-full outline-none transition-colors hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-[var(--sf-primary)]"
+            className="grid h-9 min-h-[44px] w-9 min-w-[44px] cursor-pointer touch-manipulation place-items-center rounded-full outline-none transition-colors duration-200 hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-[var(--sf-primary)] [-webkit-tap-highlight-color:transparent]"
             aria-label="Account"
             style={{ color: "var(--sf-text-secondary)" }}
           >
@@ -94,14 +95,14 @@ export default function TopBar({
           </button>
           <button
             onClick={onCart}
-            className="relative grid h-9 min-h-[44px] w-9 min-w-[44px] place-items-center rounded-full outline-none transition-colors hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-[var(--sf-primary)]"
+            className="relative grid h-9 min-h-[44px] w-9 min-w-[44px] cursor-pointer touch-manipulation place-items-center rounded-full outline-none transition-colors duration-200 hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-[var(--sf-primary)] [-webkit-tap-highlight-color:transparent]"
             aria-label="Open cart"
             style={{ color: "var(--sf-text)" }}
           >
             <ShoppingBag className="h-4 w-4" />
             {itemCount > 0 && (
               <span
-                className="sf-pop-in absolute -right-0.5 -top-0.5 grid h-[18px] min-w-[18px] place-items-center rounded-full px-0.5 text-[9px] font-extrabold text-white ring-2"
+                className="sf-pop-in absolute -right-0.5 -top-0.5 grid h-[18px] min-w-[18px] place-items-center rounded-full px-0.5 text-[9px] font-extrabold tabular-nums text-white ring-2"
                 style={{ background: "var(--sf-primary)", "--tw-ring-color": "var(--sf-bg)" } as React.CSSProperties}
               >
                 {itemCount}
@@ -110,7 +111,7 @@ export default function TopBar({
           </button>
           <a
             href="#menu"
-            className="hidden rounded-full px-5 py-2.5 text-xs font-extrabold text-white shadow-[var(--sf-shadow-fab)] sm:inline-flex"
+            className="hidden cursor-pointer touch-manipulation rounded-full px-5 py-2.5 text-xs font-extrabold text-white shadow-[var(--sf-shadow-fab)] transition-all duration-200 hover:brightness-110 active:scale-95 [-webkit-tap-highlight-color:transparent] sm:inline-flex"
             style={{ background: "var(--sf-primary)" }}
           >
             Order now

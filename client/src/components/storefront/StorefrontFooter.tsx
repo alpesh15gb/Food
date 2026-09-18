@@ -36,7 +36,7 @@ export default function StorefrontFooter({
             {contactPhone && (
               <a
                 href={`tel:${contactPhone}`}
-                className="mt-1 inline-block text-sm font-semibold hover:underline"
+                className="mt-1 inline-block min-h-[44px] cursor-pointer touch-manipulation py-2.5 text-sm font-semibold tabular-nums transition-opacity duration-200 hover:underline [-webkit-tap-highlight-color:transparent]"
                 style={{ color: "var(--sf-primary)" }}
               >
                 {contactPhone}
@@ -55,7 +55,7 @@ export default function StorefrontFooter({
               <Link
                 key={l.href}
                 href={l.href}
-                className="min-h-[44px] py-2.5 text-sm font-semibold hover:underline md:min-h-0 md:py-1"
+                className="min-h-[44px] cursor-pointer touch-manipulation py-2.5 text-sm font-semibold transition-opacity duration-200 hover:underline [-webkit-tap-highlight-color:transparent] md:min-h-0 md:py-1"
                 style={{ color: "var(--sf-text-secondary)" }}
               >
                 {l.label}

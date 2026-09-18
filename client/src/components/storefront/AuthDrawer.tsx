@@ -46,7 +46,7 @@ export default function AuthDrawer({
 }) {
   return (
     <Drawer open={open} onOpenChange={onOpenChange}>
-      <DrawerContent className="storefront max-h-[85vh]" style={{ background: "var(--sf-bg)" }}>
+      <DrawerContent className="storefront max-h-[85dvh]" style={{ background: "var(--sf-bg)" }}>
         <DrawerHeader className="px-6 pb-2 text-left">
           <DrawerTitle
             className="sf-heading text-2xl"
@@ -106,7 +106,7 @@ export default function AuthDrawer({
               <Button
                 onClick={onLogout}
                 variant="outline"
-                className="w-full rounded-[var(--sf-radius-btn)] font-extrabold"
+                className="w-full cursor-pointer touch-manipulation rounded-[var(--sf-radius-btn)] font-extrabold transition-colors duration-200 active:scale-95 [-webkit-tap-highlight-color:transparent]"
                 style={{
                   borderColor: "var(--sf-border)",
                   color: "var(--sf-red)",
@@ -143,7 +143,7 @@ export default function AuthDrawer({
                 disabled={
                   otpLoading || normalizePhone(otpPhone).length < 10
                 }
-                className="h-12 w-full rounded-[var(--sf-radius-btn)] text-base font-extrabold text-white"
+                className="h-12 w-full cursor-pointer touch-manipulation rounded-[var(--sf-radius-btn)] text-base font-extrabold text-white tabular-nums transition-all duration-200 hover:brightness-110 active:scale-95 disabled:cursor-not-allowed [-webkit-tap-highlight-color:transparent]"
                 style={{ background: "var(--sf-primary)" }}
               >
                 {otpLoading ? "Sending..." : "Send verification code"}
@@ -184,7 +184,7 @@ export default function AuthDrawer({
               <Button
                 onClick={onVerifyOtp}
                 disabled={otpLoading || otpCode.length !== 6}
-                className="h-12 w-full rounded-[var(--sf-radius-btn)] text-base font-extrabold text-white"
+                className="h-12 w-full cursor-pointer touch-manipulation rounded-[var(--sf-radius-btn)] text-base font-extrabold text-white tabular-nums transition-all duration-200 hover:brightness-110 active:scale-95 disabled:cursor-not-allowed [-webkit-tap-highlight-color:transparent]"
                 style={{ background: "var(--sf-primary)" }}
               >
                 {otpLoading ? "Verifying..." : "Verify & continue"}
@@ -195,7 +195,7 @@ export default function AuthDrawer({
                   setOtpCode("");
                   setOtpError("");
                 }}
-                className="w-full text-center text-xs font-bold underline"
+                className="min-h-[44px] w-full cursor-pointer touch-manipulation px-2 py-2 text-center text-xs font-bold underline transition-opacity duration-200 hover:opacity-80 [-webkit-tap-highlight-color:transparent]"
                 style={{ color: "var(--sf-text-muted)" }}
               >
                 Change phone number

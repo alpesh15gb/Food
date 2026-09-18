@@ -53,7 +53,7 @@ export default function SearchAndFilters({
               <button
                 key={pill.id}
                 onClick={() => onCategoryChange(pill.name)}
-                className="rounded-full px-5 py-2.5 text-xs font-bold transition-all"
+                className="cursor-pointer touch-manipulation rounded-full px-5 py-2.5 text-xs font-bold transition-all duration-200 hover:brightness-110 active:scale-95 [-webkit-tap-highlight-color:transparent]"
                 style={
                   active
                     ? {

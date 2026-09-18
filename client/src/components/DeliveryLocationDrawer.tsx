@@ -350,7 +350,7 @@ export default function DeliveryLocationDrawer({
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="storefront max-w-md rounded-[1.5rem] p-0 max-h-[90vh] overflow-y-auto" style={{ background: "var(--sf-bg)", borderColor: "var(--sf-border)" }}>
+      <DialogContent className="storefront max-h-[90dvh] w-[calc(100vw-2rem)] max-w-md overflow-y-auto rounded-[1.5rem] p-0" style={{ background: "var(--sf-bg)", borderColor: "var(--sf-border)" }}>
         <div className="rounded-t-[1.5rem] border-b p-6" style={{ borderColor: "var(--sf-border)" }}>
           <DialogHeader>
             <DialogTitle className="font-extrabold tracking-tight text-3xl" style={{ color: "var(--sf-text)" }}>
@@ -377,7 +377,7 @@ export default function DeliveryLocationDrawer({
 
               <Button
                 onClick={useCurrentLocation}
-                className="h-12 w-full rounded-xl bg-[#C84630] font-bold text-white hover:bg-[#b03a28]"
+                className="h-12 w-full cursor-pointer touch-manipulation rounded-xl bg-[var(--sf-primary)] font-bold text-white transition-all duration-200 hover:brightness-90 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50 [-webkit-tap-highlight-color:transparent]"
               >
                 <Navigation className="mr-2 h-4 w-4" />
                 Use My Current Location
@@ -403,7 +403,7 @@ export default function DeliveryLocationDrawer({
                   />
                   <Button
                     variant="outline"
-                    className="h-12 rounded-xl border-[var(--sf-border)] bg-[var(--sf-surface)] font-bold"
+                    className="h-12 cursor-pointer touch-manipulation rounded-xl border-[var(--sf-border)] bg-[var(--sf-surface)] font-bold transition-colors duration-200 [-webkit-tap-highlight-color:transparent]"
                     style={{ color: "var(--sf-text)" }}
                     disabled={!searchQuery.trim()}
                   >
@@ -417,10 +417,10 @@ export default function DeliveryLocationDrawer({
                       <button
                         key={result.placeId}
                         onClick={() => handlePlaceSelect(result.placeId, result.description)}
-                        className="w-full px-4 py-3 text-left text-sm hover:bg-white/10"
+                        className="w-full cursor-pointer touch-manipulation px-4 py-3 text-left text-sm transition-colors duration-150 hover:bg-white/10 [-webkit-tap-highlight-color:transparent]"
                         style={{ color: "var(--sf-text)" }}
                       >
-                        <MapPin className="mr-2 inline h-3 w-3 text-[#C84630]" />
+                        <MapPin className="mr-2 inline h-3 w-3 text-[var(--sf-primary)]" />
                         {result.description}
                       </button>
                     ))}
@@ -438,7 +438,7 @@ export default function DeliveryLocationDrawer({
                   setStep("map_confirm");
                 }}
                 variant="outline"
-                className="h-11 w-full rounded-xl border-[var(--sf-border)] bg-[var(--sf-surface)] font-bold"
+                className="h-11 w-full cursor-pointer touch-manipulation rounded-xl border-[var(--sf-border)] bg-[var(--sf-surface)] font-bold transition-colors duration-200 hover:bg-white/10 active:scale-95 [-webkit-tap-highlight-color:transparent]"
                 style={{ color: "var(--sf-text)" }}
               >
                 <MapPin className="mr-2 h-4 w-4" />
@@ -450,7 +450,7 @@ export default function DeliveryLocationDrawer({
           {/* Step: Loading */}
           {step === "loading" && (
             <div className="flex flex-col items-center gap-4 py-8">
-              <Loader2 className="h-8 w-8 animate-spin text-[#C84630]" />
+              <Loader2 className="h-8 w-8 animate-spin text-[var(--sf-primary)]" />
               <p className="text-sm" style={{ color: "var(--sf-text-muted)" }}>Getting your location...</p>
             </div>
           )}
@@ -460,7 +460,7 @@ export default function DeliveryLocationDrawer({
             <>
               <div className="rounded-xl border border-[var(--sf-border)] bg-[var(--sf-bg-subtle)] p-4">
                 <p className="text-sm font-semibold" style={{ color: "var(--sf-text)" }}>
-                  <Crosshair className="mr-1 inline h-4 w-4 text-[#C84630]" />
+                  <Crosshair className="mr-1 inline h-4 w-4 text-[var(--sf-primary)]" />
                   Confirm your delivery pin
                 </p>
                 <p className="mt-1 text-xs" style={{ color: "var(--sf-text-secondary)" }}>
@@ -502,14 +502,14 @@ export default function DeliveryLocationDrawer({
                 {/* Fixed center pin overlay */}
                 <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
                   <div className="relative">
-                    <MapPin className="h-8 w-8 -translate-y-1/2 text-[#C84630] drop-shadow-md" fill="#C84630" />
+                    <MapPin className="h-8 w-8 -translate-y-1/2 text-[var(--sf-primary)] drop-shadow-md" fill="currentColor" />
                     <div className="absolute -bottom-1 left-1/2 h-2 w-2 -translate-x-1/2 rounded-full bg-black/20 blur-sm" />
                   </div>
                 </div>
               </div>
 
               {geoState && (
-                <div className="space-y-1 text-xs" style={{ color: "var(--sf-text-secondary)" }}>
+                <div className="space-y-1 text-xs tabular-nums" style={{ color: "var(--sf-text-secondary)" }}>
                   <p>Pin: {geoState.latitude.toFixed(6)}, {geoState.longitude.toFixed(6)}</p>
                   {geoState.deviceAccuracyMeters && (
                     <p>Device accuracy: ~{Math.round(geoState.deviceAccuracyMeters)}m ({accuracyLevel})</p>
@@ -521,7 +521,7 @@ export default function DeliveryLocationDrawer({
                 <Button
                   onClick={() => setStep("choose_method")}
                   variant="outline"
-                  className="h-11 flex-1 rounded-xl border-[var(--sf-border)] bg-[var(--sf-surface)] font-bold"
+                  className="h-11 flex-1 cursor-pointer touch-manipulation rounded-xl border-[var(--sf-border)] bg-[var(--sf-surface)] font-bold transition-colors duration-200 hover:bg-white/10 active:scale-95 [-webkit-tap-highlight-color:transparent]"
                   style={{ color: "var(--sf-text)" }}
                 >
                   Back
@@ -536,7 +536,7 @@ export default function DeliveryLocationDrawer({
                         ? "Move the map so the pin points to your exact location"
                         : undefined
                   }
-                  className="h-11 flex-1 rounded-xl bg-[#C84630] font-bold text-white hover:bg-[#b03a28] disabled:opacity-50"
+                  className="h-11 flex-1 cursor-pointer touch-manipulation rounded-xl bg-[var(--sf-primary)] font-bold text-white transition-all duration-200 hover:brightness-90 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50 [-webkit-tap-highlight-color:transparent]"
                 >
                   <Check className="mr-1 h-4 w-4" />
                   Confirm delivery pin
@@ -549,7 +549,7 @@ export default function DeliveryLocationDrawer({
           {step === "address_form" && (
             <>
               {geoState && (
-                <div className="rounded-xl border border-[var(--sf-border)] bg-[var(--sf-bg-subtle)] p-3 text-xs" style={{ color: "var(--sf-text-secondary)" }}>
+                <div className="rounded-xl border border-[var(--sf-border)] bg-[var(--sf-bg-subtle)] p-3 text-xs tabular-nums" style={{ color: "var(--sf-text-secondary)" }}>
                   Location: {geoState.latitude.toFixed(6)}, {geoState.longitude.toFixed(6)}
                   {geoState.deviceAccuracyMeters && <> · Accuracy: ~{Math.round(geoState.deviceAccuracyMeters)}m</>}
                   {geoState.source === "map_pin" && <> · Source: Map pin</>}
@@ -608,7 +608,7 @@ export default function DeliveryLocationDrawer({
                 <Button
                   onClick={() => setStep("map_confirm")}
                   variant="outline"
-                  className="h-11 flex-1 rounded-xl border-[var(--sf-border)] bg-[var(--sf-surface)] font-bold"
+                  className="h-11 flex-1 cursor-pointer touch-manipulation rounded-xl border-[var(--sf-border)] bg-[var(--sf-surface)] font-bold transition-colors duration-200 hover:bg-white/10 active:scale-95 [-webkit-tap-highlight-color:transparent]"
                   style={{ color: "var(--sf-text)" }}
                 >
                   Back
@@ -616,7 +616,7 @@ export default function DeliveryLocationDrawer({
                 <Button
                   onClick={confirmAddress}
                   disabled={!formValid}
-                  className="h-11 flex-1 rounded-xl bg-[#C84630] font-bold text-white hover:bg-[#b03a28] disabled:opacity-50"
+                  className="h-11 flex-1 cursor-pointer touch-manipulation rounded-xl bg-[var(--sf-primary)] font-bold text-white transition-all duration-200 hover:brightness-90 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50 [-webkit-tap-highlight-color:transparent]"
                 >
                   <Check className="mr-1 h-4 w-4" />
                   Confirm Location
@@ -644,7 +644,7 @@ export default function DeliveryLocationDrawer({
               <Button
                 onClick={reset}
                 variant="outline"
-                className="h-11 w-full rounded-xl border-[var(--sf-border)] bg-[var(--sf-surface)] font-bold"
+                className="h-11 w-full cursor-pointer touch-manipulation rounded-xl border-[var(--sf-border)] bg-[var(--sf-surface)] font-bold transition-colors duration-200 hover:bg-white/10 active:scale-95 [-webkit-tap-highlight-color:transparent]"
                 style={{ color: "var(--sf-text)" }}
               >
                 Change Location

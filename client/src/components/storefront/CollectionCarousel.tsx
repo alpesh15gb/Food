@@ -19,14 +19,14 @@ export default function CollectionCarousel({
   return (
     <div className="mb-6 space-y-6">
       {collections.map((collection) => (
-        <div key={collection.name}>
-          <div className="mb-3 flex items-center gap-2">
+        <div key={collection.name} className="min-w-0">
+          <div className="mb-3 flex min-w-0 items-center gap-2">
             <Flame
-              className="h-4 w-4"
+              className="h-4 w-4 shrink-0"
               style={{ color: "var(--sf-primary)" }}
             />
             <h3
-              className="sf-heading text-sm"
+              className="sf-heading min-w-0 truncate text-sm"
               style={{ color: "var(--sf-text)" }}
             >
               {collection.name}

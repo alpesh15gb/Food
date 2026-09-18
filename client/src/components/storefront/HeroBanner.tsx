@@ -110,14 +110,14 @@ export default function HeroBanner({ restaurant, firstItemImage, thumbs = [], me
             <div className="mt-8 flex flex-wrap justify-center gap-3 lg:justify-start">
               <a
                 href="#menu"
-                className="inline-flex items-center rounded-full px-7 py-3 text-sm font-extrabold text-white shadow-[var(--sf-shadow-fab)] transition-transform active:scale-95"
+                className="inline-flex cursor-pointer touch-manipulation items-center rounded-full px-7 py-3 text-sm font-extrabold text-white shadow-[var(--sf-shadow-fab)] transition-all duration-200 hover:brightness-110 active:scale-95 [-webkit-tap-highlight-color:transparent]"
                 style={{ background: "var(--sf-primary)" }}
               >
                 View menu
               </a>
               <a
                 href="#popular"
-                className="inline-flex items-center rounded-full px-7 py-3 text-sm font-extrabold transition-transform active:scale-95"
+                className="inline-flex cursor-pointer touch-manipulation items-center rounded-full px-7 py-3 text-sm font-extrabold transition-all duration-200 hover:brightness-110 active:scale-95 [-webkit-tap-highlight-color:transparent]"
                 style={{ background: "var(--sf-text)", color: "var(--sf-bg)" }}
               >
                 Order in now
@@ -136,7 +136,9 @@ export default function HeroBanner({ restaurant, firstItemImage, thumbs = [], me
                         key={i}
                         src={src}
                         alt=""
-                        className="h-9 w-9 rounded-full object-cover ring-2"
+                        loading="lazy"
+                        decoding="async"
+                        className="aspect-square h-9 w-9 rounded-full object-cover ring-2"
                         style={{
                           borderColor: "var(--sf-bg)",
                           marginLeft: i ? -10 : 0,
@@ -146,7 +148,7 @@ export default function HeroBanner({ restaurant, firstItemImage, thumbs = [], me
                     ))}
                   </div>
                 )}
-                <span className="text-sm font-extrabold" style={{ color: "var(--sf-gold)" }}>
+                <span className="text-sm font-extrabold tabular-nums" style={{ color: "var(--sf-gold)" }}>
                   {restaurant.isOpen === false ? "Opens soon" : restaurant.eta}
                 </span>
                 <span className="text-xs font-medium" style={{ color: "var(--sf-text-muted)" }}>
@@ -175,7 +177,9 @@ export default function HeroBanner({ restaurant, firstItemImage, thumbs = [], me
                 <img
                   src={heroImage}
                   alt={restaurant.name}
-                  className="h-full w-full rounded-full object-cover"
+                  decoding="async"
+                  fetchPriority="high"
+                  className="aspect-square h-full w-full rounded-full object-cover"
                   onError={() => setFailedSrc(heroImage)}
                 />
               ) : (

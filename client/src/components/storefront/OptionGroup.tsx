@@ -36,7 +36,7 @@ export default function OptionGroup({
             <button
               key={value}
               onClick={() => onSelect(value)}
-              className={`flex items-center gap-3 rounded-[var(--sf-radius-btn)] border px-3.5 py-3 text-left text-sm font-semibold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-[var(--sf-primary)] ${
+              className={`flex min-w-0 cursor-pointer touch-manipulation items-center gap-3 rounded-[var(--sf-radius-btn)] border px-3.5 py-3 text-left text-sm font-semibold outline-none transition-colors duration-200 focus-visible:ring-2 focus-visible:ring-[var(--sf-primary)] active:scale-[0.99] [-webkit-tap-highlight-color:transparent] ${
                 active
                   ? "bg-[var(--sf-primary-soft)]"
                   : "bg-[var(--sf-surface)]"

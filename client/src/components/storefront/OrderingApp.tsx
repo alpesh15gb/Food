@@ -569,7 +569,7 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
   if (storefrontQuery.isError) {
     return (
       <div className="storefront">
-        <main className="grid min-h-screen place-items-center px-4" style={{ background: "var(--sf-bg)" }}>
+        <main className="grid min-h-dvh place-items-center px-4" style={{ background: "var(--sf-bg)" }}>
           <div className="w-full max-w-md text-center">
             <div className="mx-auto grid h-16 w-16 place-items-center rounded-full bg-red-50 text-red-500">
               <X className="h-7 w-7" />
@@ -582,7 +582,7 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
             </p>
             <button
               onClick={() => storefrontQuery.refetch()}
-              className="sf-add-btn mt-6"
+              className="sf-add-btn mt-6 cursor-pointer touch-manipulation transition-all duration-200 hover:brightness-110 active:scale-95 [-webkit-tap-highlight-color:transparent]"
             >
               Try again
             </button>
@@ -663,7 +663,7 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
   return (
     <div className="storefront">
       {seo}
-      <main className="min-h-screen pb-28 lg:pb-16" style={{ background: "var(--sf-bg)" }}>
+      <main className="min-h-dvh pb-28 lg:pb-16" style={{ background: "var(--sf-bg)" }}>
         {/* Header */}
         <TopBar
           restaurantName={restaurant.name}
@@ -713,13 +713,13 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
         <div className="mx-auto max-w-[1100px] px-4 pb-2 sm:px-6 lg:px-10">
           {query && (
             <div className="mb-4 flex items-center justify-between">
-              <p className="text-sm font-bold" style={{ color: "var(--sf-text)" }}>
+              <p className="min-w-0 truncate text-sm font-bold tabular-nums" style={{ color: "var(--sf-text)" }}>
                 Results for{" "}
                 <span style={{ color: "var(--sf-primary)" }}>"{query}"</span>
               </p>
               <button
                 onClick={() => setQuery("")}
-                className="text-xs font-bold hover:underline"
+                className="shrink-0 cursor-pointer touch-manipulation px-2 py-2 text-xs font-bold transition-opacity duration-200 hover:underline [-webkit-tap-highlight-color:transparent]"
                 style={{ color: "var(--sf-text-muted)" }}
               >
                 Clear
@@ -756,22 +756,22 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
       {cartOpen && (
         <div className="fixed inset-0 z-50">
           <button
-            className="absolute inset-0"
+            className="absolute inset-0 cursor-pointer [-webkit-tap-highlight-color:transparent]"
             style={{ background: "var(--sf-overlay)" }}
             aria-label="Close cart"
             onClick={() => setCartOpen(false)}
           />
           <div
-            className="absolute inset-y-0 right-0 w-full max-w-[400px] overflow-y-auto p-4"
+            className="absolute inset-y-0 right-0 w-full max-w-[400px] min-w-0 overflow-y-auto p-4"
             style={{ background: "var(--sf-bg-subtle)" }}
           >
-            <div className="mb-3 flex items-center justify-between">
-              <h2 className="sf-serif text-xl font-bold" style={{ color: "var(--sf-text)" }}>
+            <div className="mb-3 flex min-w-0 items-center justify-between gap-3">
+              <h2 className="sf-serif min-w-0 truncate text-xl font-bold" style={{ color: "var(--sf-text)" }}>
                 Your order
               </h2>
               <button
                 onClick={() => setCartOpen(false)}
-                className="grid h-9 w-9 place-items-center rounded-full hover:bg-white/10"
+                className="grid h-9 min-h-[44px] w-9 min-w-[44px] shrink-0 cursor-pointer touch-manipulation place-items-center rounded-full transition-colors duration-200 hover:bg-white/10 active:scale-95 [-webkit-tap-highlight-color:transparent]"
                 style={{ color: "var(--sf-text-secondary)" }}
                 aria-label="Close cart"
               >

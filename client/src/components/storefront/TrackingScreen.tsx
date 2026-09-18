@@ -57,12 +57,12 @@ export default function TrackingScreen({
 
   return (
     <main
-      className="grid min-h-screen place-items-center px-4 py-10"
+      className="grid min-h-dvh place-items-center px-4 py-10"
       style={{ background: "var(--sf-bg)" }}
     >
       <section
         aria-live="polite"
-        className="sf-card w-full max-w-lg p-8 text-center"
+        className="sf-card w-full max-w-lg min-w-0 p-8 text-center"
       >
         {!hasCredentials ? (
           <>
@@ -88,7 +88,7 @@ export default function TrackingScreen({
             {onMenu && (
               <Button
                 onClick={onMenu}
-                className="mt-6 h-12 rounded-[var(--sf-radius-btn)] px-6 font-extrabold text-white"
+                className="mt-6 h-12 cursor-pointer touch-manipulation rounded-[var(--sf-radius-btn)] px-6 font-extrabold text-white transition-all duration-200 hover:brightness-110 active:scale-95 [-webkit-tap-highlight-color:transparent]"
                 style={{ background: "var(--sf-primary)" }}
               >
                 Back to menu
@@ -136,18 +136,18 @@ export default function TrackingScreen({
               again. If this keeps happening, contact{" "}
               {restaurantName ?? "the restaurant"} directly for support.
             </p>
-            <div className="mt-6 flex justify-center gap-2">
+            <div className="mt-6 flex flex-wrap justify-center gap-2">
               <Button
                 onClick={() => tracking.refetch()}
                 variant="outline"
-                className="h-12 rounded-[var(--sf-radius-btn)] px-6 font-extrabold"
+                className="h-12 cursor-pointer touch-manipulation rounded-[var(--sf-radius-btn)] px-6 font-extrabold transition-colors duration-200 active:scale-95 [-webkit-tap-highlight-color:transparent]"
               >
                 Try again
               </Button>
               {onMenu && (
                 <Button
                   onClick={onMenu}
-                  className="h-12 rounded-[var(--sf-radius-btn)] px-6 font-extrabold text-white"
+                  className="h-12 cursor-pointer touch-manipulation rounded-[var(--sf-radius-btn)] px-6 font-extrabold text-white transition-all duration-200 hover:brightness-110 active:scale-95 [-webkit-tap-highlight-color:transparent]"
                   style={{ background: "var(--sf-primary)" }}
                 >
                   Back to menu
@@ -184,7 +184,7 @@ export default function TrackingScreen({
             </p>
             <div className="mt-5 flex flex-wrap items-center justify-center gap-2 text-xs font-extrabold">
               <span
-                className="rounded-full px-3 py-1.5 text-white"
+                className="min-w-0 truncate rounded-full px-3 py-1.5 tabular-nums text-white"
                 style={{ background: "var(--sf-text)" }}
               >
                 Order {tracking.data.orderNumber}
@@ -200,7 +200,7 @@ export default function TrackingScreen({
               </span>
               {eta && (
                 <span
-                  className="inline-flex items-center gap-1 rounded-full px-3 py-1.5"
+                  className="inline-flex items-center gap-1 rounded-full px-3 py-1.5 tabular-nums"
                   style={{
                     background: "var(--sf-green-soft)",
                     color: "var(--sf-green)",
@@ -224,16 +224,16 @@ export default function TrackingScreen({
                 }) => (
                   <div
                     key={item.id}
-                    className="flex items-center justify-between gap-3 text-sm"
+                    className="flex min-w-0 items-center justify-between gap-3 text-sm"
                   >
                     <span
-                      className="font-bold"
+                      className="line-clamp-2 min-w-0 flex-1 text-left font-bold leading-snug"
                       style={{ color: "var(--sf-text)" }}
                     >
                       {item.quantity} × {item.itemNameSnapshot}
                     </span>
                     <span
-                      className="font-bold"
+                      className="shrink-0 font-bold tabular-nums"
                       style={{ color: "var(--sf-text-secondary)" }}
                     >
                       {formatINR(
@@ -244,7 +244,7 @@ export default function TrackingScreen({
                 )
               )}
               <div
-                className="flex items-center justify-between gap-3 border-t border-dashed pt-3 text-base font-extrabold"
+                className="flex min-w-0 items-center justify-between gap-3 border-t border-dashed pt-3 text-base font-extrabold tabular-nums"
                 style={{
                   color: "var(--sf-text)",
                   borderColor: "var(--sf-border-subtle)",
@@ -281,7 +281,7 @@ export default function TrackingScreen({
                   href={tracking.data.delivery.trackingUrl}
                   target="_blank"
                   rel="noreferrer"
-                  className="mt-1 inline-flex min-h-[44px] items-center gap-1.5 rounded-[var(--sf-radius-btn)] px-4 py-2.5 text-xs font-extrabold text-white"
+                  className="mt-1 inline-flex min-h-[44px] cursor-pointer touch-manipulation items-center gap-1.5 rounded-[var(--sf-radius-btn)] px-4 py-2.5 text-xs font-extrabold text-white transition-all duration-200 hover:brightness-110 active:scale-95 [-webkit-tap-highlight-color:transparent]"
                   style={{ background: "var(--sf-text)" }}
                 >
                   <ExternalLink className="h-3.5 w-3.5" />
@@ -329,7 +329,7 @@ export default function TrackingScreen({
             {onMenu && (
               <Button
                 onClick={onMenu}
-                className="mt-6 h-12 rounded-[var(--sf-radius-btn)] px-6 font-extrabold text-white"
+                className="mt-6 h-12 cursor-pointer touch-manipulation rounded-[var(--sf-radius-btn)] px-6 font-extrabold text-white transition-all duration-200 hover:brightness-110 active:scale-95 [-webkit-tap-highlight-color:transparent]"
                 style={{ background: "var(--sf-primary)" }}
               >
                 Back to menu

@@ -95,15 +95,26 @@ export default function IntegrationPanel({ restaurantId }: { restaurantId?: stri
   const [feeInput, setFeeInput] = useState("");
 
   if (!restaurantId) {
-    return <div className="rounded-2xl bg-red-50 p-5 text-sm font-bold text-red-600">We couldn't determine which restaurant these integrations belong to.</div>;
+    return <div className="rounded-2xl border border-red-200 bg-red-50 p-5 text-sm font-bold text-red-700">We couldn't determine which restaurant these integrations belong to.</div>;
   }
 
   if (integrationQuery.isLoading) {
-    return <div className="grid min-h-72 place-items-center rounded-2xl bg-white text-sm font-bold text-gray-500"><LoaderCircle className="mr-2 h-4 w-4 animate-spin" />Checking connection readiness…</div>;
+    return <div className="grid min-h-72 place-items-center rounded-2xl border border-gray-200 bg-white text-sm font-bold text-gray-500"><LoaderCircle className="mr-2 h-4 w-4 animate-spin" />Checking connection readiness…</div>;
   }
 
-  if (!integrationQuery.data) {
-    return <div className="rounded-2xl bg-red-50 p-5 text-sm font-bold text-red-600">We couldn't read the integration status. Please refresh the workspace.</div>;
+  if (integrationQuery.isError || !integrationQuery.data) {
+    return (
+      <div className="rounded-2xl border border-red-200 bg-red-50 p-6 text-center">
+        <p className="text-sm font-bold text-red-700">We couldn't read the integration status. Please refresh the workspace.</p>
+        <Button
+          onClick={() => integrationQuery.refetch()}
+          variant="outline"
+          className="mt-3 h-11 min-h-[44px] cursor-pointer rounded-xl border-gray-200 bg-white text-xs font-extrabold text-gray-700 transition-colors hover:bg-gray-50"
+        >
+          Retry
+        </Button>
+      </div>
+    );
   }
 
   const services = Object.values(integrationQuery.data);
@@ -117,7 +128,7 @@ export default function IntegrationPanel({ restaurantId }: { restaurantId?: stri
         <div className="absolute -right-6 -top-10 h-36 w-36 rounded-full border-[18px] border-[#c84630]/30" />
         <div className="relative grid gap-4 md:grid-cols-[1fr_auto]">
           <div>
-            <p className="text-[10px] font-extrabold uppercase tracking-[0.16em] text-gray-300">Owner configuration</p>
+            <p className="text-[10px] font-extrabold uppercase tracking-wide text-gray-300">Owner configuration</p>
             <h2 className="font-extrabold tracking-tight mt-2 text-3xl">Secure connection vault</h2>
             <p className="mt-3 max-w-2xl text-sm leading-relaxed text-white/70">
               Save provider values through this owner-only panel. Each value is encrypted before database storage, never rendered again, and only used by the server when a provider call is required.
@@ -134,22 +145,22 @@ export default function IntegrationPanel({ restaurantId }: { restaurantId?: stri
         {services.map(service => {
           const isOpen = openProvider === service.provider;
           return (
-            <article key={service.provider} className="rounded-2xl bg-white p-5 shadow-sm">
+            <article key={service.provider} className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
               <div className="flex items-start justify-between gap-3">
-                <span className={`grid h-10 w-10 place-items-center rounded-xl ${service.ready ? "bg-[#e5f1e5] text-[#42774b]" : "bg-gray-50 text-[#c84630]"}`}>
+                <span className={`grid h-10 w-10 place-items-center rounded-xl ${service.ready ? "bg-green-50 text-green-700" : "bg-gray-50 text-[#c84630]"}`}>
                   {service.ready ? <CheckCircle2 className="h-5 w-5" /> : <CircleAlert className="h-5 w-5" />}
                 </span>
                 <span className="flex flex-col items-end gap-1">
-                  <span className={`rounded-full px-2.5 py-1 text-[10px] font-extrabold uppercase tracking-[0.08em] ${service.ready ? "bg-[#e5f1e5] text-[#42774b]" : "bg-gray-50 text-[#c84630]"}`}>
+                  <span className={`rounded-full px-2.5 py-1 text-[10px] font-extrabold uppercase tracking-wide ${service.ready ? "bg-green-50 text-green-700" : "bg-gray-50 text-[#c84630]"}`}>
                     {service.ready ? "Configured" : "Needs setup"}
                   </span>
                   {"mode" in service && (service as { mode?: string }).mode !== "unknown" && (
-                    <span className="rounded-full bg-gray-100 px-2.5 py-1 text-[10px] font-extrabold uppercase tracking-[0.08em] text-gray-600">
+                    <span className="rounded-full bg-gray-100 px-2.5 py-1 text-[10px] font-extrabold uppercase tracking-wide text-gray-600">
                       {(service as { mode?: string }).mode === "test" ? "Test mode" : "Live mode"}
                     </span>
                   )}
                   {"environment" in service && (
-                    <span className="rounded-full bg-gray-100 px-2.5 py-1 text-[10px] font-extrabold uppercase tracking-[0.08em] text-gray-600">
+                    <span className="rounded-full bg-gray-100 px-2.5 py-1 text-[10px] font-extrabold uppercase tracking-wide text-gray-600">
                       {(service as { environment?: string }).environment === "staging" ? "Staging" : "Production"}
                     </span>
                   )}
@@ -157,13 +168,13 @@ export default function IntegrationPanel({ restaurantId }: { restaurantId?: stri
               </div>
               <h3 className="mt-5 text-base font-extrabold text-gray-900">{service.name}</h3>
               <p className="mt-2 min-h-10 text-xs leading-relaxed text-gray-500">{service.detail}</p>
-              <Button onClick={() => setOpenProvider(isOpen ? null : service.provider as Provider)} variant="outline" className="mt-5 h-10 w-full rounded-xl border-gray-200 bg-white text-xs font-extrabold text-gray-600">
+              <Button onClick={() => setOpenProvider(isOpen ? null : service.provider as Provider)} variant="outline" className="mt-5 h-11 min-h-[44px] w-full cursor-pointer rounded-xl border-gray-200 bg-white text-xs font-extrabold text-gray-600 transition-colors hover:bg-gray-50">
                 <KeyRound className="mr-2 h-4 w-4" />
                 {isOpen ? "Close secure fields" : service.ready ? "Replace secure values" : "Add secure values"}
               </Button>
               {isOpen && (
                 <div className="mt-4 space-y-3 border-t border-dashed border-gray-200 pt-4">
-                  <p className="text-[10px] font-extrabold uppercase tracking-[0.12em] text-gray-500">Values are masked after save</p>
+                  <p className="text-[10px] font-extrabold uppercase tracking-wide text-gray-500">Values are masked after save</p>
                   {service.requiredSecrets.map(keyName => (
                     <div key={keyName}>
                       <label className="text-xs font-extrabold text-gray-700">
@@ -174,16 +185,16 @@ export default function IntegrationPanel({ restaurantId }: { restaurantId?: stri
                       </label>
                       <div className="mt-1.5 flex gap-2">
                         <Input value={drafts[keyName] ?? ""} onChange={event => setDrafts(current => ({ ...current, [keyName]: event.target.value }))} type="password" autoComplete="off" placeholder="Paste secure value" className="h-10 rounded-xl border-gray-200 text-xs" />
-                        <Button aria-label={`Save ${keyName}`} disabled={!rid || !drafts[keyName]?.trim() || saveSecret.isPending} onClick={() => saveSecret.mutate({ restaurantId: rid, provider: service.provider as Provider, keyName, value: drafts[keyName] })} className="h-10 shrink-0 rounded-xl bg-[#c84630] px-3 font-extrabold hover:bg-[#b03a28]">
+                        <Button aria-label={`Save ${keyName}`} disabled={!rid || !drafts[keyName]?.trim() || saveSecret.isPending} onClick={() => saveSecret.mutate({ restaurantId: rid, provider: service.provider as Provider, keyName, value: drafts[keyName] })} className="h-11 min-h-[44px] shrink-0 cursor-pointer rounded-xl bg-[#c84630] px-3 font-extrabold transition-colors hover:bg-[#b03a28] disabled:opacity-50">
                           {saveSecret.isPending ? <LoaderCircle className="h-4 w-4 animate-spin" /> : "Save"}
                         </Button>
-                        <Button aria-label={`Verify ${keyName}`} variant="outline" disabled={verifySecret.isPending} onClick={() => verifySecret.mutate({ restaurantId: rid, provider: service.provider as Provider, keyName })} className="h-10 shrink-0 rounded-xl border-gray-200 px-3 text-xs font-extrabold text-gray-600">Check</Button>
+                        <Button aria-label={`Verify ${keyName}`} variant="outline" disabled={verifySecret.isPending} onClick={() => verifySecret.mutate({ restaurantId: rid, provider: service.provider as Provider, keyName })} className="h-11 min-h-[44px] shrink-0 cursor-pointer rounded-xl border-gray-200 px-3 text-xs font-extrabold text-gray-600 transition-colors hover:bg-gray-50 disabled:opacity-50">Check</Button>
                       </div>
                     </div>
                   ))}
                   {(service.provider === "razorpay" || service.provider === "delivery") && (
                     <div className="space-y-2 rounded-xl bg-gray-50 p-3">
-                      <p className="text-[10px] font-extrabold uppercase tracking-[0.12em] text-gray-500">Live connection test (read-only)</p>
+                      <p className="text-[10px] font-extrabold uppercase tracking-wide text-gray-500">Live connection test (read-only)</p>
                       {service.provider === "delivery" && (
                         <div className="grid grid-cols-2 gap-2">
                           <Input value={deliveryPincodes.pickup} onChange={e => setDeliveryPincodes(p => ({ ...p, pickup: e.target.value.replace(/\D/g, "").slice(0, 6) }))} inputMode="numeric" placeholder="Pickup pincode" className="h-9 rounded-xl border-gray-200 text-xs" />
@@ -205,23 +216,23 @@ export default function IntegrationPanel({ restaurantId }: { restaurantId?: stri
                             });
                           }
                         }}
-                        className="h-9 w-full rounded-xl border-gray-200 text-xs font-extrabold text-gray-600"
+                        className="h-11 min-h-[44px] w-full cursor-pointer rounded-xl border-gray-200 text-xs font-extrabold text-gray-600 transition-colors hover:bg-gray-50 disabled:opacity-50"
                       >
                         {(testRazorpay.isPending || testDelivery.isPending) && <LoaderCircle className="mr-2 h-4 w-4 animate-spin" />}
                         Test live connection
                       </Button>
                       {connResult[service.provider] && (
-                        <p className={`text-xs font-bold ${connResult[service.provider].ok ? "text-[#42774b]" : "text-[#c84630]"}`}>
+                        <p className={`text-xs font-bold tabular-nums ${connResult[service.provider].ok ? "text-green-700" : "text-[#c84630]"}`}>
                           {connResult[service.provider].ok ? "✓ " : "✗ "}{connResult[service.provider].text}
                         </p>
                       )}
                     </div>
                   )}
                   {"webhookConfigured" in service && (
-                    <p className="text-[11px] leading-relaxed text-gray-500">
+                    <p className="text-xs leading-relaxed text-gray-500">
                       Webhook secret (server env <code className="rounded bg-gray-100 px-1 py-0.5 font-bold text-gray-700">{service.provider === "razorpay" ? "RAZORPAY_WEBHOOK_SECRET" : "SHADOWFAX_WEBHOOK_SECRET"}</code>):{" "}
                       {(service as { webhookConfigured?: boolean }).webhookConfigured
-                        ? <span className="font-extrabold text-[#42774b]">set ✓</span>
+                        ? <span className="font-extrabold text-green-700">set ✓</span>
                         : <span className="font-extrabold text-[#c84630]">missing — webhooks will be rejected until it is set on the server</span>}
                     </p>
                   )}
@@ -233,10 +244,10 @@ export default function IntegrationPanel({ restaurantId }: { restaurantId?: stri
       </section>
 
       {/* Razorpay Route — Split Settlement */}
-      <section className="rounded-2xl bg-white p-6 shadow-sm">
+      <section className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-center gap-3">
-            <span className={`grid h-10 w-10 place-items-center rounded-xl ${isRouteActive ? "bg-[#e5f1e5] text-[#42774b]" : "bg-gray-50 text-[#c84630]"}`}>
+            <span className={`grid h-10 w-10 place-items-center rounded-xl ${isRouteActive ? "bg-green-50 text-green-700" : "bg-gray-50 text-[#c84630]"}`}>
               <Split className="h-5 w-5" />
             </span>
             <div>
@@ -244,9 +255,9 @@ export default function IntegrationPanel({ restaurantId }: { restaurantId?: stri
               <p className="text-xs text-gray-500">Auto-split payments between platform and restaurant</p>
             </div>
           </div>
-          <span className={`rounded-full px-2.5 py-1 text-[10px] font-extrabold uppercase tracking-[0.08em] ${
-            isRouteActive ? "bg-[#e5f1e5] text-[#42774b]" :
-            routeData?.status === "pending" ? "bg-[#fef3cd] text-[#856404]" :
+          <span className={`rounded-full px-2.5 py-1 text-[10px] font-extrabold uppercase tracking-wide ${
+            isRouteActive ? "bg-green-50 text-green-700" :
+            routeData?.status === "pending" ? "bg-amber-50 text-amber-700" :
             "bg-gray-50 text-[#c84630]"
           }`}>
             {isRouteActive ? "Active" : routeData?.status ?? "Not linked"}
@@ -255,7 +266,7 @@ export default function IntegrationPanel({ restaurantId }: { restaurantId?: stri
 
         {!isRouteActive && (
           <div className="mt-5 space-y-3 border-t border-dashed border-gray-200 pt-5">
-            <p className="text-[10px] font-extrabold uppercase tracking-[0.12em] text-gray-500">Link a Razorpay sub-account for automatic settlement</p>
+            <p className="text-[10px] font-extrabold uppercase tracking-wide text-gray-500">Link a Razorpay sub-account for automatic settlement</p>
             <div className="grid gap-3 sm:grid-cols-2">
               <div>
                 <label className="text-xs font-extrabold text-gray-700">Contact email</label>
@@ -281,7 +292,7 @@ export default function IntegrationPanel({ restaurantId }: { restaurantId?: stri
             <Button
               disabled={!routeForm.contactEmail || !routeForm.contactPhone || setupRoute.isPending}
               onClick={() => setupRoute.mutate({ restaurantId: rid, ...routeForm })}
-              className="mt-2 h-10 rounded-xl bg-[#c84630] px-5 font-extrabold hover:bg-[#b03a28]"
+              className="mt-2 h-11 min-h-[44px] cursor-pointer rounded-xl bg-[#c84630] px-5 font-extrabold transition-colors hover:bg-[#b03a28] disabled:opacity-50"
             >
               {setupRoute.isPending ? <LoaderCircle className="mr-2 h-4 w-4 animate-spin" /> : null}
               Link Razorpay Route Account
@@ -314,13 +325,13 @@ export default function IntegrationPanel({ restaurantId }: { restaurantId?: stri
                     toast.error("Enter a valid percentage (0–100)");
                   }
                 }}
-                className="h-10 rounded-xl bg-[#c84630] px-5 font-extrabold hover:bg-[#b03a28]"
+                className="h-11 min-h-[44px] cursor-pointer rounded-xl bg-[#c84630] px-5 font-extrabold transition-colors hover:bg-[#b03a28] disabled:opacity-50"
               >
                 {updateFee.isPending ? <LoaderCircle className="h-4 w-4 animate-spin" /> : "Update fee"}
               </Button>
             </div>
-            <p className="text-[10px] text-gray-500">
-              Linked account: <code className="rounded bg-gray-50 px-1.5 py-0.5 text-[10px] font-bold text-gray-700">{routeData?.accountId}</code>
+            <p className="text-xs tabular-nums text-gray-500">
+              Linked account: <code className="rounded bg-gray-50 px-1.5 py-0.5 text-xs font-bold text-gray-700">{routeData?.accountId}</code>
             </p>
           </div>
         )}
@@ -330,8 +341,8 @@ export default function IntegrationPanel({ restaurantId }: { restaurantId?: stri
       <section className="rounded-2xl border border-gray-200 bg-white p-5">
         <div className="flex items-start gap-3">
           <span className="mt-0.5 text-[#c84630]"><LockKeyhole className="h-5 w-5" /></span>
-          <p className="text-xs leading-relaxed text-gray-600">
-            <strong>Security boundary.</strong> Do not use this panel for passwords intended for people. Use it only for provider API values. Saved values are encrypted, withheld from all API responses and logs, and unavailable to standard staff accounts.
+          <p className="text-xs leading-relaxed text-gray-500">
+            <strong className="text-gray-900">Security boundary.</strong> Do not use this panel for passwords intended for people. Use it only for provider API values. Saved values are encrypted, withheld from all API responses and logs, and unavailable to standard staff accounts.
           </p>
         </div>
       </section>

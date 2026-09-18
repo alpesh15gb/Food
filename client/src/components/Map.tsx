@@ -246,8 +246,8 @@ export function MapView({
 
   if (loadError) {
     return (
-      <div role="alert" className={cn("grid w-full place-items-center bg-[#f6ecdf] p-6 text-center", className)}>
-        <p className="max-w-xs text-sm font-bold leading-relaxed text-[#9C4A07]">{loadError}</p>
+      <div role="alert" className={cn("grid w-full place-items-center bg-[var(--sf-primary-soft)] p-6 text-center", className)}>
+        <p className="max-w-xs text-sm font-bold leading-relaxed text-[var(--sf-primary)]">{loadError}</p>
       </div>
     );
   }

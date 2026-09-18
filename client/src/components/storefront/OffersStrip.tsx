@@ -14,7 +14,7 @@ export default function OffersStrip({ offers }: { offers: Offer[] }) {
         {offers.slice(0, 5).map((offer) => (
           <div
             key={offer.code}
-            className="sf-card flex shrink-0 items-center gap-2.5 px-4 py-3"
+            className="sf-card flex max-w-[80vw] shrink-0 items-center gap-2.5 px-4 py-3"
           >
             <span
               className="grid h-9 w-9 shrink-0 place-items-center rounded-full"
@@ -25,15 +25,15 @@ export default function OffersStrip({ offers }: { offers: Offer[] }) {
             >
               <TicketPercent className="h-4 w-4" />
             </span>
-            <div>
+            <div className="min-w-0">
               <p
-                className="text-sm font-extrabold"
+                className="truncate text-sm font-extrabold tabular-nums"
                 style={{ color: "var(--sf-primary)" }}
               >
                 {offer.code}
               </p>
               <p
-                className="text-[11px]"
+                className="line-clamp-2 text-[11px] leading-snug"
                 style={{ color: "var(--sf-text-secondary)" }}
               >
                 {offer.description}

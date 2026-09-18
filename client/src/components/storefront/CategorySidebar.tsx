@@ -30,7 +30,7 @@ export default function CategorySidebar({
               <button
                 key={category.id}
                 onClick={() => onSelect(category.name)}
-                className={`block w-full rounded-[var(--sf-radius-btn)] px-3 py-2.5 text-left text-sm font-semibold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-[var(--sf-primary)] ${
+                className={`block w-full cursor-pointer touch-manipulation rounded-[var(--sf-radius-btn)] px-3 py-2.5 text-left text-sm font-semibold outline-none transition-colors duration-200 focus-visible:ring-2 focus-visible:ring-[var(--sf-primary)] active:scale-[0.98] [-webkit-tap-highlight-color:transparent] ${
                   active ? "" : "hover:bg-[var(--sf-bg-subtle)]"
                 }`}
                 style={{

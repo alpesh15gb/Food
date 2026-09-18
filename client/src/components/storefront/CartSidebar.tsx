@@ -75,21 +75,21 @@ export default function CartSidebar({
               style={{ borderColor: "var(--sf-border-subtle)" }}
             >
               {cart.map((line) => (
-                <div key={line.id} className="flex gap-2 py-3 first:pt-0 last:pb-0">
+                <div key={line.id} className="flex min-w-0 gap-2 py-3 first:pt-0 last:pb-0">
                   <div className="min-w-0 flex-1">
                     <p
-                      className="text-sm font-bold"
+                      className="line-clamp-2 text-sm font-bold leading-snug"
                       style={{ color: "var(--sf-text)" }}
                     >
                       {line.item.name}
                     </p>
                     <p
-                      className="mt-0.5 text-[11px]"
+                      className="mt-0.5 line-clamp-2 text-[11px] leading-snug"
                       style={{ color: "var(--sf-text-muted)" }}
                     >
                       {line.modifiers?.join(" \u00B7 ") || "As listed"}
                     </p>
-                    <p className="mt-1 text-xs font-bold" style={{ color: "var(--sf-text)" }}>
+                    <p className="mt-1 text-xs font-bold tabular-nums" style={{ color: "var(--sf-text)" }}>
                       {formatINR(line.unitPrice * line.quantity)}
                     </p>
                   </div>
@@ -112,7 +112,7 @@ export default function CartSidebar({
               <BillRow label="Delivery" value={formatINR(delivery)} />
               <BillRow label="Taxes" value={formatINR(taxes)} />
               <div
-                className="flex justify-between pt-3 text-base font-extrabold border-t"
+                className="flex justify-between border-t pt-3 text-base font-extrabold tabular-nums"
                 style={{
                   color: "var(--sf-text)",
                   borderColor: "var(--sf-border-subtle)",
@@ -145,7 +145,7 @@ export default function CartSidebar({
                 cart.length === 0 ||
                 (restaurant?.minOrder > 0 && itemTotal < restaurant.minOrder)
               }
-              className="h-12 w-full rounded-[var(--sf-radius-btn)] text-sm font-extrabold text-white"
+              className="h-12 w-full cursor-pointer touch-manipulation rounded-[var(--sf-radius-btn)] text-sm font-extrabold text-white transition-all duration-200 hover:brightness-110 active:scale-95 disabled:cursor-not-allowed [-webkit-tap-highlight-color:transparent]"
               style={{ background: "var(--sf-primary)" }}
             >
               {processing ? "Processing..." : "Checkout"}
@@ -168,11 +168,11 @@ export default function CartSidebar({
 function BillRow({ label, value }: { label: string; value: string }) {
   return (
     <div
-      className="flex justify-between text-xs"
+      className="flex min-w-0 justify-between gap-3 text-xs tabular-nums"
       style={{ color: "var(--sf-text-secondary)" }}
     >
-      <span>{label}</span>
-      <span>{value}</span>
+      <span className="min-w-0">{label}</span>
+      <span className="shrink-0">{value}</span>
     </div>
   );
 }

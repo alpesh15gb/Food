@@ -29,10 +29,10 @@ export default function PopularCarousel({
             Popular right now
           </h2>
         </div>
-        <div className="flex gap-2">
+        <div className="flex min-w-0 gap-2">
           <button
             onClick={() => scrollBy(-320)}
-            className="grid h-9 w-9 place-items-center rounded-full transition-colors hover:bg-white/10"
+            className="grid h-9 min-h-[44px] w-9 min-w-[44px] shrink-0 cursor-pointer touch-manipulation place-items-center rounded-full transition-colors duration-200 hover:bg-white/10 active:scale-95 [-webkit-tap-highlight-color:transparent]"
             style={{ background: "var(--sf-surface)", color: "var(--sf-text-secondary)" }}
             aria-label="Scroll left"
           >
@@ -40,7 +40,7 @@ export default function PopularCarousel({
           </button>
           <button
             onClick={() => scrollBy(320)}
-            className="grid h-9 w-9 place-items-center rounded-full text-white transition-transform active:scale-90"
+            className="grid h-9 min-h-[44px] w-9 min-w-[44px] shrink-0 cursor-pointer touch-manipulation place-items-center rounded-full text-white transition-all duration-200 hover:brightness-110 active:scale-90 [-webkit-tap-highlight-color:transparent]"
             style={{ background: "var(--sf-primary)" }}
             aria-label="Scroll right"
           >
@@ -54,13 +54,15 @@ export default function PopularCarousel({
         className="hide-scrollbar -mx-4 mt-8 flex gap-4 overflow-x-auto px-4 pb-2 sm:mx-0 sm:px-0"
       >
         {items.map((item) => (
-          <article key={item.id} className="w-[180px] shrink-0 sm:w-[210px]">
-            <div className="relative z-10 mx-auto h-28 w-28 sm:h-32 sm:w-32">
+          <article key={item.id} className="w-[180px] max-w-[52vw] shrink-0 sm:w-[210px]">
+            <div className="relative z-10 mx-auto aspect-square h-28 w-28 sm:h-32 sm:w-32">
               {item.image ? (
                 <img
                   src={item.image}
                   alt={item.name}
-                  className="h-full w-full rounded-full object-cover shadow-[var(--sf-shadow-elevated)] ring-4 ring-black/25"
+                  loading="lazy"
+                  decoding="async"
+                  className="aspect-square h-full w-full rounded-full object-cover shadow-[var(--sf-shadow-elevated)] ring-4 ring-black/25"
                 />
               ) : (
                 <div
@@ -71,20 +73,20 @@ export default function PopularCarousel({
                 </div>
               )}
             </div>
-            <div className="sf-card -mt-10 flex flex-col px-4 pb-4 pt-12">
-              <h3 className="truncate text-sm font-extrabold" style={{ color: "var(--sf-text)" }}>
+            <div className="sf-card -mt-10 flex min-w-0 flex-col px-4 pb-4 pt-12">
+              <h3 className="line-clamp-2 min-h-[2.5rem] text-sm font-extrabold leading-snug" style={{ color: "var(--sf-text)" }}>
                 {item.name}
               </h3>
-              <p className="mt-1 line-clamp-1 text-[11px] font-medium" style={{ color: "var(--sf-text-muted)" }}>
+              <p className="mt-1 line-clamp-2 min-h-[1.75rem] text-[11px] font-medium leading-snug" style={{ color: "var(--sf-text-muted)" }}>
                 {item.description}
               </p>
-              <div className="mt-3 flex items-center justify-between">
-                <span className="text-sm font-extrabold" style={{ color: "var(--sf-primary)" }}>
+              <div className="mt-3 flex min-w-0 items-center justify-between gap-2">
+                <span className="min-w-0 truncate text-sm font-extrabold tabular-nums" style={{ color: "var(--sf-primary)" }}>
                   {formatINR(item.price)}
                 </span>
                 <button
                   onClick={() => onAdd(item)}
-                  className="grid h-8 w-8 place-items-center rounded-full text-white transition-transform active:scale-90"
+                  className="grid h-8 min-h-[44px] w-8 min-w-[44px] shrink-0 cursor-pointer touch-manipulation place-items-center rounded-full text-white transition-all duration-200 hover:brightness-110 active:scale-90 [-webkit-tap-highlight-color:transparent]"
                   style={{ background: "var(--sf-primary)" }}
                   aria-label={`Add ${item.name}`}
                 >
