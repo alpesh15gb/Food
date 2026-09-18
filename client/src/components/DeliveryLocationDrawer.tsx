@@ -550,9 +550,11 @@ export default function DeliveryLocationDrawer({
             <>
               {geoState && (
                 <div className="rounded-xl border border-[var(--sf-border)] bg-[var(--sf-bg-subtle)] p-3 text-xs tabular-nums" style={{ color: "var(--sf-text-secondary)" }}>
-                  Location: {geoState.latitude.toFixed(6)}, {geoState.longitude.toFixed(6)}
+                  Pin: {geoState.latitude.toFixed(6)}, {geoState.longitude.toFixed(6)}
                   {geoState.deviceAccuracyMeters && <> · Accuracy: ~{Math.round(geoState.deviceAccuracyMeters)}m</>}
                   {geoState.source === "map_pin" && <> · Source: Map pin</>}
+                  <br />
+                  Pincode to be checked: {postalCode || geoState.postalCode || "not detected yet"}
                 </div>
               )}
 

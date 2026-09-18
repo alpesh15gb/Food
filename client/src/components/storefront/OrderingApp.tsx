@@ -400,6 +400,12 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
   const startSecurePayment = async () => {
     // Guard re-entry: rapid double-clicks must not open two Razorpay flows.
     if (paymentInFlight.current || processing) return;
+    // Custom-domain race: storefrontSlug resolves async via defaultSlug.
+    // Never start payment (or serviceability) with an unresolved slug.
+    if (!storefrontSlug || storefrontSlug.length < 2) {
+      toast.error("Restaurant is still loading. Please try again in a moment.");
+      return;
+    }
     if (!paymentConfig.data?.enabled) {
       toast.error("Online payments are not configured yet.", {
         description:
@@ -427,36 +433,106 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
     // Serviceability pre-check (radius + Shadowfax pincode-pair when the
     // provider is configured — catches pincode-unserviceable addresses
     // BEFORE payment instead of failing late at dispatch).
+    // Coerce + validate coordinates BEFORE the fetch: never send garbage
+    // that 400s into a misleading "can't deliver" toast.
+    const svcLat = Number(deliveryAddress.latitude);
+    const svcLng = Number(deliveryAddress.longitude);
+    const coordsValid =
+      Number.isFinite(svcLat) &&
+      Number.isFinite(svcLng) &&
+      svcLat >= -90 &&
+      svcLat <= 90 &&
+      svcLng >= -180 &&
+      svcLng <= 180 &&
+      !(svcLat === 0 && svcLng === 0);
+    if (!coordsValid) {
+      return toast.error(
+        "Delivery location is invalid — please re-confirm your pin."
+      );
+    }
     paymentInFlight.current = true;
     setProcessing(true);
     try {
       const dropPincode = /^\d{6}$/.test(deliveryAddress.postalCode ?? "")
         ? deliveryAddress.postalCode
         : undefined;
+      console.debug("[serviceability] payload", {
+        slug: storefrontSlug,
+        latitude: svcLat,
+        longitude: svcLng,
+        postalCode: dropPincode,
+      });
       const svcRes = await fetch(
         `/api/trpc/storefront.checkServiceability?input=${encodeURIComponent(
           JSON.stringify({
             slug: storefrontSlug,
-            latitude: deliveryAddress.latitude,
-            longitude: deliveryAddress.longitude,
+            latitude: svcLat,
+            longitude: svcLng,
             ...(dropPincode ? { postalCode: dropPincode } : {}),
           })
         )}`,
         { credentials: "include" }
       );
-      const svcJson = await svcRes.json();
-      const serviceability = svcJson?.result?.data ?? svcJson;
-      if (!serviceability?.serviceable) {
+      // Defensive parse: non-JSON bodies and non-2xx (e.g. 400 validation
+      // errors) are "could not verify" — never misread as unserviceable.
+      let svcJson: unknown = null;
+      try {
+        const rawText = await svcRes.text();
+        svcJson = rawText ? (JSON.parse(rawText) as unknown) : null;
+      } catch {
+        svcJson = null;
+      }
+      const failOpen = () => {
         paymentInFlight.current = false;
         setProcessing(false);
-        const reason = serviceability?.reason ?? "";
+        toast.error(
+          "Could not verify delivery availability. Please try again."
+        );
+      };
+      if (!svcRes.ok || svcJson == null) {
+        failOpen();
+        return;
+      }
+      const envelope = svcJson as {
+        result?: { data?: unknown };
+        error?: unknown;
+      };
+      if (envelope.error) {
+        failOpen();
+        return;
+      }
+      const serviceability = (envelope.result?.data ?? svcJson) as {
+        serviceable?: unknown;
+        reason?: unknown;
+      } | null;
+      if (!serviceability || typeof serviceability.serviceable !== "boolean") {
+        failOpen();
+        return;
+      }
+      if (!serviceability.serviceable) {
+        paymentInFlight.current = false;
+        setProcessing(false);
+        const reason =
+          typeof serviceability.reason === "string"
+            ? serviceability.reason
+            : "";
+        const description =
+          reason === "OUTSIDE_DELIVERY_RADIUS"
+            ? "Your location is outside our current delivery area."
+            : reason === "SHADOWFAX_NOT_SERVICEABLE"
+              ? "Our delivery partner doesn't serve this pincode yet."
+              : reason === "SHADOWFAX_UNAVAILABLE"
+                ? "Our delivery partner is unreachable right now. Please try again."
+                : reason === "INVALID_LOCATION"
+                  ? "Your delivery location looks invalid — please re-confirm your pin."
+                  : reason === "NO_ACTIVE_OUTLET" ||
+                      reason === "OUTLET_MISCONFIGURED"
+                    ? "Our kitchen setup is incomplete. Please contact the restaurant."
+                    : reason === "OUTLET_CLOSED"
+                      ? "The restaurant is currently closed. Please try again later."
+                      : "Please try a different address.";
         toast.error("Sorry, we can't deliver to this location.", {
-          description:
-            reason === "OUTSIDE_DELIVERY_RADIUS"
-              ? "Your location is outside our current delivery area."
-              : reason === "SHADOWFAX_NOT_SERVICEABLE"
-                ? "Our delivery partner doesn't serve this pincode yet."
-                : "Please try a different address.",
+          description,
         });
         return;
       }

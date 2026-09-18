@@ -294,14 +294,20 @@ export const storefrontRouter = router({
   checkServiceability: publicProcedure
     .input(z.object({
       slug: z.string().min(2),
-      latitude: z.number().min(-90).max(90),
-      longitude: z.number().min(-180).max(180),
+      latitude: z.union([
+        z.number().min(-90).max(90),
+        z.string().regex(/^-?\d+(\.\d+)?$/).transform((s) => parseFloat(s)).pipe(z.number().min(-90).max(90)),
+      ]),
+      longitude: z.union([
+        z.number().min(-180).max(180),
+        z.string().regex(/^-?\d+(\.\d+)?$/).transform((s) => parseFloat(s)).pipe(z.number().min(-180).max(180)),
+      ]),
       // Customer pincode enables the Shadowfax pincode-pair check (spec §6).
       // Absent → radius-only result with provider NOT_CHECKED.
       postalCode: z.string().regex(/^\d{6}$/).optional(),
     }))
     .query(async ({ input }) => {
-      const { checkServiceability, validateGeoLocation } = await import("../domain/locationService");
+      const { checkServiceability, validateGeoLocation, selectBestOutlet, parseRadiusKm } = await import("../domain/locationService");
       const { getDb } = await import("../db");
       const { restaurants, outlets } = await import("../../drizzle/schema");
       const { eq } = await import("drizzle-orm");
@@ -309,22 +315,48 @@ export const storefrontRouter = router({
       // Validate coordinates server-side
       const loc = validateGeoLocation({ latitude: input.latitude, longitude: input.longitude });
       if (!loc.valid) {
-        return { serviceable: false as const, reason: "INVALID_LOCATION" as const };
+        console.log("[serviceability]", {
+          slug: input.slug, latitude: input.latitude, longitude: input.longitude, postalCode: input.postalCode,
+          restaurantId: null, outletCount: 0, selectedOutletId: null, radiusKm: null, distanceKm: null,
+          serviceable: false, reason: "INVALID_LOCATION", providerServiceable: "NOT_CHECKED",
+        });
+        return { serviceable: false as const, reason: "INVALID_LOCATION" as const, outletName: null, distanceKm: null };
       }
 
       const db = await getDb();
-      if (!db) return { serviceable: false as const, reason: "NO_ACTIVE_OUTLET" as const };
+      if (!db) {
+        console.log("[serviceability]", {
+          slug: input.slug, latitude: loc.latitude, longitude: loc.longitude, postalCode: input.postalCode,
+          restaurantId: null, outletCount: 0, selectedOutletId: null, radiusKm: null, distanceKm: null,
+          serviceable: false, reason: "NO_ACTIVE_OUTLET", providerServiceable: "NOT_CHECKED",
+        });
+        return { serviceable: false as const, reason: "NO_ACTIVE_OUTLET" as const, outletName: null, distanceKm: null };
+      }
 
       // Find restaurant
       const restaurant = (await db.select().from(restaurants).where(eq(restaurants.slug, input.slug)).limit(1))[0];
-      if (!restaurant) return { serviceable: false as const, reason: "NO_ACTIVE_OUTLET" as const };
+      if (!restaurant) {
+        console.log("[serviceability]", {
+          slug: input.slug, latitude: loc.latitude, longitude: loc.longitude, postalCode: input.postalCode,
+          restaurantId: null, outletCount: 0, selectedOutletId: null, radiusKm: null, distanceKm: null,
+          serviceable: false, reason: "NO_ACTIVE_OUTLET", providerServiceable: "NOT_CHECKED",
+        });
+        return { serviceable: false as const, reason: "NO_ACTIVE_OUTLET" as const, outletName: null, distanceKm: null };
+      }
 
+      // Capture full outlet rows for diagnostics — db.select() returns every
+      // column including latitudeNum/longitudeNum numeric mirrors, which
+      // selectBestOutlet consumes via outletCoordinates (numerics preferred).
+      let capturedOutlets: any[] = [];
       const getOutlets = async (restId: string) => {
-        return db.select().from(outlets).where(eq(outlets.restaurantId, restId)) as any;
+        const rows = (await db.select().from(outlets).where(eq(outlets.restaurantId, restId))) as any[];
+        capturedOutlets = rows;
+        return rows as any;
       };
 
       // Thread restaurant delivery radius into outlet selection.
       const defaultRadiusKm = restaurant.deliveryRadiusKm ? parseFloat(String(restaurant.deliveryRadiusKm)) : 5;
+      const effectiveDefaultRadiusKm = Number.isFinite(defaultRadiusKm) ? defaultRadiusKm : 5;
       // Shadowfax Unified API has NO route/lat-lng serviceability endpoint
       // (spec §6, §41) — provider checks are pincode-pair based. Radius
       // selection runs first; the provider then verifies outlet pincode
@@ -337,12 +369,11 @@ export const storefrontRouter = router({
       let outletPincode: string | null = null;
       if (providerConfigured && input.postalCode) {
         try {
-          const { selectBestOutlet } = await import("../domain/locationService");
           const allOutlets = await getOutlets(restaurant.id) as Array<{ postalCode?: unknown; [k: string]: unknown }>;
           const sel = selectBestOutlet(
             allOutlets as never,
             loc.latitude!, loc.longitude!,
-            Number.isFinite(defaultRadiusKm) ? defaultRadiusKm : 5,
+            effectiveDefaultRadiusKm,
           );
           const pin = sel ? String((sel.outlet as { postalCode?: unknown }).postalCode ?? "") : "";
           outletPincode = /^\d{6}$/.test(pin) ? pin : null;
@@ -358,14 +389,58 @@ export const storefrontRouter = router({
         providerConfigured && input.postalCode && outletPincode
           ? async () => {
               const provider = getDeliveryProvider(restaurant.id);
-              const pair = await (provider as unknown as {
-                checkPincodeServiceability: (i: { pickupPincode: string; deliveryPincode: string }) => Promise<{ serviceable: boolean }>;
-              }).checkPincodeServiceability({ pickupPincode: outletPincode as string, deliveryPincode: input.postalCode! });
-              return { serviceable: pair.serviceable, estimatedMinutes: undefined };
+              try {
+                const pair = await (provider as unknown as {
+                  checkPincodeServiceability: (i: { pickupPincode: string; deliveryPincode: string }) => Promise<{ serviceable: boolean }>;
+                }).checkPincodeServiceability({ pickupPincode: outletPincode as string, deliveryPincode: input.postalCode! });
+                console.log("[serviceability] shadowfax pair", {
+                  slug: input.slug, outletPincode, deliveryPincode: input.postalCode, serviceable: pair.serviceable,
+                });
+                return { serviceable: pair.serviceable, estimatedMinutes: undefined };
+              } catch (err) {
+                console.log("[serviceability] shadowfax pair error", {
+                  slug: input.slug, outletPincode, deliveryPincode: input.postalCode,
+                  error: err instanceof Error ? err.message : String(err),
+                });
+                throw err;
+              }
             }
           : undefined,
-        { defaultRadiusKm: Number.isFinite(defaultRadiusKm) ? defaultRadiusKm : 5 },
+        { defaultRadiusKm: effectiveDefaultRadiusKm },
       );
+
+      const diagSelection = (() => {
+        try {
+          return selectBestOutlet(capturedOutlets as never, loc.latitude!, loc.longitude!, effectiveDefaultRadiusKm);
+        } catch {
+          return null;
+        }
+      })();
+      const loggedSelectedId = diagSelection
+        ? (diagSelection.outlet as { id?: unknown }).id ?? (result.serviceable ? (result as { outletId?: unknown }).outletId ?? null : null)
+        : (result.serviceable ? (result as { outletId?: unknown }).outletId ?? null : null);
+      const loggedRadiusKm = diagSelection
+        ? parseRadiusKm((diagSelection.outlet as { deliveryRadiusKm?: unknown }).deliveryRadiusKm, effectiveDefaultRadiusKm)
+        : effectiveDefaultRadiusKm;
+      const loggedDistanceKm = diagSelection
+        ? Math.round(diagSelection.distanceKm * 100) / 100
+        : (result.serviceable
+            ? (result as { distanceKm?: number }).distanceKm ?? null
+            : (result as { distanceKm?: number | null }).distanceKm ?? null);
+      const loggedProviderServiceable = result.serviceable
+        ? (result as { providerServiceable?: unknown }).providerServiceable ?? "NOT_CHECKED"
+        : result.reason === "SHADOWFAX_NOT_SERVICEABLE"
+          ? false
+          : result.reason === "SHADOWFAX_UNAVAILABLE"
+            ? "FAILED"
+            : "NOT_CHECKED";
+      console.log("[serviceability]", {
+        slug: input.slug, latitude: loc.latitude, longitude: loc.longitude, postalCode: input.postalCode,
+        restaurantId: restaurant.id, outletCount: capturedOutlets.length,
+        selectedOutletId: loggedSelectedId, radiusKm: loggedRadiusKm, distanceKm: loggedDistanceKm,
+        serviceable: result.serviceable, reason: result.serviceable ? "SERVICEABLE" : result.reason,
+        providerServiceable: loggedProviderServiceable,
+      });
 
       return result;
     }),

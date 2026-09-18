@@ -21,6 +21,7 @@ export type AccuracyLevel = "HIGH" | "GOOD" | "LOW" | "POOR" | "UNKNOWN";
 export type ServiceabilityResult =
   | {
       serviceable: true;
+      reason: "SERVICEABLE";
       outletId: string;
       outletName: string;
       distanceKm: number;
@@ -41,6 +42,8 @@ export type ServiceabilityResult =
         | "SHADOWFAX_NOT_SERVICEABLE"
         | "OUTLET_CLOSED";
       detail?: string;
+      outletName: string | null;
+      distanceKm: number | null;
     };
 
 // =============================================================================
@@ -211,6 +214,29 @@ export function selectBestOutlet(
 // =============================================================================
 
 /**
+ * Nearest outlet ignoring radius — diagnostics only. Used to populate
+ * outletName/distanceKm on OUTSIDE_DELIVERY_RADIUS so failures stay
+ * diagnosable (which outlet was closest, how far). Never gates serviceability.
+ */
+export function findNearestOutlet(
+  outlets: OutletCandidate[],
+  customerLat: number,
+  customerLng: number
+): { outlet: OutletCandidate; distanceKm: number } | null {
+  let best: { outlet: OutletCandidate; distanceKm: number } | null = null;
+  for (const outlet of outlets) {
+    if (!outlet.isActive || !outlet.isOpen) continue;
+    const loc = outletCoordinates(outlet);
+    if (!loc) continue;
+    const distanceKm = haversineDistanceKm(customerLat, customerLng, loc.latitude, loc.longitude);
+    if (!best || distanceKm < best.distanceKm) {
+      best = { outlet, distanceKm };
+    }
+  }
+  return best;
+}
+
+/**
  * Full serviceability check: validates coordinates, finds outlet, checks radius.
  * This is the authoritative server-side check — never trust browser results.
  */
@@ -224,13 +250,13 @@ export async function checkServiceability(
 ): Promise<ServiceabilityResult> {
   // Layer 1: Validate destination coordinates
   if (!isValidLatitude(customerLat) || !isValidLongitude(customerLng)) {
-    return { serviceable: false, reason: "INVALID_LOCATION" };
+    return { serviceable: false, reason: "INVALID_LOCATION", outletName: null, distanceKm: null };
   }
 
   // Layer 2: Outlet selection based on distance
   const outlets = await getOutletsFn(restaurantId);
   if (outlets.length === 0) {
-    return { serviceable: false, reason: "NO_ACTIVE_OUTLET" };
+    return { serviceable: false, reason: "NO_ACTIVE_OUTLET", outletName: null, distanceKm: null };
   }
 
   // Distinct misconfiguration: outlets exist but none have usable coordinates.
@@ -241,15 +267,21 @@ export async function checkServiceability(
   if (!hasUsableOutlet) {
     const anyActive = outlets.some(o => o.isActive && o.isOpen);
     if (anyActive) {
-      return { serviceable: false, reason: "OUTLET_MISCONFIGURED", detail: "No outlet has valid pickup coordinates." };
+      return { serviceable: false, reason: "OUTLET_MISCONFIGURED", detail: "No outlet has valid pickup coordinates.", outletName: null, distanceKm: null };
     }
-    return { serviceable: false, reason: "NO_ACTIVE_OUTLET" };
+    return { serviceable: false, reason: "NO_ACTIVE_OUTLET", outletName: null, distanceKm: null };
   }
 
   const defaultRadiusKm = opts?.defaultRadiusKm ?? 5;
   const selection = selectBestOutlet(outlets, customerLat, customerLng, defaultRadiusKm);
   if (!selection) {
-    return { serviceable: false, reason: "OUTSIDE_DELIVERY_RADIUS" };
+    const nearest = findNearestOutlet(outlets, customerLat, customerLng);
+    return {
+      serviceable: false,
+      reason: "OUTSIDE_DELIVERY_RADIUS",
+      outletName: nearest ? nearest.outlet.name : null,
+      distanceKm: nearest ? Math.round(nearest.distanceKm * 100) / 100 : null,
+    };
   }
 
   // Layer 3: Shadowfax provider serviceability (optional)
@@ -270,7 +302,12 @@ export async function checkServiceability(
           estimatedMinutes = providerResult.estimatedMinutes;
         }
         if (!providerServiceable) {
-          return { serviceable: false, reason: "SHADOWFAX_NOT_SERVICEABLE" };
+          return {
+            serviceable: false,
+            reason: "SHADOWFAX_NOT_SERVICEABLE",
+            outletName: selection.outlet.name,
+            distanceKm: Math.round(selection.distanceKm * 100) / 100,
+          };
         }
       } catch (err) {
         // Distinct from NOT_SERVICEABLE: provider could not be reached at all.
@@ -278,6 +315,8 @@ export async function checkServiceability(
           serviceable: false,
           reason: "SHADOWFAX_UNAVAILABLE",
           detail: err instanceof Error ? err.message : "Delivery provider unavailable.",
+          outletName: selection.outlet.name,
+          distanceKm: Math.round(selection.distanceKm * 100) / 100,
         };
       }
     }
@@ -285,6 +324,7 @@ export async function checkServiceability(
 
   return {
     serviceable: true,
+    reason: "SERVICEABLE",
     outletId: selection.outlet.id,
     outletName: selection.outlet.name,
     distanceKm: Math.round(selection.distanceKm * 100) / 100,
