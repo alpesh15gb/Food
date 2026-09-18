@@ -18,6 +18,8 @@ export default function CartSidebar({
   restaurant,
   customerPhone,
   onCustomerPhone,
+  orderingClosed,
+  orderingReason,
 }: {
   cart: CartLine[];
   total: number;
@@ -31,6 +33,8 @@ export default function CartSidebar({
   restaurant: any;
   customerPhone: string;
   onCustomerPhone: (v: string) => void;
+  orderingClosed?: boolean;
+  orderingReason?: string | null;
 }) {
   return (
     <div
@@ -137,13 +141,22 @@ export default function CartSidebar({
             {/* Contact number — same requirement as the checkout page */}
             <PhoneField compact value={customerPhone} onChange={onCustomerPhone} />
 
+            {orderingClosed && (
+              <p
+                className="text-xs font-bold leading-relaxed"
+                style={{ color: "var(--sf-red)" }}
+              >
+                {orderingReason ?? "This kitchen is not taking orders right now."}
+              </p>
+            )}
+
             {/* Checkout button */}
             <Button
               onClick={onCheckout}
               disabled={
                 processing ||
-                cart.length === 0 ||
-                (restaurant?.minOrder > 0 && itemTotal < restaurant.minOrder)
+                orderingClosed ||
+                (restaurant?.minOrder > 0 && total < restaurant.minOrder)
               }
               className="h-12 w-full cursor-pointer touch-manipulation rounded-[var(--sf-radius-btn)] text-sm font-extrabold text-white transition-all duration-200 hover:brightness-110 active:scale-95 disabled:cursor-not-allowed [-webkit-tap-highlight-color:transparent]"
               style={{ background: "var(--sf-primary)" }}

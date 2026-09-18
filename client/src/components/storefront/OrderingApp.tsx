@@ -406,6 +406,17 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
       toast.error("Restaurant is still loading. Please try again in a moment.");
       return;
     }
+    // Closed kitchen fails FIRST: never walk the customer through address,
+    // phone and payment before telling them. The menu screen also shows this
+    // upfront (banner + disabled CTAs) — this guard is the backstop.
+    if (restaurant && restaurant.orderingOpen === false) {
+      toast.error("This kitchen is not taking orders right now.", {
+        description:
+          restaurant.orderingReason ??
+          "Please try again during opening hours.",
+      });
+      return;
+    }
     if (!paymentConfig.data?.enabled) {
       toast.error("Online payments are not configured yet.", {
         description:
@@ -682,6 +693,11 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
 
   const goMenu = () => navigate(`/${storefrontSlug}`);
 
+  // Closed kitchens greet upfront (banner + disabled CTAs + early guard).
+  // Ordering stays browsable; only payment is blocked.
+  const orderingClosed = restaurant?.orderingOpen === false;
+  const orderingReason = restaurant?.orderingReason ?? null;
+
   // --- Cart / Checkout / Confirmation / Tracking screens ---
   // Confirmation + tracking authenticate via ?order=&token= (or the
   // /order/:number path) and render the live status timeline. The tracking
@@ -739,6 +755,8 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
           restaurant={restaurant}
           customerPhone={customerPhone}
           onCustomerPhone={persistPhone}
+          orderingClosed={orderingClosed}
+          orderingReason={orderingReason}
         />
       </div>
     );
@@ -778,6 +796,31 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
             deliveryAddress={deliveryAddress}
             onOpen={() => setLocationOpen(true)}
           />
+          {restaurant.orderingOpen === false && (
+            <div
+              role="status"
+              className="mt-3 rounded-[var(--sf-radius-card)] border p-4 text-center"
+              style={{
+                borderColor: "var(--sf-border)",
+                background: "var(--sf-surface)",
+              }}
+            >
+              <p
+                className="text-sm font-extrabold"
+                style={{ color: "var(--sf-text)" }}
+              >
+                Currently not taking orders
+              </p>
+              <p
+                className="mt-1 text-xs leading-relaxed"
+                style={{ color: "var(--sf-text-secondary)" }}
+              >
+                {restaurant.orderingReason ??
+                  "Please try again during opening hours."}{" "}
+                You can still browse the menu.
+              </p>
+            </div>
+          )}
           <OffersStrip offers={offers} />
         </div>
 
@@ -876,6 +919,8 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
               restaurant={restaurant}
               customerPhone={customerPhone}
               onCustomerPhone={persistPhone}
+              orderingClosed={orderingClosed}
+              orderingReason={orderingReason}
             />
           </div>
         </div>

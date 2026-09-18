@@ -401,6 +401,11 @@ export async function getStorefront(slug: string) {
   const schedules = await db.select().from(restaurantSchedules)
     .where(eq(restaurantSchedules.restaurantId, restaurant.id));
 
+  // Ordering status via the same canonical engine that gates checkout, so
+  // the storefront can show closed-state UPFRONT instead of failing at payment.
+  const { checkRestaurantAvailability } = await import("./domain/availability");
+  const orderingAvail = checkRestaurantAvailability(restaurant, schedules, new Date());
+
   return {
     restaurant,
     outlet,
@@ -408,6 +413,10 @@ export async function getStorefront(slug: string) {
     items,
     offers: offers.filter(o => o.isActive),
     schedules,
+    orderingStatus: {
+      open: orderingAvail.isAvailable,
+      reason: orderingAvail.reason,
+    },
   };
 }
 

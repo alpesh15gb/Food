@@ -56,6 +56,10 @@ type StorefrontPayload = {
     bodyFontFamily: string | null;
     faviconUrl: string | null;
   };
+  orderingStatus?: {
+    open: boolean;
+    reason: string | null;
+  } | null;
   outlet: {
     id: string;
     name: string;
@@ -303,6 +307,8 @@ export function adaptStorefront(data: StorefrontPayload) {
       isOpen: data.restaurant.isOpen,
       description: data.restaurant.description,
       contactPhone: data.restaurant.contactPhone,
+      orderingOpen: data.orderingStatus?.open ?? data.restaurant.isOpen,
+      orderingReason: data.orderingStatus?.reason ?? null,
       address: data.outlet
         ? data.outlet.city === "To be configured"
           ? data.outlet.address

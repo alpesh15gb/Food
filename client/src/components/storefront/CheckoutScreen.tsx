@@ -20,6 +20,8 @@ export default function CheckoutScreen({
   restaurant,
   customerPhone,
   onCustomerPhone,
+  orderingClosed,
+  orderingReason,
 }: {
   screen: string;
   cart: CartLine[];
@@ -35,6 +37,8 @@ export default function CheckoutScreen({
   restaurant: any;
   customerPhone: string;
   onCustomerPhone: (v: string) => void;
+  orderingClosed?: boolean;
+  orderingReason?: string | null;
 }) {
   if (screen === "confirmation") {
     return (
@@ -222,10 +226,20 @@ export default function CheckoutScreen({
             </p>
           )}
 
+          {orderingClosed && (
+            <p
+              className="text-xs font-bold leading-relaxed"
+              style={{ color: "var(--sf-red)" }}
+            >
+              {orderingReason ?? "This kitchen is not taking orders right now."}
+            </p>
+          )}
+
           <Button
             onClick={onCheckout}
             disabled={
               processing ||
+              orderingClosed ||
               cart.length === 0 ||
               (restaurant?.minOrder > 0 && itemTotal < restaurant.minOrder)
             }
