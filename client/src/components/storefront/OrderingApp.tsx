@@ -49,7 +49,12 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
     { slug: storefrontSlug },
     { enabled: hasSlug }
   );
-  const paymentConfig = trpc.storefront.paymentConfig.useQuery();
+  // Slug-scoped: without it the server only checks env vars and misses the
+  // per-restaurant vault keys, wrongly reporting payments as disabled.
+  const paymentConfig = trpc.storefront.paymentConfig.useQuery(
+    { slug: storefrontSlug },
+    { enabled: hasSlug }
+  );
   const initiatePayment = trpc.storefront.initiatePayment.useMutation();
   const verifyPayment = trpc.storefront.verifyPayment.useMutation();
 
