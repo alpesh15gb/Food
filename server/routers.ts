@@ -99,8 +99,11 @@ export const appRouter = router({
           role: "admin",
           lastSignedIn: new Date(),
         });
+        // Issue the user's current sessionVersion so a prior logout bump does
+        // not brick this fresh login (signSession also resolves it when omitted).
+        const localAdminUser = await getUserByOpenId(openId);
         const sessionToken = await sdk.signSession(
-          { openId, appId: "vps-local", name: "Kitchen Administrator" },
+          { openId, appId: "vps-local", name: "Kitchen Administrator", sv: localAdminUser?.sessionVersion ?? 0 },
           { expiresInMs: 1000 * 60 * 60 * 12 }
         );
         ctx.res.cookie(ADMIN_COOKIE_NAME, sessionToken, {
@@ -199,8 +202,9 @@ export const appRouter = router({
         }
 
         // H-03: Use explicit 12-hour expiry for registration session (not default ONE_YEAR_MS)
+        // Issue the fresh user's sessionVersion so the token passes the sv check.
         const sessionToken = await sdk.signSession(
-          { openId, appId: "self-register", name },
+          { openId, appId: "self-register", name, sv: owner.sessionVersion ?? 0 },
           { expiresInMs: 1000 * 60 * 60 * 12 }
         );
         ctx.res.cookie(ADMIN_COOKIE_NAME, sessionToken, {
@@ -266,8 +270,10 @@ export const appRouter = router({
         });
 
         // H-03: Use explicit 12-hour expiry for login session
+        // Issue the user's current sessionVersion so a prior logout/revocation
+        // bump does not brick this fresh login.
         const sessionToken = await sdk.signSession(
-          { openId: user.openId, appId: "email-login", name: user.name ?? "" },
+          { openId: user.openId, appId: "email-login", name: user.name ?? "", sv: user.sessionVersion ?? 0 },
           { expiresInMs: 1000 * 60 * 60 * 12 }
         );
         ctx.res.cookie(ADMIN_COOKIE_NAME, sessionToken, {

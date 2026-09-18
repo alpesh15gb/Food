@@ -40,13 +40,20 @@ export default function TrackingScreen({
     }
   );
 
+  const formatEtaTime = (value: unknown): string | null => {
+    if (typeof value !== "string" && !(value instanceof Date)) return null;
+    const date = value instanceof Date ? value : new Date(value);
+    if (Number.isNaN(date.getTime())) return null;
+    return date.toLocaleTimeString("en-IN", {
+      hour: "numeric",
+      minute: "2-digit",
+      timeZone: "Asia/Kolkata",
+    });
+  };
+
   const eta = tracking.data?.estimatedMinutes
     ? `~${tracking.data.estimatedMinutes} min`
-    : tracking.data?.delivery?.estimatedDelivery
-      ? new Date(
-          tracking.data.delivery.estimatedDelivery
-        ).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" })
-      : null;
+    : formatEtaTime(tracking.data?.delivery?.estimatedDelivery);
 
   return (
     <main
@@ -72,8 +79,11 @@ export default function TrackingScreen({
               className="mt-3 text-sm leading-relaxed"
               style={{ color: "var(--sf-text-secondary)" }}
             >
-              We couldn't find your secure order link. Please open tracking
-              from your confirmation page or receipt.
+              We couldn't find your secure order link — the order number or
+              tracking token looks missing or invalid. Please open tracking
+              from your confirmation page or receipt. If you need help,
+              contact {restaurantName ?? "the restaurant"} directly for
+              support.
             </p>
             {onMenu && (
               <Button
@@ -123,7 +133,8 @@ export default function TrackingScreen({
               style={{ color: "var(--sf-text-secondary)" }}
             >
               Something went wrong while fetching your order. Please try
-              again.
+              again. If this keeps happening, contact{" "}
+              {restaurantName ?? "the restaurant"} directly for support.
             </p>
             <div className="mt-6 flex justify-center gap-2">
               <Button

@@ -1,12 +1,27 @@
 import { trpc } from "@/lib/trpc";
 import { MapPin, Loader2, Plus, Store, ToggleLeft, ToggleRight } from "lucide-react";
 import { useState } from "react";
+import { toast } from "sonner";
 
 export default function OutletsPanel({ restaurantId }: { restaurantId: string }) {
+  const utils = trpc.useUtils();
   const { data: outlets, isLoading, refetch } = trpc.admin.listOutlets.useQuery({ restaurantId });
-  const createMutation = trpc.admin.createOutlet.useMutation({ onSuccess: () => { refetch(); setShowForm(false); resetForm(); } });
-  const updateMutation = trpc.admin.updateOutlet.useMutation({ onSuccess: () => refetch() });
-  const toggleActiveMutation = trpc.admin.toggleOutletActive.useMutation({ onSuccess: () => refetch() });
+  const invalidateAll = () => {
+    refetch();
+    utils.admin.dashboard.invalidate();
+  };
+  const createMutation = trpc.admin.createOutlet.useMutation({
+    onSuccess: () => { invalidateAll(); setShowForm(false); resetForm(); toast.success("Outlet created"); },
+    onError: (err) => toast.error(err.message || "Could not create outlet."),
+  });
+  const updateMutation = trpc.admin.updateOutlet.useMutation({
+    onSuccess: () => { invalidateAll(); setShowForm(false); toast.success("Outlet updated"); },
+    onError: (err) => toast.error(err.message || "Could not update outlet."),
+  });
+  const toggleActiveMutation = trpc.admin.toggleOutletActive.useMutation({
+    onSuccess: () => { invalidateAll(); toast.success("Outlet status updated"); },
+    onError: (err) => toast.error(err.message || "Could not update outlet status."),
+  });
 
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -32,19 +47,31 @@ export default function OutletsPanel({ restaurantId }: { restaurantId: string })
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const payload = {
-      restaurantId,
-      name: form.name,
-      address: form.address,
-      city: form.city,
-      phone: form.phone || undefined,
-      preparationMinutes: parseInt(form.preparationMinutes) || 25,
-      deliveryRadiusKm: form.deliveryRadiusKm,
-    };
-    if (editingId) {
-      await updateMutation.mutateAsync({ outletId: editingId, ...payload });
-    } else {
-      await createMutation.mutateAsync(payload);
+    try {
+      if (editingId) {
+        await updateMutation.mutateAsync({
+          outletId: editingId,
+          restaurantId,
+          name: form.name,
+          address: form.address,
+          city: form.city,
+          phone: form.phone || undefined,
+          preparationMinutes: parseInt(form.preparationMinutes) || 25,
+          deliveryRadiusKm: form.deliveryRadiusKm,
+        });
+      } else {
+        await createMutation.mutateAsync({
+          restaurantId,
+          name: form.name,
+          address: form.address,
+          city: form.city,
+          phone: form.phone || undefined,
+          preparationMinutes: parseInt(form.preparationMinutes) || 25,
+          deliveryRadiusKm: form.deliveryRadiusKm,
+        });
+      }
+    } catch (err: any) {
+      toast.error(err?.message || "Could not save outlet.");
     }
   };
 

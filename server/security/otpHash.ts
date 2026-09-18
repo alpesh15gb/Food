@@ -14,20 +14,27 @@ export { normalizePhoneStrict } from "./phoneValidation";
 
 /**
  * Returns the HMAC secret from environment.
- * In production/staging, fails if not configured.
+ * Fail-closed: the dev fallback is allowed ONLY in development/test.
+ * Production, staging, or unset NODE_ENV with a missing secret throws, and
+ * short secrets (<16 chars) always throw — a weak secret must never sign OTPs.
  */
 function getHmacSecret(): string {
   const secret = process.env.OTP_HMAC_SECRET;
   if (!secret) {
-    const isProd = process.env.NODE_ENV === "production" || process.env.NODE_ENV === "staging";
-    if (isProd) {
-      throw new Error(
-        "OTP_HMAC_SECRET environment variable is required in production. " +
-        "Generate one with: openssl rand -hex 32"
-      );
+    const env = process.env.NODE_ENV;
+    if (env === "development" || env === "test") {
+      // Development/test fallback — MUST NOT be used in production
+      return "dev-otp-hmac-secret-not-for-production";
     }
-    // Development/test fallback — MUST NOT be used in production
-    return "dev-otp-hmac-secret-not-for-production";
+    throw new Error(
+      "OTP_HMAC_SECRET environment variable is required outside development. " +
+      "Generate one with: openssl rand -hex 32"
+    );
+  }
+  if (secret.length < 16) {
+    throw new Error(
+      "OTP_HMAC_SECRET is too short (min 16 chars). Generate one with: openssl rand -hex 32"
+    );
   }
   return secret;
 }
@@ -66,7 +73,9 @@ export function verifyOtpHash(
 
 /**
  * Check if OTP_HMAC_SECRET is configured (for startup health checks).
+ * A present-but-too-short secret counts as NOT configured (fail-closed).
  */
 export function isOtpSecretConfigured(): boolean {
-  return !!process.env.OTP_HMAC_SECRET;
+  const s = process.env.OTP_HMAC_SECRET;
+  return !!s && s.length >= 16;
 }

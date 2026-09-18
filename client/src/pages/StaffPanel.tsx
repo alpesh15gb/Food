@@ -47,6 +47,28 @@ export default function StaffPanel({ restaurantId }: { restaurantId: string }) {
   const [inviteForm, setInviteForm] = useState({ email: "", role: "staff" as RoleValue });
 
   const list = members.data ?? [];
+  const activeOwners = list.filter((m) => m.role === "owner" && m.isActive);
+  const isLastActiveOwner = (m: { role: string; isActive: boolean }) =>
+    m.role === "owner" && m.isActive && activeOwners.length <= 1;
+
+  const handleRoleChange = (m: (typeof list)[number], nextRole: RoleValue) => {
+    if (nextRole === m.role) return;
+    if (m.role === "owner" && nextRole !== "owner" && isLastActiveOwner(m)) {
+      toast.error("Cannot demote the last active owner.");
+      return;
+    }
+    if (!window.confirm(`Change ${m.userName ?? m.userEmail ?? "member"} role from ${m.role} to ${nextRole}?`)) return;
+    updateRole.mutate({ memberId: m.id, role: nextRole });
+  };
+
+  const handleDeactivate = (m: (typeof list)[number]) => {
+    if (isLastActiveOwner(m)) {
+      toast.error("Cannot deactivate the last active owner.");
+      return;
+    }
+    if (!window.confirm(`Deactivate ${m.userName ?? m.userEmail ?? "this member"}? They will lose access.`)) return;
+    deactivate.mutate({ memberId: m.id });
+  };
 
   return (
     <div className="space-y-6">
@@ -82,6 +104,19 @@ export default function StaffPanel({ restaurantId }: { restaurantId: string }) {
         </div>
       )}
 
+      {members.isLoading ? (
+        <div className="bg-white rounded-xl border border-gray-200 p-8 text-center text-sm font-bold text-gray-500">
+          <LoaderCircle className="w-5 h-5 animate-spin mx-auto mb-2" />
+          Loading team members...
+        </div>
+      ) : members.isError ? (
+        <div className="bg-red-50 rounded-xl border border-red-200 p-6 text-center">
+          <p className="text-sm font-bold text-red-700">Could not load team members.</p>
+          <Button size="sm" variant="outline" className="mt-3" onClick={() => members.refetch()}>
+            Retry
+          </Button>
+        </div>
+      ) : (
       <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
         <table className="w-full text-sm">
           <thead className="bg-gray-50 text-left">
@@ -106,9 +141,10 @@ export default function StaffPanel({ restaurantId }: { restaurantId: string }) {
                 <td className="px-4 py-2.5">{m.userEmail ?? "—"}</td>
                 <td className="px-4 py-2.5">
                   <select
-                    className="text-xs font-bold px-2 py-1 rounded border border-gray-200 bg-transparent"
+                    className="text-xs font-bold px-2 py-1 rounded border border-gray-200 bg-transparent disabled:opacity-50"
                     value={m.role}
-                    onChange={e => updateRole.mutate({ memberId: m.id, role: e.target.value as RoleValue })}
+                    disabled={updateRole.isPending}
+                    onChange={e => handleRoleChange(m, e.target.value as RoleValue)}
                   >
                     {ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
                   </select>
@@ -121,7 +157,7 @@ export default function StaffPanel({ restaurantId }: { restaurantId: string }) {
                 <td className="px-4 py-2.5 text-gray-600">{new Date(m.joinedAt).toLocaleDateString()}</td>
                 <td className="px-4 py-2.5 text-right">
                   {m.isActive && (
-                    <Button size="sm" variant="ghost" className="text-red-500 hover:text-red-700 hover:bg-red-50 h-7 px-2" onClick={() => deactivate.mutate({ memberId: m.id })}>
+                    <Button size="sm" variant="ghost" className="text-red-500 hover:text-red-700 hover:bg-red-50 h-7 px-2" disabled={deactivate.isPending} onClick={() => handleDeactivate(m)}>
                       <UserMinus className="w-3 h-3" />
                     </Button>
                   )}
@@ -131,6 +167,7 @@ export default function StaffPanel({ restaurantId }: { restaurantId: string }) {
           </tbody>
         </table>
       </div>
+      )}
 
       {/* Role Reference */}
       <div className="bg-white rounded-xl border border-gray-200 p-4">

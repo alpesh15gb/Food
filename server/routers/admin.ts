@@ -1450,10 +1450,23 @@ export const adminRouter = router({
     reason: z.string().max(500).optional(),
   }))
     .mutation(async ({ ctx, input }) => {
+      // Tenant scope: never pass undefined — resolve the order's own restaurant
+      // and require membership for it, so initiateRefund's
+      // `order.restaurantId !== restaurantId` check always binds (a caller on a
+      // platform host with ctx.restaurantId=null would otherwise skip it).
+      const orderData = await getOrderWithItems(input.orderId);
+      if (!orderData) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Order not found." });
+      }
+      await checkTenantAccess(ctx.user, orderData.restaurantId);
+      const scopedRestaurantId = orderData.restaurantId ?? ctx.restaurantId ?? undefined;
+      if (!scopedRestaurantId) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Restaurant scope is required for this operation." });
+      }
       const result = await initiateRefund({
         ...input,
         initiatedBy: ctx.user.id,
-        restaurantId: ctx.restaurantId ?? undefined,
+        restaurantId: scopedRestaurantId,
       });
       await logAudit({
         actorId: ctx.user.id,
@@ -1462,7 +1475,7 @@ export const adminRouter = router({
         targetType: "order",
         targetId: input.orderId,
         afterData: { refundId: result.refundId, amountPaise: input.amountPaise },
-        restaurantId: ctx.restaurantId ?? undefined,
+        restaurantId: scopedRestaurantId,
       });
       return result;
     }),
@@ -2237,5 +2250,51 @@ export const adminRouter = router({
       await db.update(outlets).set({ isActive: input.isActive })
         .where(and(eq(outlets.id, input.outletId), eq(outlets.restaurantId, scopeId)));
       return { success: true };
+    }),
+
+  // Batch C: convenience refund wrapper (orderId + amount; payment lookup server-side).
+  // Wraps the existing initiateRefund from server/integrations/razorpay.ts.
+  // Permission "payments:refund" verified in server/_core/trpc.ts.
+  refundPayment: requirePermission("payments:refund").input(z.object({
+    orderId: z.string().min(4),
+    paymentId: z.string().min(4).optional(),
+    amountPaise: z.number().int().positive(),
+    reason: z.string().max(500).optional(),
+    restaurantId: z.string().min(4).optional(),
+  }))
+    .mutation(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database not available." });
+      const { payments } = await import("../../drizzle/schema");
+      const { eq: eqPay, and: andPay, desc: descPay } = await import("drizzle-orm");
+      let paymentId = input.paymentId;
+      if (!paymentId) {
+        const captured = (await db.select().from(payments)
+          .where(andPay(eqPay(payments.orderId, input.orderId), eqPay(payments.status, "CAPTURED")))
+          .orderBy(descPay(payments.createdAt)).limit(1))[0];
+        const fallback = captured ?? (await db.select().from(payments)
+          .where(eqPay(payments.orderId, input.orderId))
+          .orderBy(descPay(payments.createdAt)).limit(1))[0];
+        if (!fallback) throw new TRPCError({ code: "NOT_FOUND", message: "Payment not found for this order." });
+        paymentId = fallback.id;
+      }
+      const result = await initiateRefund({
+        orderId: input.orderId,
+        paymentId,
+        amountPaise: input.amountPaise,
+        reason: input.reason,
+        initiatedBy: ctx.user.id,
+        restaurantId: input.restaurantId ?? ctx.restaurantId ?? undefined,
+      });
+      await logAudit({
+        actorId: ctx.user.id,
+        actorName: ctx.user.name ?? undefined,
+        action: `Refund initiated: ₹${input.amountPaise / 100}`,
+        targetType: "order",
+        targetId: input.orderId,
+        afterData: { refundId: result.refundId, amountPaise: input.amountPaise },
+        restaurantId: input.restaurantId ?? ctx.restaurantId ?? undefined,
+      });
+      return result;
     }),
 });

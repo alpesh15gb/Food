@@ -8,53 +8,91 @@ import {
   DrawerHeader,
   DrawerTitle,
 } from "@/components/ui/drawer";
-import { formatINR, type MenuItem } from "@/lib/types";
+import { formatINR } from "@/lib/types";
+import type {
+  StorefrontAddonGroup,
+  StorefrontMenuItem,
+} from "@/lib/storefrontAdapter";
 import FoodDot from "./FoodDot";
-import OptionGroup from "./OptionGroup";
 import Quantity from "./Quantity";
 import { Check } from "lucide-react";
+
+const rupees = (paise: number): number =>
+  Number.isFinite(paise) ? paise / 100 : 0;
 
 export default function CustomizationDrawer({
   item,
   quantity,
-  size,
-  extras,
+  variantId,
+  optionIds,
   note,
   onClose,
   onQuantity,
-  onSize,
-  onExtras,
+  onVariant,
+  onOptions,
   onNote,
   onAdd,
 }: {
-  item: MenuItem | null;
+  item: StorefrontMenuItem | null;
   quantity: number;
-  size: string;
-  extras: string[];
+  variantId: string | null;
+  optionIds: string[];
   note: string;
   onClose: () => void;
   onQuantity: (value: number) => void;
-  onSize: (value: string) => void;
-  onExtras: (value: string[]) => void;
+  onVariant: (id: string | null) => void;
+  onOptions: (value: string[]) => void;
   onNote: (value: string) => void;
   onAdd: () => void;
 }) {
   if (!item) return null;
 
-  const sizeUpcharge = size === "Medium" ? 100 : size === "Large" ? 200 : 0;
-  const extraUpcharge = extras.reduce(
-    (sum, extra) =>
-      sum + (extra === "Extra cheese" ? 70 : extra === "Jalapeño" ? 40 : 50),
-    0
-  );
-  const displayTotal = (item.price + sizeUpcharge + extraUpcharge) * quantity;
+  const variants = item.variants ?? [];
+  const groups: StorefrontAddonGroup[] = item.addonGroups ?? [];
 
-  const toggleExtra = (extra: string) =>
-    onExtras(
-      extras.includes(extra)
-        ? extras.filter((choice) => choice !== extra)
-        : [...extras, extra]
+  const selectedVariant = variants.find((v) => v.id === variantId) ?? null;
+  const variantUpcharge = selectedVariant
+    ? rupees(selectedVariant.pricePaise)
+    : 0;
+
+  const selectedSet = new Set(optionIds);
+  let optionsUpcharge = 0;
+  for (const group of groups) {
+    for (const opt of group.options) {
+      if (selectedSet.has(opt.id)) optionsUpcharge += rupees(opt.pricePaise);
+    }
+  }
+  const displayTotal = (item.price + variantUpcharge + optionsUpcharge) * quantity;
+
+  const toggleOption = (group: StorefrontAddonGroup, optionId: string) => {
+    const inGroup = new Set(
+      group.options.map((o) => o.id).filter((id) => selectedSet.has(id))
     );
+    if (group.selectionType === "single") {
+      // Single-select: replace the group's pick (or deselect unless required).
+      const next = optionIds.filter(
+        (id) => !group.options.some((o) => o.id === id)
+      );
+      if (!inGroup.has(optionId)) next.push(optionId);
+      else if (group.isRequired) next.push(optionId);
+      onOptions(next);
+      return;
+    }
+    const max = group.maxSelections ?? group.options.length;
+    if (selectedSet.has(optionId)) {
+      onOptions(optionIds.filter((id) => id !== optionId));
+      return;
+    }
+    if (inGroup.size >= Math.max(max, 1)) return;
+    onOptions([...optionIds, optionId]);
+  };
+
+  // Required groups missing a pick block Add (server would reject anyway).
+  const missingRequired = groups.filter((group) => {
+    const count = group.options.filter((o) => selectedSet.has(o.id)).length;
+    const min = Math.max(group.isRequired ? 1 : 0, group.minSelections ?? 0);
+    return count < min;
+  });
 
   return (
     <Drawer open={!!item} onOpenChange={(open) => !open && onClose()}>
@@ -101,63 +139,168 @@ export default function CustomizationDrawer({
             </div>
           </DrawerHeader>
 
-          {/* Size options */}
-          <OptionGroup
-            title="Choose size"
-            required
-            values={["Regular", "Medium +₹100", "Large +₹200"]}
-            selected={size}
-            onSelect={(value) => onSize(value.split(" ")[0])}
-          />
-
-          {/* Extras */}
-          <div className="mt-6">
-            <p className="sf-heading text-sm" style={{ color: "var(--sf-text)" }}>
-              Add extras{" "}
-              <span className="font-medium" style={{ color: "var(--sf-text-muted)" }}>
-                (optional)
-              </span>
-            </p>
-            <div className="mt-3 grid gap-2">
-              {["Extra cheese", "Jalapeño"].map((extra) => {
-                const active = extras.includes(extra);
-                return (
-                  <button
-                    key={extra}
-                    onClick={() => toggleExtra(extra)}
-                    className={`flex items-center justify-between rounded-[var(--sf-radius-btn)] border px-3.5 py-3 text-left text-sm font-semibold transition-colors`}
-                    style={{
-                      borderColor: active
-                        ? "var(--sf-primary)"
-                        : "var(--sf-border)",
-                      background: active ? "var(--sf-primary-soft)" : "var(--sf-surface)",
-                      color: active
-                        ? "var(--sf-text)"
-                        : "var(--sf-text-secondary)",
-                    }}
-                  >
-                    <span className="flex items-center gap-3">
-                      <span
-                        className="grid h-5 w-5 place-items-center rounded-[5px] border"
+          {/* Real variants from the storefront payload (DB prices, DB IDs) */}
+          {variants.length > 0 && (
+            <div className="mt-6">
+              <p className="sf-heading text-sm" style={{ color: "var(--sf-text)" }}>
+                Choose variant{" "}
+                <span className="font-medium text-[var(--sf-red)]">Required</span>
+              </p>
+              <div className="mt-3 grid gap-2">
+                {variants
+                  .filter((v) => v.isAvailable)
+                  .map((v) => {
+                    const active = variantId === v.id;
+                    return (
+                      <button
+                        key={v.id}
+                        onClick={() => onVariant(active ? null : v.id)}
+                        className="flex items-center justify-between rounded-[var(--sf-radius-btn)] border px-3.5 py-3 text-left text-sm font-semibold transition-colors"
                         style={{
                           borderColor: active
                             ? "var(--sf-primary)"
                             : "var(--sf-border)",
-                          background: active ? "var(--sf-primary)" : "transparent",
+                          background: active
+                            ? "var(--sf-primary-soft)"
+                            : "var(--sf-surface)",
+                          color: active
+                            ? "var(--sf-text)"
+                            : "var(--sf-text-secondary)",
                         }}
                       >
-                        {active && <Check className="h-3.5 w-3.5 text-white" />}
-                      </span>
-                      {extra}
-                    </span>
-                    <span className="text-xs" style={{ color: "var(--sf-text-muted)" }}>
-                      +₹{extra === "Extra cheese" ? 70 : 40}
-                    </span>
-                  </button>
-                );
-              })}
+                        <span className="flex items-center gap-3">
+                          <span
+                            className="grid h-5 w-5 shrink-0 place-items-center rounded-full border"
+                            style={{
+                              borderColor: active
+                                ? "var(--sf-primary)"
+                                : "var(--sf-border)",
+                            }}
+                          >
+                            {active && (
+                              <span
+                                className="h-2.5 w-2.5 rounded-full"
+                                style={{ background: "var(--sf-primary)" }}
+                              />
+                            )}
+                          </span>
+                          {v.name}
+                        </span>
+                        <span
+                          className="text-xs"
+                          style={{ color: "var(--sf-text-muted)" }}
+                        >
+                          {v.pricePaise > 0
+                            ? `+${formatINR(rupees(v.pricePaise))}`
+                            : "Included"}
+                        </span>
+                      </button>
+                    );
+                  })}
+              </div>
             </div>
-          </div>
+          )}
+
+          {/* Real addon groups from the storefront payload (DB prices, DB IDs) */}
+          {groups.map((group) => (
+            <div key={group.id} className="mt-6">
+              <p className="sf-heading text-sm" style={{ color: "var(--sf-text)" }}>
+                {group.name}{" "}
+                {group.isRequired ? (
+                  <span className="font-medium text-[var(--sf-red)]">Required</span>
+                ) : (
+                  <span
+                    className="font-medium"
+                    style={{ color: "var(--sf-text-muted)" }}
+                  >
+                    (optional)
+                  </span>
+                )}
+              </p>
+              <div className="mt-3 grid gap-2">
+                {group.options
+                  .filter((opt) => opt.isAvailable)
+                  .map((opt) => {
+                    const active = selectedSet.has(opt.id);
+                    return (
+                      <button
+                        key={opt.id}
+                        onClick={() => toggleOption(group, opt.id)}
+                        className="flex items-center justify-between rounded-[var(--sf-radius-btn)] border px-3.5 py-3 text-left text-sm font-semibold transition-colors"
+                        style={{
+                          borderColor: active
+                            ? "var(--sf-primary)"
+                            : "var(--sf-border)",
+                          background: active
+                            ? "var(--sf-primary-soft)"
+                            : "var(--sf-surface)",
+                          color: active
+                            ? "var(--sf-text)"
+                            : "var(--sf-text-secondary)",
+                        }}
+                      >
+                        <span className="flex items-center gap-3">
+                          <span
+                            className={`grid h-5 w-5 place-items-center border ${
+                              group.selectionType === "single"
+                                ? "rounded-full"
+                                : "rounded-[5px]"
+                            }`}
+                            style={{
+                              borderColor: active
+                                ? "var(--sf-primary)"
+                                : "var(--sf-border)",
+                              background:
+                                active && group.selectionType !== "single"
+                                  ? "var(--sf-primary)"
+                                  : "transparent",
+                            }}
+                          >
+                            {active &&
+                              (group.selectionType === "single" ? (
+                                <span
+                                  className="h-2.5 w-2.5 rounded-full"
+                                  style={{ background: "var(--sf-primary)" }}
+                                />
+                              ) : (
+                                <Check className="h-3.5 w-3.5 text-white" />
+                              ))}
+                          </span>
+                          {opt.name}
+                        </span>
+                        <span
+                          className="text-xs"
+                          style={{ color: "var(--sf-text-muted)" }}
+                        >
+                          {opt.pricePaise > 0
+                            ? `+${formatINR(rupees(opt.pricePaise))}`
+                            : "Included"}
+                        </span>
+                      </button>
+                    );
+                  })}
+              </div>
+            </div>
+          ))}
+
+          {variants.length === 0 && groups.length === 0 && (
+            <p
+              className="mt-6 text-sm"
+              style={{ color: "var(--sf-text-secondary)" }}
+            >
+              No customizations available for this dish — add a note below if
+              needed.
+            </p>
+          )}
+
+          {missingRequired.length > 0 && (
+            <p
+              className="mt-4 text-xs font-bold"
+              style={{ color: "var(--sf-red)" }}
+            >
+              Please choose: {missingRequired.map((g) => g.name).join(", ")}
+            </p>
+          )}
 
           {/* Special instructions */}
           <div className="mt-6">
@@ -196,6 +339,7 @@ export default function CustomizationDrawer({
         >
           <Button
             onClick={onAdd}
+            disabled={missingRequired.length > 0}
             className="h-13 w-full rounded-[var(--sf-radius-btn)] text-sm font-extrabold text-white"
             style={{ background: "var(--sf-primary)" }}
           >

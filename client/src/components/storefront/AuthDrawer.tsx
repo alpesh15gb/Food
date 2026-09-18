@@ -7,6 +7,7 @@ import {
   DrawerTitle,
 } from "@/components/ui/drawer";
 import { Input } from "@/components/ui/input";
+import { normalizePhone } from "./types";
 
 export default function AuthDrawer({
   open,
@@ -140,7 +141,7 @@ export default function AuthDrawer({
               <Button
                 onClick={onSendOtp}
                 disabled={
-                  otpLoading || otpPhone.replace(/[^\d]/g, "").length < 10
+                  otpLoading || normalizePhone(otpPhone).length < 10
                 }
                 className="h-12 w-full rounded-[var(--sf-radius-btn)] text-base font-extrabold text-white"
                 style={{ background: "var(--sf-primary)" }}

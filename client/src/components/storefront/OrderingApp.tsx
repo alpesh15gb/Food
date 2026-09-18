@@ -3,18 +3,19 @@
  * Wraps all storefront components in a `.storefront` scoped container.
  * Holds ALL state, performs ALL data fetching, routes to screens.
  */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { toast } from "sonner";
 import { X } from "lucide-react";
 import { formatINR, type MenuItem } from "@/lib/types";
 import { trpc } from "@/lib/trpc";
-import { adaptStorefront } from "@/lib/storefrontAdapter";
+import { adaptStorefront, type StorefrontMenuItem } from "@/lib/storefrontAdapter";
 import DeliveryLocationDrawer, {
   type DeliveryLocation,
 } from "@/components/DeliveryLocationDrawer";
 
 import type { CartLine } from "./types";
+import { normalizePhone } from "./types";
 import MenuSkeleton from "./MenuSkeleton";
 import TopBar from "./TopBar";
 import HeroBanner from "./HeroBanner";
@@ -110,12 +111,15 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
   const [cartOpen, setCartOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [activeCategory, setActiveCategory] = useState("All");
-  const [selected, setSelected] = useState<MenuItem | null>(null);
+  const [selected, setSelected] = useState<StorefrontMenuItem | null>(null);
   const [customQty, setCustomQty] = useState(1);
-  const [size, setSize] = useState("Regular");
-  const [extras, setExtras] = useState<string[]>([]);
+  const [variantId, setVariantId] = useState<string | null>(null);
+  const [optionIds, setOptionIds] = useState<string[]>([]);
   const [note, setNote] = useState("");
   const [processing, setProcessing] = useState(false);
+  // Re-entry guard: state alone lags a frame, so rapid double-clicks could
+  // fire startSecurePayment twice before `processing` flips.
+  const paymentInFlight = useRef(false);
   const [deliveryAddress, setDeliveryAddress] =
     useState<DeliveryLocation | null>(null);
   const [locationOpen, setLocationOpen] = useState(false);
@@ -154,6 +158,52 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
   const taxes = Math.round((itemTotal + packaging) * 0.05);
   const grandTotal = Math.max(0, itemTotal + packaging + delivery + taxes);
   const totalQuantity = cart.reduce((sum, line) => sum + line.quantity, 0);
+
+  // --- Cart persistence: survive reloads, clear after successful payment ---
+  const cartKey = storefrontSlug ? `ck_cart:${storefrontSlug}` : null;
+  const restoredCartKey = useRef<string | null>(null);
+  useEffect(() => {
+    if (!cartKey || restoredCartKey.current === cartKey) return;
+    restoredCartKey.current = cartKey;
+    try {
+      const raw = localStorage.getItem(cartKey);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as CartLine[];
+      if (!Array.isArray(parsed)) return;
+      const clean = parsed.filter(
+        (line) =>
+          line &&
+          typeof line.id === "string" &&
+          line.item &&
+          typeof line.item.id === "string" &&
+          typeof line.quantity === "number" &&
+          Number.isInteger(line.quantity) &&
+          line.quantity >= 1 &&
+          typeof line.unitPrice === "number" &&
+          Number.isFinite(line.unitPrice)
+      );
+      if (clean.length) setCart(clean);
+    } catch {
+      /* corrupt snapshot — start fresh */
+    }
+  }, [cartKey]);
+  useEffect(() => {
+    if (!cartKey || restoredCartKey.current !== cartKey) return;
+    try {
+      if (cart.length === 0) localStorage.removeItem(cartKey);
+      else localStorage.setItem(cartKey, JSON.stringify(cart));
+    } catch {
+      /* private mode — persistence skipped */
+    }
+  }, [cart, cartKey]);
+  const clearCart = () => {
+    setCart([]);
+    try {
+      if (cartKey) localStorage.removeItem(cartKey);
+    } catch {
+      /* private mode — nothing to clear */
+    }
+  };
 
   // --- Cart quantity map (for MenuCard inline steppers) ---
   const cartQuantities = useMemo(() => {
@@ -231,11 +281,14 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
   };
 
   const openItem = (item: MenuItem) => {
-    if (item.customizable) {
-      setSelected(item);
+    const full = item as StorefrontMenuItem;
+    const groups = full.addonGroups ?? [];
+    const variants = full.variants ?? [];
+    if (item.customizable || groups.length > 0 || variants.length > 0) {
+      setSelected(full);
       setCustomQty(1);
-      setSize("Regular");
-      setExtras([]);
+      setVariantId(null);
+      setOptionIds([]);
       setNote("");
     } else {
       simpleAdd(item);
@@ -244,14 +297,22 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
 
   const addCustomItem = () => {
     if (!selected) return;
-    const sizeUpcharge =
-      size === "Medium" ? 100 : size === "Large" ? 200 : 0;
-    const extraUpcharge = extras.reduce(
-      (sum, extra) =>
-        sum + (extra === "Extra cheese" ? 70 : extra === "Jalapeño" ? 40 : 50),
+    const groups = selected.addonGroups ?? [];
+    const variants = selected.variants ?? [];
+    const variant = variants.find((v) => v.id === variantId) ?? null;
+    const variantUpcharge = variant ? variant.pricePaise / 100 : 0;
+    const picked = groups.flatMap((group) =>
+      group.options.filter((opt) => optionIds.includes(opt.id))
+    );
+    const optionsUpcharge = picked.reduce(
+      (sum, opt) => sum + opt.pricePaise / 100,
       0
     );
-    const unitPrice = selected.price + sizeUpcharge + extraUpcharge;
+    const unitPrice = selected.price + variantUpcharge + optionsUpcharge;
+    const displayNames = [
+      ...(variant ? [variant.name] : []),
+      ...picked.map((opt) => opt.name),
+    ];
     setCart((current) => [
       ...current,
       {
@@ -260,7 +321,9 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
         quantity: customQty,
         unitPrice,
         note,
-        modifiers: [size, ...extras],
+        modifiers: displayNames,
+        modifierOptionIds: picked.map((opt) => opt.id),
+        selectedVariantId: variant?.id,
       },
     ]);
     toast.success(`${selected.name} added to your order`);
@@ -269,7 +332,7 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
 
   // --- Customer Auth Handlers ---
   const handleSendOtp = async () => {
-    const phone = otpPhone.replace(/[^\d]/g, "");
+    const phone = normalizePhone(otpPhone);
     if (phone.length < 10) {
       setOtpError("Enter a valid 10-digit phone number.");
       return;
@@ -297,10 +360,10 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
     setOtpError("");
     try {
       const result = await verifyOtp.mutateAsync({
-        phone: otpPhone,
+        phone: normalizePhone(otpPhone),
         code: otpCode,
       });
-      localStorage.setItem("ck_phone_prefill", otpPhone);
+      localStorage.setItem("ck_phone_prefill", normalizePhone(otpPhone));
       setAuthOpen(false);
       setOtpStep("phone");
       setOtpPhone("");
@@ -335,6 +398,8 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
 
   // --- Payment ---
   const startSecurePayment = async () => {
+    // Guard re-entry: rapid double-clicks must not open two Razorpay flows.
+    if (paymentInFlight.current || processing) return;
     if (!paymentConfig.data?.enabled) {
       toast.error("Online payments are not configured yet.", {
         description:
@@ -343,7 +408,8 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
       return;
     }
     if (cart.length === 0) return toast.error("Add items to your cart first.");
-    if (grandTotal < (restaurant?.minOrder ?? 0)) {
+    // Server enforces itemTotal >= minOrder (fees excluded) — match it here.
+    if (itemTotal < (restaurant?.minOrder ?? 0)) {
       return toast.error(
         `Minimum order is ${formatINR(restaurant?.minOrder ?? 0)}`
       );
@@ -354,13 +420,14 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
         description: "Tap on the delivery address bar to set your location.",
       });
     }
-    if (!customerPhone || customerPhone.length < 10) {
+    if (normalizePhone(customerPhone).length < 10) {
       return toast.error("Please enter your phone number.");
     }
 
     // Serviceability pre-check (radius + Shadowfax pincode-pair when the
     // provider is configured — catches pincode-unserviceable addresses
     // BEFORE payment instead of failing late at dispatch).
+    paymentInFlight.current = true;
     setProcessing(true);
     try {
       const dropPincode = /^\d{6}$/.test(deliveryAddress.postalCode ?? "")
@@ -380,6 +447,7 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
       const svcJson = await svcRes.json();
       const serviceability = svcJson?.result?.data ?? svcJson;
       if (!serviceability?.serviceable) {
+        paymentInFlight.current = false;
         setProcessing(false);
         const reason = serviceability?.reason ?? "";
         toast.error("Sorry, we can't deliver to this location.", {
@@ -393,6 +461,7 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
         return;
       }
     } catch {
+      paymentInFlight.current = false;
       setProcessing(false);
       toast.error(
         "Could not verify delivery availability. Please try again."
@@ -406,11 +475,10 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
         lines: cart.map((line) => ({
           menuItemId: line.item.id,
           quantity: line.quantity,
-          modifierOptionIds: line.modifiers?.length
-            ? line.modifiers.map(
-                (name, i) => `${line.item.id}_opt_${i}`
-              )
+          modifierOptionIds: line.modifierOptionIds?.length
+            ? line.modifierOptionIds
             : undefined,
+          selectedVariantId: line.selectedVariantId ?? undefined,
           specialInstructions: line.note,
         })),
         address: {
@@ -459,6 +527,8 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
               providerPaymentId: response.razorpay_payment_id,
               signature: response.razorpay_signature,
             });
+            // Clear the cart so back-button can't re-pay the same lines.
+            clearCart();
             // Persist the tracking token so confirmation/tracking can authenticate.
             const paidToken =
               (created as { trackingToken?: string }).trackingToken ?? "";
@@ -473,14 +543,19 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
                 : "Payment verification failed."
             );
           } finally {
+            paymentInFlight.current = false;
             setProcessing(false);
           }
         },
         modal: {
-          ondismiss: () => setProcessing(false),
+          ondismiss: () => {
+            paymentInFlight.current = false;
+            setProcessing(false);
+          },
         },
       }).open();
     } catch (error) {
+      paymentInFlight.current = false;
       setProcessing(false);
       toast.error(
         error instanceof Error
@@ -673,6 +748,7 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
       <MobileCartBar
         quantity={totalQuantity}
         total={grandTotal}
+        disabled={processing}
         onClick={() => setCartOpen(true)}
       />
 
@@ -724,13 +800,13 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
       <CustomizationDrawer
         item={selected}
         quantity={customQty}
-        size={size}
-        extras={extras}
+        variantId={variantId}
+        optionIds={optionIds}
         note={note}
         onClose={() => setSelected(null)}
         onQuantity={setCustomQty}
-        onSize={setSize}
-        onExtras={setExtras}
+        onVariant={setVariantId}
+        onOptions={setOptionIds}
         onNote={setNote}
         onAdd={addCustomItem}
       />

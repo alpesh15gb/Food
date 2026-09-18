@@ -68,6 +68,25 @@ const statusColor: Record<string, string> = {
   REFUNDED: "bg-gray-50 text-gray-700",
 };
 
+// Legal next statuses — hardcoded mirror of server/domain/orderStateMachine.ts VALID_TRANSITIONS.
+const VALID_TRANSITIONS: Record<string, string[]> = {
+  PENDING_PAYMENT: ["PAYMENT_CONFIRMED", "CANCELLED"],
+  PAYMENT_CONFIRMED: ["PLACED", "CANCELLED"],
+  PLACED: ["RESTAURANT_ACCEPTED", "REJECTED", "CANCELLED"],
+  RESTAURANT_ACCEPTED: ["PREPARING", "CANCELLED"],
+  PREPARING: ["READY_FOR_PICKUP", "CANCELLED"],
+  READY_FOR_PICKUP: ["DELIVERY_REQUESTED", "RIDER_ASSIGNED", "CANCELLED"],
+  DELIVERY_REQUESTED: ["RIDER_ASSIGNED", "CANCELLED"],
+  RIDER_ASSIGNED: ["PICKED_UP", "CANCELLED"],
+  PICKED_UP: ["OUT_FOR_DELIVERY"],
+  OUT_FOR_DELIVERY: ["DELIVERED"],
+  DELIVERED: ["REFUND_PENDING"],
+  CANCELLED: ["REFUND_PENDING"],
+  REJECTED: ["REFUND_PENDING"],
+  REFUND_PENDING: ["REFUNDED"],
+  REFUNDED: [],
+};
+
 const ADMIN_SECTIONS = new Set(["import","menu","orders","categories","coupons","customers","restaurant","integrations","domains","kds","inventory","staff","notifications","analytics","outlets","loyalty","combos","overview"]);
 
 export default function Admin() {
@@ -301,12 +320,14 @@ function MenuImportWorkspace({ slug }: { slug?: string }) {
 
 function AdminWorkspace({ section, slug }: { section: string; slug?: string }) {
   const utils = trpc.useUtils();
-  const dashboard = trpc.admin.dashboard.useQuery({ slug: slug || "" }, { enabled: !!slug });
+  const dashboard = trpc.admin.dashboard.useQuery({ slug: slug || "" }, { enabled: !!slug, refetchInterval: 10000 });
   const [itemForm, setItemForm] = useState({
     name: "",
     price: "",
     categoryId: "",
     dietaryType: "veg" as "veg" | "nonveg" | "egg",
+    description: "",
+    imageUrl: "",
   });
   const [couponForm, setCouponForm] = useState({
     code: "",
@@ -318,16 +339,19 @@ function AdminWorkspace({ section, slug }: { section: string; slug?: string }) {
 
   const updateOrder = trpc.admin.updateOrderStatus.useMutation({
     onSuccess: () => utils.admin.dashboard.invalidate(),
+    onError: (err) => toast.error(err.message || "Could not update order."),
   });
   const updateAvailability = trpc.admin.updateMenuAvailability.useMutation({
     onSuccess: () => utils.admin.dashboard.invalidate(),
+    onError: (err) => toast.error(err.message || "Could not update availability."),
   });
   const createItem = trpc.admin.createMenuItem.useMutation({
     onSuccess: () => {
       utils.admin.dashboard.invalidate();
-      setItemForm({ name: "", price: "", categoryId: "", dietaryType: "veg" });
+      setItemForm({ name: "", price: "", categoryId: "", dietaryType: "veg", description: "", imageUrl: "" });
       toast.success("Menu item added");
     },
+    onError: (err) => toast.error(err.message || "Could not create menu item."),
   });
   const createCoupon = trpc.admin.upsertCoupon.useMutation({
     onSuccess: () => {
@@ -335,15 +359,25 @@ function AdminWorkspace({ section, slug }: { section: string; slug?: string }) {
       setCouponForm({ code: "", description: "", discount: "", discountType: "flat", minOrder: "" });
       toast.success("Coupon is live");
     },
+    onError: (err) => toast.error(err.message || "Could not save coupon."),
   });
   const updateSettings = trpc.admin.updateSettings.useMutation({
     onSuccess: () => {
       utils.admin.dashboard.invalidate();
       toast.success("Restaurant settings saved");
     },
+    onError: (err) => toast.error(err.message || "Could not save settings."),
+  });
+  const refundPayment = trpc.admin.refundPayment.useMutation({
+    onSuccess: () => {
+      utils.admin.dashboard.invalidate();
+      toast.success("Refund initiated");
+    },
+    onError: (err) => toast.error(err.message || "Refund failed."),
   });
   const toggleItem = trpc.admin.toggleItemOpen.useMutation({
     onSuccess: () => utils.admin.dashboard.invalidate(),
+    onError: (err) => toast.error(err.message || "Could not toggle item."),
   });
   const uploadImage = trpc.admin.uploadMenuImage.useMutation();
   const uploadBrand = trpc.admin.uploadBrandImage.useMutation({
@@ -354,27 +388,32 @@ function AdminWorkspace({ section, slug }: { section: string; slug?: string }) {
       utils.admin.dashboard.invalidate();
       toast.success("Item removed from menu");
     },
+    onError: (err) => toast.error(err.message || "Could not delete item."),
   });
   const bulkUpdate = trpc.admin.bulkUpdateMenuItems.useMutation({
     onSuccess: (d) => {
       utils.admin.dashboard.invalidate();
       toast.success(`${d.updated} items updated`);
     },
+    onError: (err) => toast.error(err.message || "Bulk update failed."),
   });
   const updateItem = trpc.admin.updateMenuItem.useMutation({
     onSuccess: () => {
       utils.admin.dashboard.invalidate();
       toast.success("Item updated");
     },
+    onError: (err) => toast.error(err.message || "Could not update item."),
   });
   const createCat = trpc.admin.createCategory.useMutation({
     onSuccess: () => {
       utils.admin.dashboard.invalidate();
       toast.success("Category created");
     },
+    onError: (err) => toast.error(err.message || "Could not create category."),
   });
   const updateCat = trpc.admin.updateCategory.useMutation({
     onSuccess: () => utils.admin.dashboard.invalidate(),
+    onError: (err) => toast.error(err.message || "Could not update category."),
   });
 
   if (dashboard.isLoading) return <AdminLoading />;
@@ -393,11 +432,16 @@ function AdminWorkspace({ section, slug }: { section: string; slug?: string }) {
   const createMenu = () => {
     if (!itemForm.name || !itemForm.price)
       return toast.error("Add an item name and price first.");
+    const priceNum = Number(itemForm.price);
+    if (!Number.isFinite(priceNum) || priceNum <= 0)
+      return toast.error("Enter a valid price.");
     createItem.mutate({
       restaurantId: data.restaurant.id,
       categoryId: itemForm.categoryId || defaultCategoryId,
       name: itemForm.name,
-      pricePaise: Math.round(Number(itemForm.price) * 100),
+      description: itemForm.description?.trim() || undefined,
+      imageUrl: itemForm.imageUrl?.trim() || undefined,
+      pricePaise: Math.round(priceNum * 100),
       dietaryType: itemForm.dietaryType,
     });
   };
@@ -405,13 +449,27 @@ function AdminWorkspace({ section, slug }: { section: string; slug?: string }) {
   const saveCoupon = () => {
     if (!couponForm.code || !couponForm.description || !couponForm.discount)
       return toast.error("Complete the coupon details first.");
+    const discountNum = Number(couponForm.discount);
+    if (!Number.isFinite(discountNum) || discountNum <= 0)
+      return toast.error("Enter a valid discount value.");
+    let discountValue: number;
+    if (couponForm.discountType === "percent") {
+      if (discountNum > 100)
+        return toast.error("Percentage discount cannot exceed 100%.");
+      discountValue = Math.round(Math.min(100, discountNum));
+    } else {
+      discountValue = Math.round(discountNum * 100);
+    }
+    const minOrderNum = Number(couponForm.minOrder || 0);
+    if (!Number.isFinite(minOrderNum) || minOrderNum < 0)
+      return toast.error("Enter a valid minimum order value.");
     createCoupon.mutate({
       restaurantId: data.restaurant.id,
       code: couponForm.code,
       description: couponForm.description,
       discountType: couponForm.discountType,
-      discountValue: Math.round(Number(couponForm.discount) * 100),
-      minOrderPaise: Math.round(Number(couponForm.minOrder || 0) * 100),
+      discountValue,
+      minOrderPaise: Math.round(minOrderNum * 100),
     });
   };
 
@@ -455,10 +513,12 @@ function AdminWorkspace({ section, slug }: { section: string; slug?: string }) {
         {section === "orders" ? (
           <OrdersPanel
             data={data}
-            onStatus={(orderId, nextStatus, note) =>
-              updateOrder.mutate({ orderId, status: nextStatus as never, note })
-            }
-            busy={updateOrder.isPending}
+            onStatus={async (orderId, nextStatus, note) => {
+              await updateOrder.mutateAsync({ orderId, status: nextStatus as never, note });
+            }}
+            onRefund={async (orderId, amountPaise) => {
+              await refundPayment.mutateAsync({ orderId, amountPaise });
+            }}
           />
         ) : section === "menu" ? (
           <MenuPanel
@@ -499,6 +559,7 @@ function AdminWorkspace({ section, slug }: { section: string; slug?: string }) {
           <RestaurantPanel
             restaurant={data.restaurant}
             onSave={(next) => updateSettings.mutate(next)}
+            isSaving={updateSettings.isPending}
             onUploadBrand={(input) =>
               uploadBrand.mutateAsync({
                 restaurantId: data.restaurant.id,
@@ -771,13 +832,18 @@ function OverviewPanel({ data }: { data: any }) {
 function OrdersPanel({
   data,
   onStatus,
-  busy,
+  onRefund,
 }: {
   data: any;
-  onStatus: (id: string, status: string, note?: string) => void;
-  busy: boolean;
+  onStatus: (id: string, status: string, note?: string) => Promise<void>;
+  onRefund: (id: string, amountPaise: number) => Promise<void>;
 }) {
   const [filter, setFilter] = useState<string>("all");
+  const [search, setSearch] = useState("");
+  const [pendingIds, setPendingIds] = useState<Set<string>>(new Set());
+  const [notes, setNotes] = useState<Record<string, string>>({});
+  const [refundAmounts, setRefundAmounts] = useState<Record<string, string>>({});
+  const [confirmRefundId, setConfirmRefundId] = useState<string | null>(null);
 
   const activeStatuses = [
     "PLACED",
@@ -790,12 +856,62 @@ function OrdersPanel({
     "OUT_FOR_DELIVERY",
   ];
 
+  const q = search.trim().toLowerCase();
+  const bySearch = (data.orders ?? []).filter((o: any) => {
+    if (!q) return true;
+    return (
+      String(o.orderNumber ?? "").toLowerCase().includes(q) ||
+      String(o.customerName ?? "").toLowerCase().includes(q) ||
+      String(o.customerPhone ?? "").toLowerCase().includes(q)
+    );
+  });
   const filtered =
     filter === "all"
-      ? (data.orders ?? [])
+      ? bySearch
       : filter === "active"
-      ? (data.orders ?? []).filter((o: any) => activeStatuses.includes(o.status))
-      : (data.orders ?? []).filter((o: any) => o.status === filter);
+      ? bySearch.filter((o: any) => activeStatuses.includes(o.status))
+      : bySearch.filter((o: any) => o.status === filter);
+
+  const handleStatus = async (orderId: string, nextStatus: string) => {
+    if (!nextStatus) return;
+    setPendingIds((prev) => new Set(prev).add(orderId));
+    try {
+      await onStatus(orderId, nextStatus, notes[orderId]?.trim() || undefined);
+      setNotes((prev) => ({ ...prev, [orderId]: "" }));
+    } catch (err: any) {
+      toast.error(err?.message || "Could not update order.");
+    } finally {
+      setPendingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(orderId);
+        return next;
+      });
+    }
+  };
+
+  const handleRefund = async (order: any) => {
+    const raw = refundAmounts[order.id] ?? "";
+    const rupees = Number(raw);
+    if (!Number.isFinite(rupees) || rupees <= 0)
+      return toast.error("Enter a valid refund amount.");
+    const amountPaise = Math.round(rupees * 100);
+    if (amountPaise > order.totalPaise)
+      return toast.error("Refund cannot exceed order total.");
+    setPendingIds((prev) => new Set(prev).add(order.id));
+    try {
+      await onRefund(order.id, amountPaise);
+      setConfirmRefundId(null);
+      setRefundAmounts((prev) => ({ ...prev, [order.id]: "" }));
+    } catch (err: any) {
+      toast.error(err?.message || "Refund failed.");
+    } finally {
+      setPendingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(order.id);
+        return next;
+      });
+    }
+  };
 
   return (
     <section className="overflow-hidden rounded-2xl bg-white shadow-sm">
@@ -833,6 +949,15 @@ function OrdersPanel({
               {label}
             </button>
           ))}
+        </div>
+        <div className="relative mt-3">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500" />
+          <Input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search by order #, name, or phone..."
+            className="h-10 rounded-xl border-gray-200 pl-9 text-sm"
+          />
         </div>
       </div>
 
@@ -903,23 +1028,78 @@ function OrdersPanel({
                     </span>
                   </td>
                   <td className="px-5 py-4">
-                    <div className="flex flex-col gap-2">
-                      <select
-                        disabled={busy}
-                        value={order.status}
-                        onChange={(e) => onStatus(order.id, e.target.value)}
-                        className="rounded-lg border border-gray-200 bg-white px-2 py-2 text-xs font-bold outline-none focus:ring-2 focus:ring-[#c84630]"
-                      >
-                        <option value="PLACED">New order</option>
-                        <option value="RESTAURANT_ACCEPTED">Accept</option>
-                        <option value="PREPARING">Preparing</option>
-                        <option value="READY_FOR_PICKUP">Ready</option>
-                        <option value="DELIVERY_REQUESTED">Request delivery</option>
-                        <option value="OUT_FOR_DELIVERY">Out for delivery</option>
-                        <option value="DELIVERED">Delivered</option>
-                        <option value="REJECTED">Reject</option>
-                        <option value="CANCELLED">Cancel</option>
-                      </select>
+                    <div className="flex min-w-[220px] flex-col gap-2">
+                      {(VALID_TRANSITIONS[order.status] ?? []).length > 0 ? (
+                        <>
+                          <select
+                            disabled={pendingIds.has(order.id)}
+                            value=""
+                            onChange={(e) => handleStatus(order.id, e.target.value)}
+                            className="rounded-lg border border-gray-200 bg-white px-2 py-2 text-xs font-bold outline-none focus:ring-2 focus:ring-[#c84630] disabled:opacity-50"
+                          >
+                            <option value="">
+                              {pendingIds.has(order.id) ? "Updating..." : "Update status..."}
+                            </option>
+                            {(VALID_TRANSITIONS[order.status] ?? []).map((next: string) => (
+                              <option key={next} value={next}>
+                                {statusLabel[next] ?? next}
+                              </option>
+                            ))}
+                          </select>
+                          <Input
+                            value={notes[order.id] ?? ""}
+                            onChange={(e) => setNotes((prev) => ({ ...prev, [order.id]: e.target.value }))}
+                            placeholder="Status note (optional)"
+                            maxLength={500}
+                            disabled={pendingIds.has(order.id)}
+                            className="h-8 rounded-lg border-gray-200 text-xs"
+                          />
+                        </>
+                      ) : (
+                        <span className="text-xs font-bold text-gray-400">No further actions</span>
+                      )}
+                      {order.paymentStatus === "PAID" && order.status !== "REFUNDED" && order.status !== "REFUND_PENDING" && (
+                        <div className="rounded-lg border border-gray-200 bg-gray-50 p-2">
+                          {confirmRefundId === order.id ? (
+                            <div className="space-y-2">
+                              <Input
+                                value={refundAmounts[order.id] ?? ""}
+                                onChange={(e) => setRefundAmounts((prev) => ({ ...prev, [order.id]: e.target.value }))}
+                                inputMode="numeric"
+                                placeholder={`Amount in ₹ (max ${(order.totalPaise / 100).toFixed(0)})`}
+                                disabled={pendingIds.has(order.id)}
+                                className="h-8 rounded-lg border-gray-200 bg-white text-xs"
+                              />
+                              <div className="flex gap-2">
+                                <button
+                                  onClick={() => handleRefund(order)}
+                                  disabled={pendingIds.has(order.id)}
+                                  className="flex-1 rounded-lg bg-red-600 px-2 py-1.5 text-[11px] font-extrabold text-white hover:bg-red-700 disabled:opacity-50"
+                                >
+                                  Confirm refund
+                                </button>
+                                <button
+                                  onClick={() => setConfirmRefundId(null)}
+                                  className="rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-[11px] font-bold text-gray-600"
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <button
+                              onClick={() => {
+                                setRefundAmounts((prev) => ({ ...prev, [order.id]: String(order.totalPaise / 100) }));
+                                setConfirmRefundId(order.id);
+                              }}
+                              disabled={pendingIds.has(order.id)}
+                              className="w-full rounded-lg border border-red-200 bg-white px-2 py-1.5 text-[11px] font-extrabold text-red-600 hover:bg-red-50 disabled:opacity-50"
+                            >
+                              Refund
+                            </button>
+                          )}
+                        </div>
+                      )}
                       {(order.status === "DELIVERED" || order.status === "READY_FOR_PICKUP") && (
                         <InvoiceButton orderId={order.id} />
                       )}
@@ -1520,7 +1700,7 @@ function CouponsPanel({
                 <p className="mt-3 text-xs font-bold text-gray-500">
                   {coupon.discountType === "flat"
                     ? `₹${coupon.discountValue / 100} off`
-                    : `${coupon.discountValue}% off`}{" "}
+                    : `${coupon.discountValue > 100 ? Math.round(coupon.discountValue / 100) : coupon.discountValue}% off`}{" "}
                   · Min {money(coupon.minOrderPaise)}
                 </p>
               </article>
@@ -1539,9 +1719,11 @@ function CouponsPanel({
 // =============================================================================
 
 function CustomersPanel({ restaurantId }: { restaurantId: string }) {
+  const utils = trpc.useUtils();
   const [search, setSearch] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [notes, setNotes] = useState("");
+  const [notesInitializedFor, setNotesInitializedFor] = useState<string | null>(null);
 
   const customers = trpc.admin.customers.useQuery({ restaurantId, search: search || undefined, limit: 50 });
   const customerDetail = trpc.admin.customerDetail.useQuery(
@@ -1552,17 +1734,37 @@ function CustomersPanel({ restaurantId }: { restaurantId: string }) {
     onSuccess: () => {
       toast.success("Notes saved");
       customerDetail.refetch();
+      customers.refetch();
+      utils.admin.customers.invalidate();
     },
+    onError: (err) => toast.error(err.message || "Could not save notes."),
   });
 
   const list = customers.data ?? [];
   const detail = customerDetail.data;
 
+  useEffect(() => {
+    if (detail && selectedId && notesInitializedFor !== selectedId) {
+      setNotes(detail.adminNotes ?? "");
+      setNotesInitializedFor(selectedId);
+    }
+  }, [detail, selectedId, notesInitializedFor]);
+
   if (selectedId && detail) {
+    const savedNotes = detail.adminNotes ?? "";
+    const notesChanged = notes !== savedNotes;
+    const handleSaveNotes = () => {
+      if (!notesChanged) return;
+      if (!notes.trim()) {
+        toast.error("Notes are unchanged or empty — existing notes preserved.");
+        return;
+      }
+      updateNotes.mutate({ customerId: selectedId, notes: notes.trim() });
+    };
     return (
       <div className="space-y-5">
         <button
-          onClick={() => { setSelectedId(null); setNotes(""); }}
+          onClick={() => { setSelectedId(null); setNotes(""); setNotesInitializedFor(null); }}
           className="flex items-center gap-2 text-sm font-extrabold text-[#c84630] hover:underline"
         >
           ← Back to customers
@@ -1603,18 +1805,21 @@ function CustomersPanel({ restaurantId }: { restaurantId: string }) {
         <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
           <p className="text-[10px] font-extrabold uppercase tracking-wider text-gray-500">Admin notes</p>
           <textarea
-            value={notes || detail.adminNotes || ""}
+            value={notes}
             onChange={(e) => setNotes(e.target.value)}
             placeholder="Add private notes about this customer..."
             className="mt-3 min-h-20 w-full rounded-xl border border-gray-200 bg-white p-3 text-sm outline-none focus:ring-2 focus:ring-[#c84630]"
           />
           <Button
-            onClick={() => updateNotes.mutate({ customerId: selectedId, notes })}
-            disabled={updateNotes.isPending}
-            className="mt-3 h-10 rounded-xl bg-[#c84630] px-4 text-xs font-extrabold hover:bg-[#b03a28]"
+            onClick={handleSaveNotes}
+            disabled={updateNotes.isPending || !notesChanged}
+            className="mt-3 h-10 rounded-xl bg-[#c84630] px-4 text-xs font-extrabold hover:bg-[#b03a28] disabled:opacity-50"
           >
-            <Save className="mr-1.5 h-3.5 w-3.5" /> Save notes
+            <Save className="mr-1.5 h-3.5 w-3.5" /> {updateNotes.isPending ? "Saving..." : "Save notes"}
           </Button>
+          {!notesChanged && (
+            <p className="mt-2 text-xs text-gray-500">No changes to save.</p>
+          )}
         </div>
 
         {/* Order History */}
@@ -1698,6 +1903,7 @@ function CustomersPanel({ restaurantId }: { restaurantId: string }) {
                   onClick={() => {
                     setSelectedId(c.id);
                     setNotes("");
+                    setNotesInitializedFor(null);
                   }}
                   className="cursor-pointer hover:bg-white transition-colors"
                 >
@@ -1729,6 +1935,7 @@ function RestaurantPanel({
   restaurant,
   onSave,
   onUploadBrand,
+  isSaving,
 }: {
   restaurant: any;
   onSave: (value: any) => void;
@@ -1737,24 +1944,34 @@ function RestaurantPanel({
     data: string;
     contentType: "image/jpeg" | "image/png" | "image/webp";
   }) => Promise<{ url: string }>;
+  isSaving?: boolean;
 }) {
-  const [form, setForm] = useState({
-    name: restaurant.name,
-    cuisineSummary: restaurant.cuisineSummary,
-    description: restaurant.description ?? "",
-    logoUrl: restaurant.logoUrl ?? "",
-    bannerUrl: restaurant.bannerImageUrl ?? "",
-    primaryColor: restaurant.primaryColor,
-    contactPhone: restaurant.contactPhone ?? "",
-    deliveryFee: String(restaurant.deliveryFeePaise / 100),
-    packagingFee: String(restaurant.packagingFeePaise / 100),
-    minOrder: String(restaurant.minOrderPaise / 100),
-    isOpen: restaurant.isOpen,
-    allowScheduledOrders: restaurant.allowScheduledOrders,
-    preparationMinutes: String(restaurant.preparationMinutes ?? 25),
+  const toForm = (r: any) => ({
+    name: r.name,
+    cuisineSummary: r.cuisineSummary,
+    description: r.description ?? "",
+    logoUrl: r.logoUrl ?? "",
+    bannerUrl: r.bannerImageUrl ?? "",
+    primaryColor: r.primaryColor,
+    contactPhone: r.contactPhone ?? "",
+    deliveryFee: String((r.deliveryFeePaise ?? 0) / 100),
+    packagingFee: String((r.packagingFeePaise ?? 0) / 100),
+    minOrder: String((r.minOrderPaise ?? 0) / 100),
+    isOpen: r.isOpen,
+    allowScheduledOrders: r.allowScheduledOrders,
+    preparationMinutes: String(r.preparationMinutes ?? 25),
   });
+  const [form, setForm] = useState(() => toForm(restaurant));
   const [uploadingKind, setUploadingKind] = useState<"logo" | "banner" | null>(null);
 
+  useEffect(() => {
+    setForm(toForm(restaurant));
+  }, [restaurant.id, restaurant.name, restaurant.cuisineSummary, restaurant.description, restaurant.logoUrl, restaurant.bannerImageUrl, restaurant.primaryColor, restaurant.contactPhone, restaurant.deliveryFeePaise, restaurant.packagingFeePaise, restaurant.minOrderPaise, restaurant.isOpen, restaurant.allowScheduledOrders, restaurant.preparationMinutes]);
+
+  const numOr = (raw: string, fallback: number) => {
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : fallback;
+  };
   const payload = (f: typeof form) => ({
     id: restaurant.id,
     restaurantId: restaurant.id,
@@ -1765,15 +1982,18 @@ function RestaurantPanel({
     bannerImageUrl: f.bannerUrl || undefined,
     primaryColor: f.primaryColor,
     contactPhone: f.contactPhone.trim() || null,
-    deliveryFeePaise: Math.round(Number(f.deliveryFee) * 100),
-    packagingFeePaise: Math.round(Number(f.packagingFee) * 100),
-    minOrderPaise: Math.round(Number(f.minOrder) * 100),
+    deliveryFeePaise: Math.round(Math.max(0, numOr(f.deliveryFee, 0)) * 100),
+    packagingFeePaise: Math.round(Math.max(0, numOr(f.packagingFee, 0)) * 100),
+    minOrderPaise: Math.round(Math.max(0, numOr(f.minOrder, 0)) * 100),
     isOpen: f.isOpen,
     allowScheduledOrders: f.allowScheduledOrders,
-    preparationMinutes: Number(f.preparationMinutes) || 25,
+    preparationMinutes: Math.min(480, Math.max(1, Math.round(numOr(f.preparationMinutes, 25)))),
   });
 
-  const save = () => onSave(payload(form));
+  const save = () => {
+    if (isSaving) return;
+    onSave(payload(form));
+  };
 
   const handleBrandUpload = (kind: "logo" | "banner", file: File) => {
     if (!["image/jpeg", "image/png", "image/webp"].includes(file.type))
@@ -1955,10 +2175,11 @@ function RestaurantPanel({
       </div>
       <Button
         onClick={save}
-        className="mt-6 h-11 rounded-xl bg-[#c84630] px-5 font-extrabold hover:bg-[#b03a28]"
+        disabled={isSaving}
+        className="mt-6 h-11 rounded-xl bg-[#c84630] px-5 font-extrabold hover:bg-[#b03a28] disabled:opacity-50"
       >
         <Save className="mr-2 h-4 w-4" />
-        Save restaurant
+        {isSaving ? "Saving..." : "Save restaurant"}
       </Button>
     </section>
   );

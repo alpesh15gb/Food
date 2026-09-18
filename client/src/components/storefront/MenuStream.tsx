@@ -17,24 +17,8 @@ export default function MenuStream({
   cartQuantities?: Record<string, number>;
   onQuantityChange?: (id: string, qty: number) => void;
 }) {
-  if (!items.length)
-    return (
-      <div className="sf-card mt-5 p-9 text-center">
-        <div
-          className="mx-auto grid h-14 w-14 place-items-center rounded-full"
-          style={{ background: "var(--sf-primary-soft)", color: "var(--sf-primary)" }}
-        >
-          <Utensils className="h-6 w-6" />
-        </div>
-        <h2 className="sf-serif mt-4 text-xl" style={{ color: "var(--sf-text)" }}>
-          The menu is being prepared
-        </h2>
-        <p className="mt-2 text-sm" style={{ color: "var(--sf-text-secondary)" }}>
-          The kitchen team will publish dishes shortly.
-        </p>
-      </div>
-    );
-
+  // Empty states are handled query-aware below (never fall back to the
+  // full menu on zero results).
   const shown = query
     ? items
     : items.filter((item) =>
@@ -45,7 +29,41 @@ export default function MenuStream({
           : item.category === activeCategory
       );
 
-  const display = shown.length ? shown : items;
+  // Never fall back to the full menu on zero results — that hides the fact
+  // that nothing matched. Show a real empty state instead.
+  if (!shown.length) {
+    const searching = query.trim().length > 0;
+    return (
+      <div className="sf-card mt-5 p-9 text-center">
+        <div
+          className="mx-auto grid h-14 w-14 place-items-center rounded-full"
+          style={{ background: "var(--sf-primary-soft)", color: "var(--sf-primary)" }}
+        >
+          <Utensils className="h-6 w-6" />
+        </div>
+        <h2 className="sf-serif mt-4 text-xl" style={{ color: "var(--sf-text)" }}>
+          {searching ? "No dishes match your search" : activeCategory === "All" || items.length === 0
+            ? "The menu is being prepared"
+            : `No dishes in ${activeCategory} yet`}
+        </h2>
+        <p className="mt-2 text-sm" style={{ color: "var(--sf-text-secondary)" }}>
+          {searching ? (
+            <>
+              Nothing matched{" "}
+              <span className="font-bold">“{query.trim()}”</span>. Try a
+              different dish or clear the search.
+            </>
+          ) : items.length === 0 ? (
+            "The kitchen team will publish dishes shortly."
+          ) : (
+            "Try another category or clear your search."
+          )}
+        </p>
+      </div>
+    );
+  }
+
+  const display = shown;
 
   return (
     <div className="pb-3">

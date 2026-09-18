@@ -14,12 +14,7 @@ const STATIONS: { id: Station; label: string }[] = [
   { id: "drinks", label: "Drinks" },
 ];
 
-function ElapsedTimer({ since }: { since: string }) {
-  const [now, setNow] = useState(Date.now());
-  useEffect(() => {
-    const interval = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(interval);
-  }, []);
+function ElapsedTimer({ since, now }: { since: string; now: number }) {
   const ms = now - new Date(since).getTime();
   const mins = Math.floor(ms / 60000);
   const secs = Math.floor((ms % 60000) / 1000);
@@ -45,8 +40,8 @@ export default function KDSPage({ slug, restaurantId }: { slug?: string; restaur
   const [soundEnabled, setSoundEnabled] = useState(false);
   const [pausedOnError, setPausedOnError] = useState(false);
   const audioCtxRef = useRef<AudioContext | null>(null);
-  // -1 = feed not loaded yet: the first load must not chime for old orders.
-  const prevCountRef = useRef(-1);
+  // null = feed not loaded yet: the first load must not chime for old orders.
+  const prevIdsRef = useRef<Set<string> | null>(null);
 
   if (!slug) {
     return (
@@ -59,11 +54,11 @@ export default function KDSPage({ slug, restaurantId }: { slug?: string; restaur
   }
   void restaurantId;
 
-  return <KDSBoard slug={slug} station={station} setStation={setStation} soundEnabled={soundEnabled} setSoundEnabled={setSoundEnabled} audioCtxRef={audioCtxRef} prevCountRef={prevCountRef} pausedOnError={pausedOnError} setPausedOnError={setPausedOnError} />;
+  return <KDSBoard slug={slug} station={station} setStation={setStation} soundEnabled={soundEnabled} setSoundEnabled={setSoundEnabled} audioCtxRef={audioCtxRef} prevIdsRef={prevIdsRef} pausedOnError={pausedOnError} setPausedOnError={setPausedOnError} />;
 }
 
 function KDSBoard({
-  slug, station, setStation, soundEnabled, setSoundEnabled, audioCtxRef, prevCountRef, pausedOnError, setPausedOnError,
+  slug, station, setStation, soundEnabled, setSoundEnabled, audioCtxRef, prevIdsRef, pausedOnError, setPausedOnError,
 }: {
   slug: string;
   station: Station;
@@ -71,10 +66,16 @@ function KDSBoard({
   soundEnabled: boolean;
   setSoundEnabled: (v: boolean) => void;
   audioCtxRef: React.MutableRefObject<AudioContext | null>;
-  prevCountRef: React.MutableRefObject<number>;
+  prevIdsRef: React.MutableRefObject<Set<string> | null>;
   pausedOnError: boolean;
   setPausedOnError: (v: boolean) => void;
 }) {
+  // Single shared 1s timer for all cards (no per-card intervals).
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const interval = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(interval);
+  }, []);
 
   const ordersQuery = trpc.kds.getActiveOrders.useQuery(
     { slug, station: station === "all" ? undefined : station },
@@ -115,6 +116,20 @@ function KDSBoard({
     },
     onError: (err) => toast.error(err.message || "Could not mark order ready."),
   });
+  const cancelUnpaid = trpc.admin.updateOrderStatus.useMutation({
+    onSuccess: () => {
+      ordersQuery.refetch();
+      toast.success("Order cancelled");
+    },
+    onError: (err) => toast.error(err.message || "Could not cancel order."),
+  });
+  const rejectUnpaid = trpc.admin.updateOrderStatus.useMutation({
+    onSuccess: () => {
+      ordersQuery.refetch();
+      toast.success("Order rejected");
+    },
+    onError: (err) => toast.error(err.message || "Could not reject order."),
+  });
 
   function playAlert() {
     if (!soundEnabled) return;
@@ -135,11 +150,19 @@ function KDSBoard({
   }
 
   useEffect(() => {
-    const count = ordersQuery.data?.length ?? 0;
-    if (prevCountRef.current >= 0 && count > prevCountRef.current) {
+    const ids = new Set((ordersQuery.data ?? []).map((o) => o.id));
+    if (prevIdsRef.current === null) {
+      prevIdsRef.current = ids;
+      return;
+    }
+    let hasNew = false;
+    ids.forEach((id) => {
+      if (!prevIdsRef.current!.has(id)) hasNew = true;
+    });
+    if (hasNew) {
       playAlert();
     }
-    prevCountRef.current = count;
+    prevIdsRef.current = ids;
   }, [ordersQuery.data, soundEnabled]);
 
   function enableSound() {
@@ -246,7 +269,7 @@ function KDSBoard({
                     </span>
                     <div className={`text-sm font-bold mt-0.5 ${urgencyText(order.createdAt as unknown as string)}`}>
                       <Clock className="w-3 h-3 inline mr-1" />
-                      <ElapsedTimer since={order.createdAt as unknown as string} />
+                      <ElapsedTimer since={order.createdAt as unknown as string} now={now} />
                     </div>
                   </div>
                   <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${
@@ -290,8 +313,30 @@ function KDSBoard({
                     InvalidTransitionError, so it is never offered. */}
                 <div className="flex gap-2 pt-2 border-t border-white/10">
                   {(order as any).paymentStatus !== "PAID" ? (
-                    <div className="flex-1 text-center text-xs font-bold text-amber-400 py-2.5">
-                      AWAITING PAYMENT
+                    <div className="flex flex-col gap-2 flex-1">
+                      <div className="text-center text-xs font-bold text-amber-400 py-1">
+                        AWAITING PAYMENT
+                      </div>
+                      <div className="flex gap-2">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="flex-1 min-h-9 border-red-500/40 text-red-400 hover:bg-red-500/10 text-xs font-bold"
+                          onClick={() => cancelUnpaid.mutate({ orderId: order.id, status: "CANCELLED" as never, note: "Cancelled stuck unpaid order from KDS" })}
+                          disabled={cancelUnpaid.isPending || rejectUnpaid.isPending}
+                        >
+                          Cancel
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="flex-1 min-h-9 border-red-500/40 text-red-400 hover:bg-red-500/10 text-xs font-bold"
+                          onClick={() => rejectUnpaid.mutate({ orderId: order.id, status: "REJECTED" as never, note: "Rejected stuck unpaid order from KDS" })}
+                          disabled={cancelUnpaid.isPending || rejectUnpaid.isPending}
+                        >
+                          Reject
+                        </Button>
+                      </div>
                     </div>
                   ) : (
                     <>

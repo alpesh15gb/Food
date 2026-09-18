@@ -197,12 +197,28 @@ class SDKServer {
     const expiresInMs = options.expiresInMs ?? ONE_YEAR_MS;
     const expirationSeconds = Math.floor((issuedAt + expiresInMs) / 1000);
     const secretKey = this.getSessionSecret();
+    // Session-version: callers with a DB user should pass `sv` explicitly.
+    // When omitted, resolve the user's current sessionVersion so
+    // logout/revocation works without bricking fresh logins (unconditional
+    // `?? 0` would issue sv=0 tokens that instantly fail the version check
+    // after a logout bump). Fail-open to 0 on DB miss so a transient DB blip
+    // never blocks login; authenticateRequest still revokes stale tokens.
+    let sv = payload.sv;
+    if (sv === undefined) {
+      try {
+        const u = await db.getUserByOpenId(payload.openId);
+        const v = (u as unknown as Record<string, unknown> | undefined)?.sessionVersion;
+        sv = typeof v === "number" ? v : 0;
+      } catch {
+        sv = 0;
+      }
+    }
 
     return new SignJWT({
       openId: payload.openId,
       appId: payload.appId,
       name: payload.name,
-      sv: payload.sv ?? 0,
+      sv,
     })
       .setProtectedHeader({ alg: "HS256", typ: "JWT" })
       .setIssuedAt()
@@ -288,14 +304,17 @@ class SDKServer {
   }
 
   async authenticateRequest(req: Request): Promise<AuthenticatedUser> {
-    // 1. Prefer the session cookie (regular OAuth login).
+    // 1. Session cookie only (regular login). Authorization: Bearer acceptance
+    //    is disabled by default — enable explicitly with ALLOW_BEARER_AUTH=1
+    //    for Preview iframe flows where cookies are blocked. Accepting bare
+    //    JWTs via header by default expands token-replay surface.
     const cookies = this.parseCookies(req.headers.cookie);
     let sessionToken = cookies.get(COOKIE_NAME);
 
-    // 2. Fallback to the Authorization header (Preview auto-login via
-    //    sessionStorage), used when the browser blocks iframe cookies such as
-    //    Safari ITP, private browsing, or iOS/Android WebView.
-    if (!sessionToken) {
+    // 2. Opt-in Bearer fallback (default OFF). Cookie logins (VPS-local-admin,
+    //    OTP customer, email) keep working with this disabled via
+    //    credentials:include.
+    if (!sessionToken && process.env.ALLOW_BEARER_AUTH === "1") {
       const authHeader = req.headers.authorization;
       if (typeof authHeader === "string" && authHeader.startsWith("Bearer ")) {
         const bearer = authHeader.slice(7).trim();
@@ -320,26 +339,13 @@ class SDKServer {
 
     const sessionUserId = session.openId;
     const signedInAt = new Date();
-    let user = await db.getUserByOpenId(sessionUserId);
+    const user = await db.getUserByOpenId(sessionUserId);
 
-    // If user not in DB, sync from OAuth server automatically
-    if (!user) {
-      try {
-        const userInfo = await this.getUserInfoWithJwt(sessionToken ?? "");
-        await db.upsertUser({
-          openId: userInfo.openId,
-          name: userInfo.name || null,
-          email: userInfo.email ?? null,
-          loginMethod: userInfo.loginMethod ?? userInfo.platform ?? null,
-          lastSignedIn: signedInAt,
-        });
-        user = await db.getUserByOpenId(userInfo.openId);
-      } catch (error) {
-        console.error("[Auth] Failed to sync user from OAuth:", error);
-        throw ForbiddenError("Failed to sync user info");
-      }
-    }
-
+    // No silent auto-provisioning from a bare JWT: every identity must be
+    // created via an explicit provisioning path (OAuth callback, register,
+    // email login, local-admin bootstrap, OTP verify) before a session for it
+    // verifies. Previously an unknown openId triggered getUserInfoWithJwt +
+    // upsertUser, letting a presented token mint accounts.
     if (!user) {
       throw ForbiddenError("User not found");
     }

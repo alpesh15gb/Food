@@ -3,6 +3,7 @@
  */
 import { desc, eq, and, or, like, sql, count, sum, between, inArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
+import { TRPCError } from "@trpc/server";
 import { Pool } from "pg";
 import { randomInt } from "node:crypto";
 import { nanoid } from "nanoid";
@@ -1635,7 +1636,7 @@ const RESEND_COOLDOWN_MS = 60 * 1000;
 export async function createOtp(phone: string, opts?: { expectedSender?: string }): Promise<{ code: string; expiresAt: Date; cooldownRemaining?: number }> {
   const db = await requireDb();
   const normalizedPhone = normalizePhone(phone) ?? phone.replace(/\D/g, "");
-  if (!normalizedPhone || normalizedPhone.length < 10) throw new Error("Invalid phone number.");
+  if (!normalizedPhone || normalizedPhone.length < 10) throw new TRPCError({ code: "BAD_REQUEST", message: "Invalid phone number." });
 
   // --- Fix 3: Enforce resend cooldown ---
   const lastOtp = (await db.select().from(otpVerifications)
@@ -1650,8 +1651,37 @@ export async function createOtp(phone: string, opts?: { expectedSender?: string 
     const elapsed = Date.now() - lastOtp.createdAt.getTime();
     if (elapsed < RESEND_COOLDOWN_MS) {
       const remaining = Math.ceil((RESEND_COOLDOWN_MS - elapsed) / 1000);
-      throw new Error(`Please wait ${remaining} seconds before requesting a new code.`);
+      throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: `Please wait ${remaining} seconds before requesting a new code.` });
     }
+  }
+
+  // Batch D: tie verify attempts to phone+window so createOtp cannot reset the
+  // per-row counter. Sum attempts across recent rows (including consumed ones —
+  // invalidation sets usedAt but preserves attempts). A fresh OTP after 10
+  // failed guesses in 10 minutes is rejected instead of resetting to 0.
+  // Uses a bounded recent-rows read + JS sum to avoid new SQL imports.
+  try {
+    const recentForWindow = await db.select({
+      attempts: otpVerifications.attempts,
+      createdAt: otpVerifications.createdAt,
+    }).from(otpVerifications)
+      .where(and(
+        eq(otpVerifications.phone, normalizedPhone),
+        eq(otpVerifications.purpose, "login"),
+      ))
+      .orderBy(desc(otpVerifications.createdAt))
+      .limit(10);
+    const windowStart = Date.now() - 10 * 60 * 1000;
+    const windowAttempts = recentForWindow
+      .filter(r => r.createdAt.getTime() >= windowStart)
+      .reduce((sum, r) => sum + (r.attempts ?? 0), 0);
+    if (windowAttempts >= 10) {
+      throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: "Too many verification attempts. Please try again later." });
+    }
+  } catch (err) {
+    // Fail-closed on limit hit, fail-open on lookup failure (never block OTP on
+    // a transient DB read — the per-row 5-attempt guard still binds).
+    if (err instanceof TRPCError) throw err;
   }
 
   const code = generateOtpCode();
@@ -1669,7 +1699,8 @@ export async function createOtp(phone: string, opts?: { expectedSender?: string 
 
   // Insert new OTP (hash stored, never plaintext). Concurrent double-submit
   // hits the partial unique (phone,purpose WHERE usedAt IS NULL) — surface as
-  // cooldown instead of a 500 with PG internals.
+  // cooldown instead of a 500 with PG internals. Generic message: never leak
+  // PG internals via raw Error.
   try {
     await db.insert(otpVerifications).values({
       phone: normalizedPhone,
@@ -1681,9 +1712,9 @@ export async function createOtp(phone: string, opts?: { expectedSender?: string 
     });
   } catch (err) {
     if (isUniqueViolation(err)) {
-      throw new Error("Please wait 60 seconds before requesting a new code.");
+      throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: "Please wait 60 seconds before requesting a new code." });
     }
-    throw err;
+    throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Could not send verification code. Please try again." });
   }
 
   return { code, expiresAt };
@@ -1727,6 +1758,18 @@ export async function verifyOtp(phone: string, code: string): Promise<{
   if (record.usedAt) return null; // already used
   if (new Date() > record.expiresAt) return null; // expired
   if ((record.attempts ?? 0) >= 5) return null; // too many attempts
+  // Batch D: phone+window guard in addition to the per-row 5-attempt limit, so
+  // createOtp cannot reset the counter. Sums attempts across recent rows
+  // (including consumed ones) in a 10-minute window; 10+ fails the verify even
+  // when the matched row is under 5. Fail-open on lookup error (per-row guard
+  // still binds); legitimate retries (<10) are unaffected.
+  {
+    const windowStart = Date.now() - 10 * 60 * 1000;
+    const windowAttempts = records
+      .filter(r => r.createdAt.getTime() >= windowStart)
+      .reduce((sum, r) => sum + (r.attempts ?? 0), 0);
+    if (windowAttempts >= 10) return null;
+  }
 
   // --- Fix 6: Atomic attempt increment + single-use consumption ---
   // Single UPDATE with WHERE guards: usedAt IS NULL AND attempts < 5.
@@ -1792,15 +1835,15 @@ export async function verifyOtp(phone: string, code: string): Promise<{
       });
       return { openId: verifiedOpenId, userId: candidateId, isNewUser: true, phone: normalizedPhone };
     } catch (err) {
-      if (!isUniqueViolation(err)) throw err;
+      if (!isUniqueViolation(err)) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Could not verify phone. Please retry." });
       const winner = (await db.select().from(users).where(eq(users.openId, verifiedOpenId)).limit(1))[0];
       if (winner) {
         return { openId: verifiedOpenId, userId: winner.id, isNewUser: false, phone: normalizedPhone };
       }
-      if (attempt === 1) throw err;
+      if (attempt === 1) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Could not verify phone. Please retry." });
     }
   }
-  throw new Error("Could not verify phone. Please retry.");
+  throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Could not verify phone. Please retry." });
 }
 
 // =============================================================================
@@ -1854,17 +1897,21 @@ export async function markWhatsappOtpReceived(args: {
 }
 
 /**
- * Received-status for a phone's latest login OTP. Returns booleans and
- * expiry ONLY — the OTP value is never exposed.
+ * Received-status for a phone's latest login OTP — minimal boolean ONLY.
+ * Returns `{ received }` with no pending-state and no expiry: exposing
+ * `hasPending`/`expiresAt` per arbitrary phone lets anyone probe whether a
+ * number recently requested an OTP (login-timing oracle). `received=true`
+ * only in the narrow window after a WhatsApp-inbound match and before
+ * verify-consumption; otherwise false (including invalid phones and no-row,
+ * which are indistinguishable). The OTP value is never exposed.
+ * Full authenticated-only gating needs the storefront endpoint (out of scope).
  */
 export async function getWhatsappOtpStatus(phone: string): Promise<{
-  hasPending: boolean;
   received: boolean;
-  expiresAt: string | null;
-} | null> {
+}> {
   const db = await requireDb();
   const normalizedPhone = normalizePhone(phone) ?? phone.replace(/\D/g, "");
-  if (!normalizedPhone || normalizedPhone.length < 10) return null;
+  if (!normalizedPhone || normalizedPhone.length < 10) return { received: false };
   const row = (await db.select().from(otpVerifications)
     .where(and(
       eq(otpVerifications.phone, normalizedPhone),
@@ -1872,12 +1919,10 @@ export async function getWhatsappOtpStatus(phone: string): Promise<{
     ))
     .orderBy(desc(otpVerifications.createdAt))
     .limit(1))[0];
-  if (!row) return { hasPending: false, received: false, expiresAt: null };
+  if (!row) return { received: false };
   const live = !row.usedAt && new Date() <= row.expiresAt;
   return {
-    hasPending: live,
     received: live && Boolean(row.receivedAt),
-    expiresAt: live ? row.expiresAt.toISOString() : null,
   };
 }
 

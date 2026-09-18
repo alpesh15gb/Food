@@ -123,13 +123,13 @@ export default function CartSidebar({
               </div>
             </div>
 
-            {/* Min order warning */}
-            {restaurant?.minOrder > 0 && total < restaurant.minOrder && (
+            {/* Min order warning — server enforces itemTotal >= minOrder */}
+            {restaurant?.minOrder > 0 && itemTotal < restaurant.minOrder && (
               <p
                 className="text-xs font-bold"
                 style={{ color: "var(--sf-red)" }}
               >
-                Add {formatINR(restaurant.minOrder - total)} more for minimum
+                Add {formatINR(restaurant.minOrder - itemTotal)} more for minimum
                 order
               </p>
             )}
@@ -142,7 +142,8 @@ export default function CartSidebar({
               onClick={onCheckout}
               disabled={
                 processing ||
-                (restaurant?.minOrder > 0 && total < restaurant.minOrder)
+                cart.length === 0 ||
+                (restaurant?.minOrder > 0 && itemTotal < restaurant.minOrder)
               }
               className="h-12 w-full rounded-[var(--sf-radius-btn)] text-sm font-extrabold text-white"
               style={{ background: "var(--sf-primary)" }}
