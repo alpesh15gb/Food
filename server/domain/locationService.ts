@@ -310,6 +310,7 @@ export async function checkServiceability(
             console.warn(`[serviceability] provider reports unserviceable but advisory mode: proceeding radius-only`);
             return {
               serviceable: true,
+              reason: "SERVICEABLE",
               outletId: selection.outlet.id,
               outletName: selection.outlet.name,
               distanceKm: Math.round(selection.distanceKm * 100) / 100,
