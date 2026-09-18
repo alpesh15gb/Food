@@ -545,6 +545,15 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
           onCheckout={startSecurePayment}
           processing={processing}
           restaurant={restaurant}
+          customerPhone={customerPhone}
+          onCustomerPhone={(v) => {
+            setCustomerPhone(v);
+            try {
+              localStorage.setItem("ck_phone_prefill", v);
+            } catch {
+              /* private mode — prefill skipped */
+            }
+          }}
         />
       </div>
     );
