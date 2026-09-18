@@ -127,7 +127,7 @@ export async function testShadowfaxConnection(input: {
         signal: controller.signal,
       });
       if (res.status === 401 || res.status === 403) {
-        return { ok: false, environment: cfg.environment, baseUrl: cfg.baseUrl, error: "Authentication failed — check SHADOWFAX_TOKEN and that the base URL matches your account (staging vs production)." };
+        return { ok: false, environment: cfg.environment, baseUrl: cfg.baseUrl, error: `Authentication failed against ${cfg.baseUrl} — check SHADOWFAX_TOKEN and that the base URL matches your account (staging vs production).` };
       }
       return { ok: true, environment: cfg.environment, baseUrl: cfg.baseUrl };
     } catch (err) {
@@ -145,7 +145,7 @@ export async function testShadowfaxConnection(input: {
     return { ok: true, environment: cfg.environment, baseUrl: cfg.baseUrl, serviceable: result.serviceable };
   } catch (err) {
     if (err instanceof ShadowfaxAuthenticationError) {
-      return { ok: false, environment: cfg.environment, baseUrl: cfg.baseUrl, error: "Authentication failed — check SHADOWFAX_TOKEN and that the base URL matches your account (staging vs production)." };
+      return { ok: false, environment: cfg.environment, baseUrl: cfg.baseUrl, error: `Authentication failed against ${cfg.baseUrl} — check SHADOWFAX_TOKEN and that the base URL matches your account (staging vs production).` };
     }
     return { ok: false, environment: cfg.environment, baseUrl: cfg.baseUrl, error: err instanceof Error ? err.message : "Serviceability check failed." };
   }
