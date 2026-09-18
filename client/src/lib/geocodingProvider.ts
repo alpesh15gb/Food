@@ -30,13 +30,92 @@ let placesService: google.maps.places.PlacesService | null = null;
 
 function ensureGoogleMaps(): boolean {
   if (!window.google?.maps) return false;
-  if (!autocompleteService) {
-    autocompleteService = new window.google.maps.places.AutocompleteService();
+  // Legacy constructors can throw for newer API keys (Google disabled
+  // AutocompleteService for new customers Mar 2025) — never let a lazy
+  // singleton break the whole provider.
+  try {
+    if (!autocompleteService && window.google.maps.places?.AutocompleteService) {
+      autocompleteService = new window.google.maps.places.AutocompleteService();
+    }
+  } catch {
+    autocompleteService = null;
   }
   if (!geocoder) {
     geocoder = new window.google.maps.Geocoder();
   }
   return true;
+}
+
+/**
+ * Places API (New): AutocompleteSuggestion. Required for keys created after
+ * Mar 2025 — legacy AutocompleteService is unavailable to them. Returns null
+ * when the new API can't run so callers can fall back.
+ */
+async function fetchAutocompleteNew(
+  query: string,
+  bias?: { lat: number; lng: number; radiusM?: number },
+): Promise<PlaceSearchResult[] | null> {
+  try {
+    const ns = window.google.maps.places as unknown as Record<string, any>;
+    const Suggestion = ns?.AutocompleteSuggestion;
+    if (!Suggestion?.fetchAutocompleteSuggestions) return null;
+    const req: Record<string, unknown> = { input: query, includedRegionCodes: ["in"] };
+    if (bias && Number.isFinite(bias.lat) && Number.isFinite(bias.lng)) {
+      req.locationBias = {
+        center: { lat: bias.lat, lng: bias.lng },
+        radius: bias.radiusM ?? 30000,
+      };
+    }
+    const { suggestions } = await Suggestion.fetchAutocompleteSuggestions(req);
+    const out: PlaceSearchResult[] = [];
+    for (const s of suggestions ?? []) {
+      const pred = s?.placePrediction;
+      const pid = pred?.placeId;
+      const text = pred?.text;
+      const desc = typeof text === "string" ? text : text?.text;
+      if (pid && desc) out.push({ description: String(desc), placeId: String(pid) });
+    }
+    return out;
+  } catch {
+    return null;
+  }
+}
+
+/** Legacy autocomplete (old keys only) — null-safe, never throws. */
+async function fetchAutocompleteLegacy(
+  query: string,
+  bias?: { lat: number; lng: number; radiusM?: number },
+): Promise<PlaceSearchResult[] | null> {
+  try {
+    if (!autocompleteService) return null;
+    const request: google.maps.places.AutocompletionRequest = {
+      input: query,
+      componentRestrictions: { country: "in" },
+    };
+    if (bias && Number.isFinite(bias.lat) && Number.isFinite(bias.lng)) {
+      request.location = new window.google.maps.LatLng(bias.lat, bias.lng);
+      request.radius = bias.radiusM ?? 30000;
+    }
+    const predictions = await new Promise<google.maps.places.AutocompletePrediction[] | null>((resolve) => {
+      try {
+        autocompleteService!.getPlacePredictions(request, (result, status) => {
+          if (status !== window.google.maps.places.PlacesServiceStatus.OK || !result) {
+            resolve(null);
+            return;
+          }
+          resolve(result);
+        });
+      } catch {
+        resolve(null);
+      }
+    });
+    return (predictions ?? []).map((p) => ({
+      description: p.description,
+      placeId: p.place_id,
+    }));
+  } catch {
+    return null;
+  }
 }
 
 const reverseGeocodeCache = new Map<string, Partial<GeocodeResult>>();
@@ -55,30 +134,12 @@ export async function searchPlaces(
   // societies and named buildings live in Google's POI database, so typing
   // an apartment name returned nothing. Unfiltered + country restriction +
   // location bias returns both addresses and places.
-  const request: google.maps.places.AutocompletionRequest = {
-    input: query,
-    componentRestrictions: { country: "in" },
-  };
-  if (bias && Number.isFinite(bias.lat) && Number.isFinite(bias.lng)) {
-    request.location = new window.google.maps.LatLng(bias.lat, bias.lng);
-    request.radius = bias.radiusM ?? 30000;
-  }
+  // Order: new API (works on all keys) → legacy (old keys) → text search.
+  const fresh = await fetchAutocompleteNew(query, bias);
+  if (fresh && fresh.length > 0) return fresh;
 
-  const predictions = await new Promise<google.maps.places.AutocompletePrediction[] | null>((resolve) => {
-    autocompleteService!.getPlacePredictions(request, (result, status) => {
-      if (status !== window.google.maps.places.PlacesServiceStatus.OK || !result) {
-        resolve(null);
-        return;
-      }
-      resolve(result);
-    });
-  });
-  if (predictions && predictions.length > 0) {
-    return predictions.map((p) => ({
-      description: p.description,
-      placeId: p.place_id,
-    }));
-  }
+  const legacy = await fetchAutocompleteLegacy(query, bias);
+  if (legacy && legacy.length > 0) return legacy;
 
   // Fallback: full text search catches named buildings the autocomplete
   // index misses (new societies, alternate spellings).

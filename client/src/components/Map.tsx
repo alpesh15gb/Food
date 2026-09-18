@@ -118,7 +118,7 @@ async function mapsScriptUrl(): Promise<string> {
   const googleKey = live
     ?? (BAKED_GOOGLE_KEY && BAKED_GOOGLE_KEY !== "undefined" && BAKED_GOOGLE_KEY.trim() ? BAKED_GOOGLE_KEY.trim() : null);
   if (googleKey) {
-    return `https://maps.googleapis.com/maps/api/js?key=${googleKey}&v=weekly&libraries=marker,places,geocoding,geometry`;
+    return `https://maps.googleapis.com/maps/api/js?key=${googleKey}&v=weekly&libraries=marker,places,geocoding,geometry&loading=async`;
   }
   if (FORGE_KEY && FORGE_KEY !== "undefined" && FORGE_KEY.trim()) {
     return `${FORGE_BASE_URL}/v1/maps/proxy/maps/api/js?key=${FORGE_KEY.trim()}&v=weekly&libraries=marker,places,geocoding,geometry`;
