@@ -22,6 +22,8 @@ const TERMINAL_STATUSES = [
 
 /** Give up on automatic polling after this many consecutive failures. */
 const MAX_POLL_FAILURES = 3;
+/** Poll cadence while the order is still in flight. */
+const POLL_INTERVAL_MS = 20000;
 
 export default function TrackingScreen({
   orderNumber,
@@ -37,10 +39,13 @@ export default function TrackingScreen({
   variant: "confirmation" | "tracking";
 }) {
   const hasCredentials = orderNumber.length >= 5 && trackingToken.length >= 16;
-  // Counts consecutive failures so a permanently broken link (stale or mistyped
-  // token -> NOT_FOUND) stops hammering the server instead of polling every 20s
-  // forever while simultaneously rendering the "Couldn't load your order" state.
+  // Counts DISTINCT failed polls, not invocations. `refetchInterval` is
+  // re-evaluated more than once per fetch (on every observer update), so a naive
+  // counter would exhaust its budget on a healthy order and silently freeze live
+  // tracking. `errorUpdatedAt` changes exactly once per failed fetch and returns
+  // to 0 on success, which is the documented signal for "one more failure".
   const consecutiveFailures = useRef(0);
+  const lastErrorAt = useRef(0);
   const tracking = trpc.storefront.orderTracking.useQuery(
     { orderNumber, trackingToken },
     {
@@ -53,18 +58,24 @@ export default function TrackingScreen({
           (query.state.data as { status?: string } | undefined)?.status ?? ""
         );
         if (status && TERMINAL_STATUSES.includes(status)) return false;
-        if (query.state.status === "error") {
-          consecutiveFailures.current += 1;
-          if (consecutiveFailures.current >= MAX_POLL_FAILURES) return false;
-        } else if (query.state.status === "success") {
+
+        const errorAt = query.state.errorUpdatedAt ?? 0;
+        if (errorAt === 0) {
           consecutiveFailures.current = 0;
+        } else if (errorAt !== lastErrorAt.current) {
+          lastErrorAt.current = errorAt;
+          consecutiveFailures.current += 1;
         }
-        return 20000;
+        if (consecutiveFailures.current >= MAX_POLL_FAILURES) return false;
+        return POLL_INTERVAL_MS;
       },
     }
   );
 
-  const formatEtaTime = (value: unknown): string | null => {
+  // Every time shown to a customer is pinned to IST explicitly. Without an
+  // explicit timeZone these render in the *device's* zone, so a customer browsing
+  // from abroad sees kitchen-local times as if they were their own.
+  const formatClockTime = (value: unknown): string | null => {
     if (typeof value !== "string" && !(value instanceof Date)) return null;
     const date = value instanceof Date ? value : new Date(value);
     if (Number.isNaN(date.getTime())) return null;
@@ -75,15 +86,43 @@ export default function TrackingScreen({
     });
   };
 
+  const formatEtaTime = formatClockTime;
+
+  /** "Today 7:45 pm" / "8 Mar, 7:45 pm" — used for timeline milestones. */
+  const formatMilestoneTime = (value: unknown): string | null => {
+    if (typeof value !== "string" && !(value instanceof Date)) return null;
+    const date = value instanceof Date ? value : new Date(value);
+    if (Number.isNaN(date.getTime())) return null;
+    const clock = formatClockTime(date);
+    if (!clock) return null;
+    const istDay = new Date(
+      date.toLocaleString("en-US", { timeZone: "Asia/Kolkata" })
+    );
+    const todayIst = new Date(
+      new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" })
+    );
+    const sameDay = istDay.toDateString() === todayIst.toDateString();
+    if (sameDay) return `Today ${clock}`;
+    return date.toLocaleDateString("en-IN", {
+      day: "numeric",
+      month: "short",
+      timeZone: "Asia/Kolkata",
+    }) + `, ${clock}`;
+  };
+
   const status = String(tracking.data?.status ?? "");
   const isTerminal = TERMINAL_STATUSES.includes(status);
-  // `estimatedMinutes` is written once at order creation and never updated, so
-  // showing it on a delivered or cancelled order displays a frozen "ETA ~45 min"
-  // that reads as if the food is still coming. Only show it while in flight.
-  const eta =
-    isTerminal || !tracking.data?.estimatedMinutes
-      ? formatEtaTime(tracking.data?.delivery?.estimatedDelivery)
-      : `~${tracking.data.estimatedMinutes} min`;
+  // Prefer the absolute delivery window written at dispatch and recomputed at
+  // pickup — it is a real clock time that tightens as the order progresses. The
+  // order-level `estimatedMinutes` is a duration, and neither form is shown on a
+  // terminal order, where a frozen "ETA ~45 min" (or a stale arrival clock time)
+  // reads as though the food were still coming.
+  const etaClockTime = formatEtaTime(tracking.data?.delivery?.estimatedDelivery);
+  const eta = isTerminal
+    ? null
+    : etaClockTime ?? (tracking.data?.estimatedMinutes
+      ? `~${tracking.data.estimatedMinutes} min`
+      : null);
 
   return (
     <main
@@ -349,6 +388,21 @@ export default function TrackingScreen({
                         >
                           {String(entry.status).replace(/_/g, " ")}
                         </span>
+                        {/* The real time each milestone was reached. Without this
+                            the timeline is a list of labels with no clock, and
+                            because the ETA is deliberately hidden on terminal
+                            orders a completed order would otherwise show no
+                            timing information at all. */}
+                        {(() => {
+                          const when = formatMilestoneTime(entry.createdAt);
+                          if (!when) return null;
+                          return (
+                            <>
+                              {" · "}
+                              <span aria-label={`at ${when}`}>{when}</span>
+                            </>
+                          );
+                        })()}
                         {entry.note ? ` — ${entry.note}` : ""}
                       </span>
                     </li>

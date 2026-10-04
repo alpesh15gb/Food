@@ -45,7 +45,19 @@ const VALID_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
   RESTAURANT_ACCEPTED: ["PREPARING", "CANCELLED"],
   PREPARING: ["READY_FOR_PICKUP", "CANCELLED"],
   // RIDER_ASSIGNED direct from READY covers manual dispatch (no provider hop).
-  READY_FOR_PICKUP: ["DELIVERY_REQUESTED", "RIDER_ASSIGNED", "CANCELLED"],
+  //
+  // DELIVERED direct from READY is a legacy-recovery edge. READY_FOR_PICKUP means
+  // the food is already BAGGED, so a courier collecting and delivering it is
+  // legitimate — we simply missed the intermediate webhooks. Orders exist in this
+  // state because an older dispatch path committed the courier AWB and then
+  // failed its order transition; the courier was live while the order sat frozen
+  // here, and its DELIVERED webhook was rejected, leaving the customer polling
+  // "Ready for pickup" forever with no legal edge out.
+  //
+  // This does NOT weaken the invariant that matters: DELIVERED stays unreachable
+  // from every earlier kitchen state (PLACED, RESTAURANT_ACCEPTED, PREPARING), so
+  // an order can never be delivered before the food was bagged and handed on.
+  READY_FOR_PICKUP: ["DELIVERY_REQUESTED", "RIDER_ASSIGNED", "DELIVERED", "CANCELLED"],
   DELIVERY_REQUESTED: ["RIDER_ASSIGNED", "CANCELLED"],
   RIDER_ASSIGNED: ["PICKED_UP", "CANCELLED"],
   // Once the rider has the food, the order can no longer reach DELIVERED — the

@@ -865,6 +865,11 @@ async function handleRefundProcessed(refundEntity: Record<string, unknown>) {
             orderId: existingRefund.orderId,
             status: "REFUND_PENDING",
             note: `Full refund of ₹${existingRefund.amountPaise / 100} pending.`,
+            // Money the customer is waiting on must be visible to them. History
+            // notes default to 'internal' (fail-closed), so system refund notes
+            // have to opt in explicitly or the customer sees a bare
+            // "REFUND_PENDING" with no amount and calls support.
+            noteVisibility: "customer",
           });
         }
         const mid = (await tx.select().from(orders).where(eq(orders.id, existingRefund.orderId)).limit(1))[0];
@@ -878,6 +883,9 @@ async function handleRefundProcessed(refundEntity: Record<string, unknown>) {
             orderId: existingRefund.orderId,
             status: "REFUNDED",
             note: `Refund of ₹${existingRefund.amountPaise / 100} processed.`,
+            // See REFUND_PENDING above: the settled amount is the single thing
+            // the customer is checking this page for.
+            noteVisibility: "customer",
           });
         } else if (mid) {
           await tx.update(orders)
@@ -900,6 +908,10 @@ async function handleRefundProcessed(refundEntity: Record<string, unknown>) {
         orderId: existingRefund.orderId,
         status: order.status,
         note: `Partial refund of ₹${existingRefund.amountPaise / 100} processed (total refunded ₹${(totalRefunded / 100).toFixed(2)}).`,
+        // See REFUND_PENDING above. Note this row deliberately reuses
+        // `order.status` (unchanged by a partial refund), so the amount in the
+        // note is the only place the customer can see the refund happened.
+        noteVisibility: "customer",
       });
     }
   });

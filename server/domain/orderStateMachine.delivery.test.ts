@@ -92,3 +92,38 @@ describe("order state machine — in-flight delivery exits", () => {
     }
   });
 });
+
+describe("DELIVERED reachability — the invariant that matters", () => {
+  it("is unreachable from every state where the food is still in the kitchen", () => {
+    // An order can never be marked delivered before it was bagged and a courier
+    // took it. If a stray webhook or a bad reconcile run could jump here, a
+    // still-preparing order would read as delivered and the customer would be
+    // charged for food that never left the kitchen.
+    const kitchenStates = [
+      "PENDING_PAYMENT",
+      "PAYMENT_CONFIRMED",
+      "PLACED",
+      "RESTAURANT_ACCEPTED",
+      "PREPARING",
+    ] as const;
+    for (const state of kitchenStates) {
+      expect(canTransition(state, "DELIVERED"), `${state} -> DELIVERED`).toBe(false);
+    }
+  });
+
+  it("is still unreachable from AWB-live states with no rider yet", () => {
+    expect(canTransition("DELIVERY_REQUESTED", "DELIVERED")).toBe(false);
+    expect(canTransition("RIDER_ASSIGNED", "DELIVERED")).toBe(false);
+  });
+
+  it("is reachable from READY_FOR_PICKUP so legacy stranded orders heal", () => {
+    // READY_FOR_PICKUP means the food is already BAGGED, so a courier collecting
+    // and delivering it is legitimate — we merely missed the intermediate
+    // webhooks. Orders exist in this state because an older dispatch path
+    // committed the courier AWB and then failed its order transition: the courier
+    // was live while the order sat frozen here, its DELIVERED webhook was
+    // rejected, and the customer polled "Ready for pickup" forever with no legal
+    // edge out.
+    expect(canTransition("READY_FOR_PICKUP", "DELIVERED")).toBe(true);
+  });
+});

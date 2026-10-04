@@ -134,6 +134,52 @@ export function checkWhatsappWebhookLimit(ip: string) {
 }
 
 /**
+ * Inbound WhatsApp throttle: 20 messages per minute per SENDER.
+ *
+ * The per-IP limit above cannot do this job. Every inbound message is delivered
+ * by the one Evolution instance, so all senders share a single IP key: 300/min is
+ * a coarse GLOBAL ceiling, not a per-sender bound. A single number can therefore
+ * stream garbage at the full global rate, and the per-OTP-row `attempts` cap in
+ * `markWhatsappOtpReceived` only bounds how many times a given code can be
+ * GUESSED — not how many requests reach us.
+ *
+ * Keyed on the sender's digits, and it fails closed on an unusable key: an
+ * unparseable sender (group chats, malformed JIDs) is throttled under one shared
+ * bucket rather than being waved through unlimited, since there is no per-sender
+ * identity to bound it with.
+ *
+ * 20/min is far above real OTP traffic — a customer replies to a code once, or
+ * asks for help a few times — so this never touches a legitimate user.
+ */
+export function checkWhatsappSenderLimit(senderKey: string) {
+  return checkRateLimit(
+    `wa-sender:${normaliseSenderKey(senderKey)}`,
+    20,
+    60 * 1000,
+    whatsappWebhookLimits
+  );
+}
+
+/**
+ * Reduce a sender to one stable identity, so reformatting cannot buy extra budget.
+ *
+ * Stripping non-digits alone is not enough: `00919812345678`, `+919812345678`,
+ * `919812345678` and `9812345678` are the same WhatsApp number and would each get
+ * their own bucket, so a sender could alternate formats to multiply the limit.
+ *
+ * Normalised to the last 10 digits (the Indian national significant number),
+ * after removing the `00` international prefix. This deliberately matches how
+ * `matchInboundOtp` decides whether a message came from the expected sender —
+ * if the two disagreed about what counts as the same number, the throttle could
+ * be sidestepped by exactly the prefixes the matcher tolerates.
+ */
+export function normaliseSenderKey(senderKey: string): string {
+  let digits = senderKey.replace(/\D/g, "");
+  if (digits.startsWith("00")) digits = digits.slice(2);
+  return digits.length >= 10 ? digits.slice(-10) : "unknown-sender";
+}
+
+/**
  * Shared client-IP resolver for rate limiting.
  *
  * X-Forwarded-For is attacker-controlled, so it is trusted ONLY behind a

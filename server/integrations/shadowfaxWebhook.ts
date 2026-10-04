@@ -16,6 +16,26 @@ export async function persistShadowfaxWebhookEvent(
   const { eq, and, sql } = await import("drizzle-orm");
   const { nanoid } = await import("nanoid");
   const { buildWebhookDedupeKey, mapDeliveryStatusToOrderStatus } = await import("./shadowfax");
+  const { shouldRecomputeEta, recomputeInTransitEta } = await import("../domain/deliveryEta");
+
+  /**
+   * Straight-line outlet -> customer distance for an order, in km.
+   *
+   * Read from the address snapshot captured at checkout (which already stores the
+   * computed distance). Falls back to 0, which the ETA module treats as "same
+   * building" and floors at the handover minimum rather than failing.
+   */
+  const resolveOrderDistanceKm = async (orderId: string): Promise<number> => {
+    try {
+      const row = (await db.select({ snapshot: orders.addressSnapshot })
+        .from(orders).where(eq(orders.id, orderId)).limit(1))[0];
+      const snapshot = row?.snapshot as { deliveryDistanceKm?: number } | null;
+      const km = Number(snapshot?.deliveryDistanceKm ?? 0);
+      return Number.isFinite(km) && km >= 0 ? km : 0;
+    } catch {
+      return 0;
+    }
+  };
 
   let delivery = (await db.select().from(deliveries)
     .where(eq(deliveries.providerAwb, update.awbNumber))
@@ -119,6 +139,17 @@ export async function persistShadowfaxWebhookEvent(
       patch.actualPickup = update.timestamp;
     }
     if (update.status === "OUT_FOR_DELIVERY") patch.outForDeliveryAt = update.timestamp;
+    // Recompute the promise at the moments it genuinely tightens. Once the bag is
+    // with the rider there is no kitchen queue left, so the ETA becomes pure
+    // last-mile from the pickup moment. `estimated_delivery` existed in the
+    // schema and was never written, so the customer only ever saw the frozen
+    // order-level estimate.
+    if (shouldRecomputeEta(update.status)) {
+      const distanceKm = await resolveOrderDistanceKm(delivery.orderId);
+      const anchor = update.timestamp ?? new Date();
+      const recomputed = recomputeInTransitEta({ distanceKm, pickedUpAt: anchor });
+      if (recomputed) patch.estimatedDelivery = recomputed.estimatedDelivery;
+    }
     if (update.status === "DELIVERED") {
       patch.deliveredAt = update.timestamp;
       patch.actualDelivery = update.timestamp;
@@ -141,7 +172,14 @@ export async function persistShadowfaxWebhookEvent(
 
     const mapped = mapDeliveryStatusToOrderStatus(update.status);
     let orderAdvanced = false;
-    if (mapped && order && (["DELIVERY_REQUESTED", "RIDER_ASSIGNED", "PICKED_UP", "OUT_FOR_DELIVERY"] as string[]).includes(order.status)) {
+    // READY_FOR_PICKUP is included so a legacy order stranded there (an older
+    // dispatch path committed the courier AWB, then failed its order transition)
+    // can still be advanced by the courier's own events instead of polling
+    // "Ready for pickup" forever. Everything below still defers to the state
+    // machine, so this only permits legal forward edges — DELIVERED is reachable
+    // from READY because the food is already bagged, not from earlier kitchen
+    // states.
+    if (mapped && order && (["DELIVERY_REQUESTED", "RIDER_ASSIGNED", "PICKED_UP", "OUT_FOR_DELIVERY", "READY_FOR_PICKUP"] as string[]).includes(order.status)) {
       // Machine-gated like every other writer: out-of-order or duplicate
       // provider events move the delivery row but must never corrupt the
       // order timeline (e.g. DELIVERY_REQUESTED straight to DELIVERED, or a

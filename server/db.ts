@@ -2,6 +2,7 @@
  * Database layer — typed query helpers for the complete cloud-kitchen platform.
  */
 import { desc, eq, and, or, like, sql, count, sum, between, inArray, notInArray } from "drizzle-orm";
+import { computeDeliveryEta, type Eta } from "./domain/deliveryEta";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { TRPCError } from "@trpc/server";
 import { Pool } from "pg";
@@ -998,7 +999,10 @@ export async function createOrderFromValidatedCart(args: {
         trackingToken: existingByKey.trackingToken,
         restaurantId: existingByKey.restaurantId,
         ...existingQuote,
-        estimatedMinutes: existingByKey.estimatedMinutes ?? selectedOutlet.preparationMinutes + 15,
+        estimatedMinutes: existingByKey.estimatedMinutes ?? computeDeliveryEta({
+          preparationMinutes: selectedOutlet.preparationMinutes,
+          distanceKm: Number(deliveryDistanceKm) || 0,
+        }).totalMinutes,
       };
     }
   }
@@ -1022,6 +1026,17 @@ export async function createOrderFromValidatedCart(args: {
   const orderNumber = `ORD-${Date.now().toString(36).toUpperCase()}-${randomInt(100000, 999999)}`;
   const trackingToken = generateTrackingToken();
   let finalQuote = baseQuote;
+  // Computed inside the transaction (it reads the outlet's live queue) but also
+  // needed by the return paths after it, so it is hoisted to function scope.
+  // Held in an object because the assignment happens inside the transaction
+  // callback; a bare `let` gets narrowed to `never` at the return paths below.
+  const orderEta: { value: Eta | null } = { value: null };
+  // Used only if the transaction somehow produced no ETA. Still distance-aware —
+  // never the old flat `preparationMinutes + 15`.
+  const fallbackEtaMinutes = computeDeliveryEta({
+    preparationMinutes: selectedOutlet.preparationMinutes,
+    distanceKm: Number(deliveryDistanceKm) || 0,
+  }).totalMinutes;
 
   // --- Issue 18: Atomic transaction — coupon counts + usage INSIDE tx with SELECT FOR UPDATE. ---
   try {
@@ -1141,6 +1156,23 @@ export async function createOrderFromValidatedCart(args: {
       }
       const initialStatus = isFreeOrder ? "PLACED" : "PENDING_PAYMENT";
       const initialPaymentStatus = isFreeOrder ? "PAID" : "PENDING";
+
+      // Distance- and queue-aware ETA. This used to be a flat
+      // `preparationMinutes + 15`, so a 300 m delivery and a 7 km one were promised
+      // the same time, the number never moved, and it was still shown after the
+      // food arrived. Assigned to the outer `orderEta` so the idempotent-replay
+      // return paths below can use it too.
+      const queueAhead = (await tx.select({ id: orders.id })
+        .from(orders)
+        .where(and(
+          eq(orders.outletId, selectedOutlet.id),
+          inArray(orders.status, ["PLACED", "RESTAURANT_ACCEPTED", "PREPARING"]),
+        ))).length;
+      orderEta.value = computeDeliveryEta({
+        preparationMinutes: selectedOutlet.preparationMinutes,
+        distanceKm: Number(deliveryDistanceKm) || 0,
+        queueAhead,
+      });
       const cleanEmail = args.customerEmail != null && String(args.customerEmail).trim() !== ""
         ? String(args.customerEmail).trim().slice(0, 320)
         : null;
@@ -1164,7 +1196,7 @@ export async function createOrderFromValidatedCart(args: {
         deliveryNotes: args.deliveryNotes ? String(args.deliveryNotes).slice(0, 1000) : null,
         specialInstructions: resolvedLines.map(l => l.specialInstructions).filter(Boolean).join("; ").slice(0, 2000) || null,
         cutleryPreference: args.cutleryPreference ?? false,
-        estimatedMinutes: selectedOutlet.preparationMinutes + 15,
+        estimatedMinutes: orderEta.value?.totalMinutes ?? fallbackEtaMinutes,
       });
 
       // Atomic stock decrement: UPDATE ... WHERE stock >= qty (rowCount check).
@@ -1281,7 +1313,7 @@ export async function createOrderFromValidatedCart(args: {
           deliveryFeePaise: winner.deliveryFeePaise,
           taxPaise: winner.taxPaise,
           totalPaise: winner.totalPaise,
-          estimatedMinutes: winner.estimatedMinutes ?? selectedOutlet.preparationMinutes + 15,
+          estimatedMinutes: winner.estimatedMinutes ?? orderEta.value?.totalMinutes ?? fallbackEtaMinutes,
         };
       }
       throw new CartValidationError("Order could not be created. Please retry.");
@@ -1298,7 +1330,7 @@ export async function createOrderFromValidatedCart(args: {
     trackingToken,
     restaurantId: storefront.restaurant.id,
     ...finalQuote,
-    estimatedMinutes: selectedOutlet.preparationMinutes + 15,
+    estimatedMinutes: orderEta.value?.totalMinutes ?? fallbackEtaMinutes,
   };
 }
 
@@ -1543,83 +1575,22 @@ export async function getOrderWithItems(orderId: string) {
 
   const payment = (await db.select().from(payments).where(eq(payments.orderId, orderId)).limit(1))[0];
 
-  const delivery = (await db.select().from(deliveries).where(eq(deliveries.orderId, orderId)).limit(1))[0];
+  // Same multi-row hazard as the public tracking lookup: prefer a live shipment,
+  // else the most recent row of any status. Without an ORDER BY Postgres may
+  // return a cancelled row and support acts on a shipment that is not running.
+  const delivery = (await db.select().from(deliveries)
+    .where(and(
+      eq(deliveries.orderId, orderId),
+      notInArray(deliveries.status, ["CANCELLED", "FAILED", "RETURNED", "DELIVERY_EXCEPTION"])
+    ))
+    .orderBy(desc(deliveries.createdAt))
+    .limit(1))[0]
+    ?? (await db.select().from(deliveries)
+      .where(eq(deliveries.orderId, orderId))
+      .orderBy(desc(deliveries.createdAt))
+      .limit(1))[0];
 
   return { ...order, items, history, payment, delivery };
-}
-
-/**
- * Customer-visible order timeline notes (fail-closed allow-list).
- *
- * order_status_history is the OPERATOR log. Besides the milestones a customer
- * should read, it carries the courier AWB — the key Shadowfax's own tracking API
- * is queried with — raw provider status text, admin price-override
- * justifications, and any reason an operator typed into the console. The public
- * tracking page is reachable by anyone holding the order number + tracking
- * token, so `getOrderForTracking` replays notes through this allow-list.
- *
- * Everything not matched here is suppressed and the row still renders as its
- * bare milestone (`status` + `createdAt`), which is the part the customer
- * actually reads. A new internal note therefore cannot leak by default: adding
- * it here is a deliberate, reviewed act.
- *
- * Patterns are anchored so an operator free-text note cannot ride in on the same
- * prefix as a system message (e.g. "Status changed to CANCELLED - fraudster").
- */
-const CUSTOMER_FACING_ORDER_NOTES: readonly RegExp[] = [
-  // db.ts createOrder — order exists, payment not taken yet.
-  /^Order created; awaiting payment\.$/,
-  // db.ts createOrder — coupon settled the whole total, so there is no payment row.
-  /^Free order confirmed \(₹0 settled by coupon\)\.$/,
-  // db.ts updateOrderStatus — the note-less default. Anchored to the exact
-  // `Status changed to <ORDER_STATUS>` shape, not a prefix.
-  /^Status changed to (PENDING_PAYMENT|PAYMENT_CONFIRMED|PLACED|RESTAURANT_ACCEPTED|PREPARING|READY_FOR_PICKUP|DELIVERY_REQUESTED|RIDER_ASSIGNED|PICKED_UP|OUT_FOR_DELIVERY|DELIVERED|CANCELLED|REJECTED|REFUND_PENDING|REFUNDED)$/,
-  // razorpay.ts — payment + refund milestones.
-  /^Payment verified via (Razorpay webhook|checkout callback)\.$/,
-  /^Full refund of ₹[0-9.,]+ pending\.$/,
-  /^Refund of ₹[0-9.,]+ processed\.$/,
-  /^Partial refund of ₹[0-9.,]+ processed \(total refunded ₹[0-9.,]+\)\.$/,
-  // shadowfaxWebhook.ts — provider milestone mirrored onto the order timeline.
-  // The rider name is already published as delivery.riderName, so it adds nothing.
-  /^Delivery update: [A-Z_]+( \(rider [^)]+\))?$/,
-  // shadowfax.ts — own-rider manual dispatch.
-  /^Manual delivery dispatched to .+\.$/,
-  // kds.ts — kitchen progress.
-  /^Accepted from KDS$/,
-  /^Started preparing from KDS$/,
-  /^Marked ready from KDS$/,
-  // storefront.ts — checkout hold released after the payment provider refused.
-  /^Payment provider unreachable — hold released automatically\.$/,
-  // admin.ts shadowfaxDispatch — customer-safe replacement for the old
-  // "Shadowfax shipment created. AWB: <awb>" note, which published the AWB.
-  /^Delivery requested — a rider is being assigned\.$/,
-];
-
-/**
- * True when an order_status_history note may be published on the tracking page.
- * Exported so the policy is unit-testable without a database.
- */
-export function isCustomerVisibleOrderNote(note: string | null | undefined): boolean {
-  if (typeof note !== "string") return false;
-  const trimmed = note.trim();
-  if (!trimmed) return false;
-  return CUSTOMER_FACING_ORDER_NOTES.some((re) => re.test(trimmed));
-}
-
-/**
- * Deterministic ordering for "one delivery row per order" lookups.
- *
- * The schema deliberately allows several rows per order (a CANCELLED/FAILED
- * provider row alongside a live manual row), so `limit(1)` with no ORDER BY can
- * return the dead row: the customer then sees no rider and no tracking link for
- * an order that is being delivered right now, and support views show a shipment
- * that no longer exists. Live rows sort first; ties break on the newest row.
- */
-export function deliveryLookupOrder() {
-  return [
-    sql`CASE WHEN ${deliveries.status} IN ('CANCELLED','FAILED') THEN 1 ELSE 0 END`,
-    desc(deliveries.createdAt),
-  ];
 }
 
 /**
@@ -1646,19 +1617,32 @@ export async function getOrderForTracking(orderNumber: string, trackingToken: st
     selectedModifiers: orderItems.selectedModifiers,
   }).from(orderItems).where(eq(orderItems.orderId, order.id));
 
-  // Only notes explicitly marked customer-visible are returned. Internal rows
-  // (operator reasons, provider internals such as the courier AWB) are filtered
-  // out here rather than trusted to every writer to remember a convention.
-  const history = await db.select({
+  // The NOTE is operator/provider data; the STATUS + timestamp is the milestone
+  // the customer reads. So the row is always returned and only the note is
+  // suppressed when it is not explicitly marked customer-visible.
+  //
+  // Filtering the whole row out (as this once did) also deleted the milestone:
+  // every operator-driven transition writes an internal note, so an
+  // operator-typed cancellation ("Customer called to cancel") erased the
+  // CANCELLED entry from the public timeline entirely — the customer saw the
+  // status chip flip with no explanation and no timeline row. The requirement is
+  // to suppress the INTERNAL TEXT, not the customer-safe milestone copy.
+  const historyRows = await db.select({
     status: orderStatusHistory.status,
     note: orderStatusHistory.note,
+    noteVisibility: orderStatusHistory.noteVisibility,
     createdAt: orderStatusHistory.createdAt,
   }).from(orderStatusHistory)
-    .where(and(
-      eq(orderStatusHistory.orderId, order.id),
-      eq(orderStatusHistory.noteVisibility, "customer")
-    ))
+    .where(eq(orderStatusHistory.orderId, order.id))
     .orderBy(orderStatusHistory.createdAt);
+
+  const history = historyRows.map((row) => ({
+    status: row.status,
+    // Fail closed: absent/unknown visibility is treated as internal, so a writer
+    // that forgets the column hides its note instead of publishing it.
+    note: row.noteVisibility === "customer" ? row.note : null,
+    createdAt: row.createdAt,
+  }));
 
   // The schema allows several delivery rows per order (a cancelled provider row
   // plus a live manual one). Ordering matters: an unordered limit(1) let Postgres
@@ -2007,27 +1991,49 @@ export async function markWhatsappOtpReceived(args: {
   //    customer's own row simply was not in the pool, so their inbound OTP was
   //    dropped with a cheerful `{processed:false, matched:false}` and no error.
   //  - Nothing tied a row to the sender, so any sender's code-looking message was
-  //    HMAC-tested against every other customer's pending OTP.
+  //    HMAC-tested against every other customer's pending OTP. That is also the
+  //    brute-force primitive: the inbound endpoint is unauthenticated, so an
+  //    attacker with one pending row of their own could grind guesses against it.
   //
   // The sender is now the primary filter (country-code tolerant, because inbound
   // WhatsApp reports the number with or without 91), and the cap is applied AFTER
   // that filter so it can no longer evict the intended row.
-  const senderFilter = args.senderDigits
-    ? sql`right(${otpVerifications.phone}, 10) = right(${args.senderDigits}, 10)`
-    : null;
+  const senderDigits = args.senderDigits ? args.senderDigits.replace(/\D/g, "") : "";
+  // No sender digits means no way to attribute the code to a phone (group chats
+  // and malformed JIDs both land here). Fall back to a global scan would
+  // reintroduce testing every other customer's pending OTP, so fail closed.
+  if (senderDigits.length < 10) return null;
+
   const candidates = await db.select().from(otpVerifications)
     .where(and(
       sql`${otpVerifications.usedAt} IS NULL`,
       sql`${otpVerifications.receivedAt} IS NULL`,
       sql`${otpVerifications.expiresAt} > ${now}`,
       sql`${otpVerifications.attempts} < 5`,
-      ...(senderFilter ? [senderFilter] : []),
+      sql`right(${otpVerifications.phone}, 10) = right(${senderDigits}, 10)`,
     ))
     .orderBy(desc(otpVerifications.createdAt))
     .limit(25);
 
   const match = matchInboundOtp(args.code, args.senderDigits, candidates as never, now.getTime());
-  if (!match) return null;
+  if (!match) {
+    // Brute-force guard: a miss means every candidate row was HMAC-tested and
+    // rejected, so each one must be charged an attempt. Without this the
+    // `attempts < 5` cap never bound on this path (only verifyOtp incremented),
+    // and an attacker could grind unlimited codes against their own pending row
+    // through the unauthenticated inbound webhook. Charging all candidates keeps
+    // the cap meaningful and, because the pool is now sender-scoped, can only
+    // ever lock the sender's own rows rather than an unrelated customer's.
+    if (candidates.length > 0) {
+      await db.update(otpVerifications)
+        .set({ attempts: sql`${otpVerifications.attempts} + 1` })
+        .where(and(
+          inArray(otpVerifications.id, candidates.map((c) => c.id)),
+          sql`${otpVerifications.attempts} < 5`,
+        ));
+    }
+    return null;
+  }
 
   // Claim atomically: only the still-unreceived row wins a concurrent race.
   const claimed = await db.update(otpVerifications)

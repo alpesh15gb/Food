@@ -235,6 +235,23 @@ export function registerWebhookRoutes(app: Express) {
           return ack({ processed: false });
         }
 
+        // Per-SENDER throttle, applied only once the envelope is trusted and
+        // parsed. The per-IP check above cannot bound this: all inbound messages
+        // arrive from the single Evolution instance, so every sender shares one
+        // IP key and 300/min is a global ceiling rather than a per-number bound.
+        //
+        // Deliberately BEFORE the OTP-candidate test, so it bounds every message
+        // from a number rather than only well-formed code attempts — gating on
+        // "looks like an OTP" would just mean an attacker includes a code-shaped
+        // string to stay in budget. 20/min is far above real OTP traffic (one
+        // reply, maybe a few help messages), so a legitimate user never hits it.
+        const { checkWhatsappSenderLimit } = await import("../security/rateLimit");
+        const senderLimit = checkWhatsappSenderLimit(msg.senderDigits ?? "");
+        if (!senderLimit.allowed) {
+          console.warn(`[Evolution][metric=wa_sender_rate_limited] throttled sender ${maskOtp(msg.senderDigits ?? "?")}.`);
+          return ack({ processed: false, rateLimited: true });
+        }
+
         const code = extractOtpCandidate(msg.text);
         if (!code) {
           debug("ignored-no-otp");

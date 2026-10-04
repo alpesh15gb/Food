@@ -40,7 +40,7 @@ import { initiateRefund, createRazorpayLinkedAccount } from "../integrations/raz
 import { orders, deliveries, outlets, restaurants, deliveryStatusHistory } from "../../drizzle/schema";
 import { getDb } from "../db";
 import { nanoid } from "nanoid";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 
 const availability = z.enum(["AVAILABLE", "SOLD_OUT", "SCHEDULED_UNAVAILABLE", "OUT_OF_STOCK", "DISABLED"]);
 const orderStatus = z.enum([
@@ -1262,6 +1262,20 @@ export const adminRouter = router({
       } catch {
         // Non-fatal: reconciles later via webhook/bulk-track.
       }
+      // Concrete ETA window for this shipment. The customer has been shown a
+      // distance-aware estimate since checkout; this pins it to real clock times
+      // so the tracking page can show "arriving by HH:MM" instead of a frozen
+      // "~45 min" that never moved.
+      const { computeDeliveryEta } = await import("../domain/deliveryEta");
+      const etaWindows = computeDeliveryEta({
+        preparationMinutes: outlet.preparationMinutes ?? 25,
+        distanceKm: Number(
+          (order.addressSnapshot as { deliveryDistanceKm?: number } | null)?.deliveryDistanceKm ?? 0
+        ),
+        placedAt: order.createdAt ?? new Date(),
+        now: new Date(),
+      });
+
       await db.transaction(async (tx) => {
         await tx.update(deliveries).set({
           providerAwb: created.awbNumber,
@@ -1270,6 +1284,11 @@ export const adminRouter = router({
           status: "REQUESTED",
           trackingUrl,
           dispatchedAt: new Date(),
+          // Populate the ETA columns that have existed in the schema but were
+          // never written. Once a shipment is created the promise is concrete:
+          // ready in the outlet's prep time, then the last mile.
+          estimatedPickup: etaWindows.estimatedPickup,
+          estimatedDelivery: etaWindows.estimatedDelivery,
           lastSyncedAt: new Date(),
           providerPayload: created.rawPayload ?? null,
         }).where(eq(deliveries.id, deliveryId));
@@ -1298,18 +1317,63 @@ export const adminRouter = router({
         console.error(
           `[admin] dispatch order ${order.id} failed to move to DELIVERY_REQUESTED after the AWB was issued; cancelling the shipment: ${transitionErr instanceof Error ? transitionErr.message : String(transitionErr)}`
         );
+        // Cancel at the COURIER first. Marking only our row cancelled leaves the
+        // shipment LIVE at Shadowfax: a rider still collects the food and delivers
+        // to an order that never left READY_FOR_PICKUP, so the customer is charged
+        // for a delivery the system never records. The provider call is the
+        // compensation that actually stops the food moving.
+        let courierCancelled = false;
         try {
-          await db.update(deliveries)
-            .set({ status: "CANCELLED", cancelledAt: new Date() })
-            .where(eq(deliveries.id, deliveryId));
+          const cancelRes = await provider.cancelDelivery({
+            awbNumber: created.awbNumber,
+            reason: "Order transition failed after dispatch.",
+          });
+          courierCancelled = cancelRes.success && cancelRes.outcome !== "FAILED";
         } catch (cancelErr) {
           console.error(
-            `[admin] CRITICAL: could not cancel shipment ${created.awbNumber} for order ${order.id}; it is live at the courier with no order transition. Reconcile manually.`,
+            `[admin] CRITICAL: provider cancel for shipment ${created.awbNumber} (order ${order.id}) failed; it may still be live at the courier with no order transition. Reconcile manually.`,
             cancelErr
           );
         }
+        // Record the outcome locally either way, so the operator sees the real
+        // state. Only mark CANCELLED (which frees the live-unique index for a
+        // retry) when the courier actually confirmed; otherwise leave the row live
+        // so reconciliation can still find and close it.
+        //
+        // When the courier cancel is UNCONFIRMED the providerPayload is merged,
+        // not overwritten: it currently holds the provider's AWB-creation
+        // response, and that response is exactly the evidence an operator needs
+        // to reconcile manually — the one moment it must not be discarded.
+        try {
+          await db.transaction(async (tx) => {
+            await tx.update(deliveries)
+              .set(courierCancelled
+                ? { status: "CANCELLED", cancelledAt: new Date() }
+                : {
+                    providerPayload: sql`coalesce(${deliveries.providerPayload}, '{}'::jsonb) || ${JSON.stringify(
+                      { dispatchRollback: true, courierCancelFailed: true }
+                    )}::jsonb`,
+                  })
+              .where(eq(deliveries.id, deliveryId));
+            await tx.insert(deliveryStatusHistory).values({
+              id: nanoid(18),
+              deliveryId,
+              status: courierCancelled ? "CANCELLED" : "DELIVERY_EXCEPTION",
+              note: courierCancelled
+                ? "Order transition failed after dispatch; shipment cancelled at the courier."
+                : "Order transition failed after dispatch and the courier cancel could not be confirmed. Reconcile manually.",
+            });
+          });
+        } catch (dbErr) {
+          console.error(
+            `[admin] CRITICAL: could not record the rollback for shipment ${created.awbNumber} (order ${order.id}). Reconcile manually.`,
+            dbErr
+          );
+        }
         throw new Error(
-          "Shipment was created but the order could not be updated, so it was cancelled. Nothing was dispatched — please retry."
+          courierCancelled
+            ? "Shipment was created but the order could not be updated, so it was cancelled at the courier. Nothing was delivered — please retry."
+            : "Shipment was created but the order could not be updated, and the courier could not be cancelled automatically. Support must cancel this shipment manually before retrying."
         );
       }
 
