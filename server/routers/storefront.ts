@@ -134,6 +134,35 @@ export const storefrontRouter = router({
         throw new Error(`Too many requests. Please try again in ${ipLimit.retryAfterSeconds} seconds.`);
       }
       const result = await createOtp(phone);
+      // Actually deliver the code. Previously the OTP was created, hashed and
+      // stored, then `sendOtp` returned success — the only use of `result.code`
+      // was a dev-only console log. The customer advanced to the "enter code"
+      // step and waited forever for a message that was never sent, and could
+      // never reach verifyOtp. An endpoint that reports success for an undelivered
+      // code is worse than one that fails loudly.
+      const { WhatsAppCloudAdapter, SmsFallbackAdapter } = await import("../integrations/whatsapp");
+      const waToken = process.env.WHATSAPP_ACCESS_TOKEN;
+      const waNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
+      const smsKey = process.env.MSG91_AUTH_KEY;
+      if (!waToken || !waNumberId) {
+        // No transport configured. Fail closed so the misconfiguration is visible
+        // in the UI and the logs instead of silently swallowing every login.
+        console.error(
+          "[OTP] no WhatsApp transport configured (WHATSAPP_ACCESS_TOKEN / WHATSAPP_PHONE_NUMBER_ID); refusing to report a code as sent."
+        );
+        throw new Error(
+          "Verification codes are temporarily unavailable. Please contact the restaurant."
+        );
+      }
+      const message = `${result.code} is your verification code for the kitchen. It expires in 10 minutes.`;
+      let delivered = await new WhatsAppCloudAdapter(waToken, waNumberId).sendText(phone, message);
+      if (!delivered.success && smsKey) {
+        delivered = await new SmsFallbackAdapter(smsKey).sendText(phone, message);
+      }
+      if (!delivered.success) {
+        console.error(`[OTP] delivery failed for a 10-digit number: ${delivered.error ?? "unknown provider error"}`);
+        throw new Error("We could not send a verification code. Please try again shortly.");
+      }
       if (process.env.OTP_DEV_LOG_ENABLED === "true" && process.env.NODE_ENV !== "production") {
         console.log(`[OTP-DEV] Phone ${phone}: code = ${result.code}`);
       }

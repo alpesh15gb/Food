@@ -134,19 +134,39 @@ export function checkWhatsappWebhookLimit(ip: string) {
 }
 
 /**
- * Shared client-IP resolver for rate limiting. X-Forwarded-For is attacker
- * controlled, so it is trusted ONLY behind a configured trusted proxy
- * (TRUSTED_PROXY=1, e.g. nginx/Caddy on the VPS). Otherwise the socket's
- * remote address is authoritative. All OTP/auth endpoints must use this
- * helper — reading XFF unconditionally lets attackers rotate the header to
- * bypass per-IP limits.
+ * Shared client-IP resolver for rate limiting.
+ *
+ * X-Forwarded-For is attacker-controlled, so it is trusted ONLY behind a
+ * configured trusted proxy (TRUSTED_PROXY=1, e.g. nginx on the VPS). Otherwise
+ * the socket's remote address is authoritative.
+ *
+ * Order matters, and the previous implementation got it backwards. Every nginx
+ * vhost sets `X-Real-IP $remote_addr` (authoritative, overwritten per request)
+ * and `X-Forwarded-For $proxy_add_x_forwarded_for` — which APPENDS the peer
+ * address to whatever the client sent. Reading `XFF.split(",")[0]` therefore
+ * returned the leftmost, attacker-supplied hop, so `X-Forwarded-For: 1.2.3.4`
+ * made every per-IP limit a no-op: unlimited OTP sends to attacker-chosen
+ * numbers (an SMS/WhatsApp spam relay), unlimited `verifyOtp` brute-force
+ * budget, and unlimited webhook flooding.
+ *
+ * Prefer `X-Real-IP`, which the trusted proxy overwrites. Fall back to the LAST
+ * XFF hop (the one our own proxy appended), never the first.
  */
 export function getRateLimitClientIp(req: Pick<{ headers: Record<string, unknown>; socket: { remoteAddress?: string | null } }, "headers" | "socket">): string {
   if (process.env.TRUSTED_PROXY === "1") {
-    const xff = (req.headers as Record<string, unknown>)["x-forwarded-for"];
+    const headers = req.headers as Record<string, unknown>;
+    const realIp = headers["x-real-ip"];
+    const realRaw = Array.isArray(realIp) ? realIp[0] : realIp;
+    if (typeof realRaw === "string" && realRaw.trim()) return realRaw.trim();
+
+    const xff = headers["x-forwarded-for"];
     const raw = Array.isArray(xff) ? xff[0] : xff;
-    const first = typeof raw === "string" ? raw.split(",")[0]?.trim() : undefined;
-    if (first) return first;
+    if (typeof raw === "string") {
+      // Rightmost hop = the address our trusted proxy observed.
+      const hops = raw.split(",").map((h) => h.trim()).filter(Boolean);
+      const last = hops[hops.length - 1];
+      if (last) return last;
+    }
   }
   return req.socket.remoteAddress ?? "unknown";
 }

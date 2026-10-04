@@ -48,8 +48,15 @@ const VALID_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
   READY_FOR_PICKUP: ["DELIVERY_REQUESTED", "RIDER_ASSIGNED", "CANCELLED"],
   DELIVERY_REQUESTED: ["RIDER_ASSIGNED", "CANCELLED"],
   RIDER_ASSIGNED: ["PICKED_UP", "CANCELLED"],
-  PICKED_UP: ["OUT_FOR_DELIVERY"],
-  OUT_FOR_DELIVERY: ["DELIVERED"],
+  // Once the rider has the food, the order can no longer reach DELIVERED — the
+  // rider may abandon it, the courier may return it, or the address may prove
+  // undeliverable. Those provider statuses used to map to null, leaving the order
+  // pinned at PICKED_UP with NO legal edge out: an operator cancel threw
+  // InvalidTransitionError before writing anything, a refund was swallowed by a
+  // bare catch, and the customer's tracking page polled "Picked up" forever.
+  // CANCELLED is the exit; REFUND_PENDING then carries the money back.
+  PICKED_UP: ["OUT_FOR_DELIVERY", "DELIVERED", "CANCELLED", "REFUND_PENDING"],
+  OUT_FOR_DELIVERY: ["DELIVERED", "CANCELLED", "REFUND_PENDING"],
   DELIVERED: ["REFUND_PENDING"],
   CANCELLED: ["REFUND_PENDING"],
   REJECTED: ["REFUND_PENDING"],

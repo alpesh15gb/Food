@@ -301,11 +301,23 @@ describe("status mapping (spec section 20)", () => {
   });
   it("hub noise never advances the customer order", () => {
     expect(mapDeliveryStatusToOrderStatus("IN_TRANSIT")).toBe("PICKED_UP");
+    // Still in progress: no order write, the terminal event follows.
     expect(mapDeliveryStatusToOrderStatus("RETURNING_TO_RESTAURANT")).toBeNull();
-    expect(mapDeliveryStatusToOrderStatus("DELIVERY_EXCEPTION")).toBeNull();
-    expect(mapDeliveryStatusToOrderStatus("CANCELLED")).toBeNull();
+    expect(mapDeliveryStatusToOrderStatus("CANCELLATION_PENDING")).toBeNull();
     expect(mapDeliveryStatusToOrderStatus("DELIVERED")).toBe("DELIVERED");
     expect(mapDeliveryStatusToOrderStatus("OUT_FOR_DELIVERY")).toBe("OUT_FOR_DELIVERY");
+  });
+
+  it("terminal delivery outcomes cancel the order so it can leave PICKED_UP", () => {
+    // These used to map to null, which meant no order write at all. An order that
+    // reached PICKED_UP then had NO legal edge out (the state machine offered only
+    // OUT_FOR_DELIVERY), so an abandoned or returned shipment pinned the order at
+    // "picked up" forever: the operator's cancel threw InvalidTransitionError
+    // before writing, a refund was swallowed by a bare catch, and the customer's
+    // tracking page polled forever.
+    for (const terminal of ["CANCELLED", "FAILED", "RETURNED", "DELIVERY_EXCEPTION"] as const) {
+      expect(mapDeliveryStatusToOrderStatus(terminal)).toBe("CANCELLED");
+    }
   });
 });
 

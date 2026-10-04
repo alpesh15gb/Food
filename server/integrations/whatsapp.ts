@@ -3,9 +3,43 @@
  * Supports Meta Cloud API (WhatsApp Business) and fallback SMS via MSG91/Twilio.
  */
 
+/**
+ * Normalise any stored customer number to the E.164 form providers require:
+ * country code + national number, digits only, no `+`.
+ *
+ * Orders store `customerPhone` as a bare 10-digit local number (the strict
+ * normaliser strips `91`/`0`), but Meta's `to` and MSG91's `mobiles` both need
+ * `919810273645`. Passing the raw column value made every single order
+ * notification fail — and because the error body was discarded, with no log line
+ * at all. Normalising at the provider boundary means delivery no longer depends
+ * on which form the caller happened to store.
+ */
+export function toProviderPhone(phone: string | null | undefined): string | null {
+  if (!phone) return null;
+  let digits = String(phone).replace(/\D/g, "");
+  if (!digits) return null;
+  // Already carries a country code (12+ digits starting 91, or any 11-15 digit
+  // international number) — leave it alone.
+  if (digits.length >= 11) return digits;
+  return `91${digits}`;
+}
+
+/** Extract a provider error message so failures are never silent. */
+async function readProviderError(res: Response): Promise<string | undefined> {
+  try {
+    const data = (await res.json()) as {
+      error?: { message?: string; error_data?: { messaging_product?: string } };
+      message?: string;
+    };
+    return data?.error?.message ?? data?.message ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export interface NotificationProvider {
-  sendText(phone: string, message: string): Promise<{ success: boolean; messageId?: string }>;
-  sendTemplate(phone: string, templateName: string, params: Record<string, string>): Promise<{ success: boolean; messageId?: string }>;
+  sendText(phone: string, message: string): Promise<{ success: boolean; messageId?: string; error?: string }>;
+  sendTemplate(phone: string, templateName: string, params: Record<string, string>): Promise<{ success: boolean; messageId?: string; error?: string }>;
 }
 
 export class WhatsAppCloudAdapter implements NotificationProvider {
@@ -17,7 +51,9 @@ export class WhatsAppCloudAdapter implements NotificationProvider {
     this.phoneNumberId = phoneNumberId;
   }
 
-  async sendText(phone: string, message: string) {
+  async sendText(phone: string, message: string): Promise<{ success: boolean; messageId?: string; error?: string }> {
+    const to = toProviderPhone(phone);
+    if (!to) return { success: false, error: "No usable phone number." };
     try {
       const res = await fetch(`https://graph.facebook.com/v18.0/${this.phoneNumberId}/messages`, {
         method: "POST",
@@ -27,15 +63,25 @@ export class WhatsAppCloudAdapter implements NotificationProvider {
         },
         body: JSON.stringify({
           messaging_product: "whatsapp",
-          to: phone,
+          to,
           type: "text",
           text: { body: message },
         }),
       });
-      const data = await res.json();
-      return { success: res.ok, messageId: data.messages?.[0]?.id };
-    } catch {
-      return { success: false };
+      if (!res.ok) {
+        // Surface why. A non-2xx here used to be swallowed, so an invalid token
+        // or a rate limit looked identical to success in the logs.
+        const error = await readProviderError(res);
+        console.error(
+          `[WhatsApp] send failed (${res.status}) to=${to}: ${error ?? "no error body"}`
+        );
+        return { success: false, error: error ?? `HTTP ${res.status}` };
+      }
+      const data = (await res.json()) as { messages?: Array<{ id?: string }> };
+      return { success: true, messageId: data.messages?.[0]?.id };
+    } catch (err) {
+      console.error(`[WhatsApp] send threw for to=${to}:`, err);
+      return { success: false, error: err instanceof Error ? err.message : "network error" };
     }
   }
 
@@ -78,7 +124,9 @@ export class SmsFallbackAdapter implements NotificationProvider {
   }
 
   // H-10: Use POST with body instead of GET with API key in URL
-  async sendText(phone: string, message: string) {
+  async sendText(phone: string, message: string): Promise<{ success: boolean; messageId?: string; error?: string }> {
+    const to = toProviderPhone(phone);
+    if (!to) return { success: false, error: "No usable phone number." };
     try {
       const res = await fetch("https://api.msg91.com/api/v5/flow/", {
         method: "POST",
@@ -87,18 +135,27 @@ export class SmsFallbackAdapter implements NotificationProvider {
           "authkey": this.apiKey,
         },
         body: JSON.stringify({
-          mobiles: phone,
+          mobiles: to,
           message: message,
         }),
       });
-      return { success: res.ok };
-    } catch {
-      return { success: false };
+      if (!res.ok) {
+        const error = await readProviderError(res);
+        console.error(`[SMS] send failed (${res.status}) to=${to}: ${error ?? "no error body"}`);
+        return { success: false, error: error ?? `HTTP ${res.status}` };
+      }
+      return { success: true };
+    } catch (err) {
+      console.error(`[SMS] send threw for to=${to}:`, err);
+      return { success: false, error: err instanceof Error ? err.message : "network error" };
     }
   }
 
-  async sendTemplate(_phone: string, _templateName: string, _params: Record<string, string>) {
-    return { success: false };
+  async sendTemplate(_phone: string, _templateName: string, _params: Record<string, string>): Promise<{ success: boolean; messageId?: string; error?: string }> {
+    // MSG91's /api/v5/flow/ endpoint is template-driven and needs a template id,
+    // which is not configured anywhere in this project. Reporting success here
+    // would be a lie, so this stays an explicit, logged failure.
+    return { success: false, error: "MSG91 template sending is not configured." };
   }
 }
 

@@ -53,6 +53,32 @@ const FAILURE_MESSAGES: Record<CaptureFailure, string> = {
   no_fix: "We could not get a usable GPS fix. Search for your address or place a pin.",
 };
 
+/**
+ * Map a W3C `GeolocationPositionError.code` to our failure taxonomy.
+ *
+ * The error callback used to ignore the code entirely and treat every error as
+ * "no samples", so a customer who had explicitly DENIED location permission was
+ * told "We could not get a usable GPS fix" — and the app then burned the full
+ * ~9 s budget escalating to a coarse fix and an IP lookup that could never
+ * succeed either. Reporting the real cause lets the UI say the actionable thing
+ * ("allow it in your browser settings") and stop escalating for a permission
+ * that will never be granted.
+ */
+export function failureFromGeolocationError(
+  err: { code?: number } | null | undefined
+): CaptureFailure {
+  switch (err?.code) {
+    case 1:
+      return "denied";
+    case 2:
+      return "unavailable";
+    case 3:
+      return "timeout";
+    default:
+      return "no_fix";
+  }
+}
+
 /** Accuracy bands, in metres. Mirrors the server's own classification. */
 export function classifyAccuracy(meters: number | null | undefined): AccuracyLevel {
   if (meters == null || !Number.isFinite(meters) || meters <= 0) return "UNKNOWN";
@@ -93,7 +119,17 @@ export function weightedMedian(fixes: Fix[]): { latitude: number; longitude: num
   if (fixes.length === 0) return null;
   if (fixes.length === 1) return { latitude: fixes[0].latitude, longitude: fixes[0].longitude };
 
-  const weightOf = (f: Fix) => (f.accuracyMeters && f.accuracyMeters > 0 ? 1 / f.accuracyMeters : 1);
+  // Weight each fix by how precise it claims to be. An ABSENT or zero accuracy
+  // (both legal: the spec defines accuracy 0 as "unknown") must not be treated as
+  // maximally precise. It previously fell back to weight 1 — the same weight as a
+  // 1-metre fix — so one unknown-accuracy fix could outvote a cluster of coarse
+  // fixes and drag the centre onto an outlier, contradicting the module's own
+  // stated invariant. Unknown accuracy now gets the WEAKEST weight.
+  const UNKNOWN_ACCURACY_WEIGHT = 1e-6;
+  const weightOf = (f: Fix) =>
+    f.accuracyMeters != null && Number.isFinite(f.accuracyMeters) && f.accuracyMeters > 0
+      ? 1 / f.accuracyMeters
+      : UNKNOWN_ACCURACY_WEIGHT;
 
   const byLng = [...fixes].sort((a, b) => a.longitude - b.longitude);
   const totalWeight = byLng.reduce((sum, f) => sum + weightOf(f), 0);
@@ -205,18 +241,27 @@ export async function capturePreciseLocation(
 
   // Phase 1 — multi-sample high-accuracy fix.
   const precise = await collectSamples(geo, targetSamples, budgetMs * 0.6, true);
-  if (precise.length > 0) {
-    return finish(precise, precise.length >= targetSamples ? "gps_multi_sample" : "gps_single");
+  if (precise.fixes.length > 0) {
+    return finish(precise.fixes, precise.fixes.length >= targetSamples ? "gps_multi_sample" : "gps_single");
+  }
+
+  // A denied permission will never be granted by retrying, so stop escalating
+  // and tell the customer the actionable thing instead of burning the remaining
+  // budget on a coarse fix and an IP lookup that cannot succeed either.
+  if (precise.failure === "denied") {
+    return { ok: false, reason: "denied", message: FAILURE_MESSAGES.denied };
   }
 
   // Phase 2 — coarse fix. Fast, near-universally available, often only accurate to
   // a few hundred metres — which the UI is told about rather than hidden.
   const coarse = await collectSamples(geo, 1, budgetMs * 0.4, false);
-  if (coarse.length > 0) {
-    return finish(coarse, "gps_coarse");
+  if (coarse.fixes.length > 0) {
+    return finish(coarse.fixes, "gps_coarse");
   }
 
-  return await ipFallback(options, "no_fix");
+  // Report the real cause when the provider gave us one, rather than always
+  // claiming a generic missing fix.
+  return await ipFallback(options, coarse.failure ?? precise.failure ?? "no_fix");
 }
 
 function finish(fixes: Fix[], method: CaptureResult extends { ok: true } ? never : string): CaptureResult {
@@ -247,11 +292,12 @@ function collectSamples(
   count: number,
   windowMs: number,
   enableHighAccuracy: boolean,
-): Promise<Fix[]> {
+): Promise<{ fixes: Fix[]; failure: CaptureFailure | null }> {
   return new Promise((resolve) => {
     const fixes: Fix[] = [];
     let watchId: number | null = null;
     let settled = false;
+    let failure: CaptureFailure | null = null;
     let timer: ReturnType<typeof setTimeout> | undefined;
 
     const clearTimer = () => {
@@ -268,12 +314,13 @@ function collectSamples(
       }
     };
 
-    const done = () => {
+    const done = (err?: { code?: number } | null) => {
       if (settled) return;
       settled = true;
+      if (err) failure = failureFromGeolocationError(err);
       clearTimer();
       if (watchId != null) clearWatch(watchId);
-      resolve(fixes);
+      resolve({ fixes, failure });
     };
 
     const onFix = (pos: PositionLike) => {
@@ -292,7 +339,7 @@ function collectSamples(
 
     try {
       if (typeof geo.watchPosition === "function") {
-        const id = geo.watchPosition(onFix, () => done(), {
+        const id = geo.watchPosition(onFix, (err) => done(err), {
           enableHighAccuracy,
           timeout: windowMs,
           maximumAge: 0,
@@ -305,7 +352,7 @@ function collectSamples(
       } else {
         geo.getCurrentPosition!(
           onFix,
-          () => done(),
+          (err) => done(err),
           { enableHighAccuracy, timeout: windowMs, maximumAge: 0 },
         );
       }

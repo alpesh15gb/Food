@@ -622,12 +622,16 @@ export function mapDeliveryStatusToOrderStatus(deliveryStatus: DeliveryStatus): 
     IN_TRANSIT: "PICKED_UP",
     OUT_FOR_DELIVERY: "OUT_FOR_DELIVERY",
     DELIVERED: "DELIVERED",
-    CANCELLED: null,
-    FAILED: null,
+    // Terminal delivery outcomes cancel the order so it can leave PICKED_UP /
+    // OUT_FOR_DELIVERY and become refund-eligible. Without this the order had no
+    // legal exit and stayed "picked up" forever.
+    CANCELLED: "CANCELLED",
+    FAILED: "CANCELLED",
+    RETURNED: "CANCELLED",
+    DELIVERY_EXCEPTION: "CANCELLED",
+    // Still in progress: no order write, the terminal event will follow.
     CANCELLATION_PENDING: null,
     RETURNING_TO_RESTAURANT: null,
-    RETURNED: null,
-    DELIVERY_EXCEPTION: null,
   };
   return mapping[deliveryStatus] ?? null;
 }

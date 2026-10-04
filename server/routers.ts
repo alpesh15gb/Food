@@ -10,6 +10,7 @@ import { getAdminCookieOptions, getCustomerCookieOptions } from "./_core/cookies
 import { sdk } from "./_core/sdk";
 import { systemRouter } from "./_core/systemRouter";
 import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
+import { getRateLimitClientIp } from "./security/rateLimit";
 import { upsertUser, getUserByOpenId, createRestaurant, getDb } from "./db";
 import { adminRouter } from "./routers/admin";
 import { storefrontRouter } from "./routers/storefront";
@@ -26,20 +27,14 @@ import { eq, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 
 /**
- * Resolve the client IP for rate limiting. X-Forwarded-For is attacker
- * controlled, so it is trusted ONLY when the app runs behind a configured
- * trusted proxy (TRUSTED_PROXY=1, e.g. nginx/Caddy on the VPS). Otherwise the
- * socket's remote address is authoritative, preventing XFF spoofing from
- * bypassing IP rate limits.
+ * Resolve the client IP for rate limiting. Delegates to the shared resolver so
+ * there is one implementation — the duplicate here read the LEFTMOST
+ * X-Forwarded-For hop, which behind nginx (`$proxy_add_x_forwarded_for`, which
+ * appends) is the attacker-controlled value, making every per-IP limit here
+ * bypassable by rotating the header.
  */
 function getClientIp(req: Pick<Request, "headers" | "socket">): string {
-  if (process.env.TRUSTED_PROXY === "1") {
-    const xff = req.headers["x-forwarded-for"];
-    const raw = Array.isArray(xff) ? xff[0] : xff;
-    const first = typeof raw === "string" ? raw.split(",")[0]?.trim() : undefined;
-    if (first) return first;
-  }
-  return req.socket.remoteAddress ?? "unknown";
+  return getRateLimitClientIp(req as never);
 }
 
 export const appRouter = router({

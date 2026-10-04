@@ -49,24 +49,44 @@ export async function persistShadowfaxWebhookEvent(
     return { processed: false, unknownDelivery: true };
   }
 
-  const order = (await db.select().from(orders).where(eq(orders.id, delivery.orderId)).limit(1))[0];
   const eventExternalId = buildWebhookDedupeKey({
     awbNumber: update.awbNumber,
     event: update.providerStatus,
     timestamp: update.timestamp.toISOString(),
   });
-  try {
-    await db.insert(webhookEvents).values({
-      id: nanoid(18),
-      provider: "shadowfax",
-      eventType: `delivery.${update.providerStatus.toLowerCase()}`,
-      externalId: eventExternalId,
-      payload: rawPayload,
-      processed: false,
-    });
-  } catch {
+
+  // Reserve the event, but only treat a genuine unique violation as a duplicate.
+  // Catching every database error here silently discarded real failures: an
+  // oversized provider `event` overflows webhookEvents.eventType (varchar 120)
+  // and raises 22001, which the old blanket catch reported as "duplicate" and
+  // answered 200 — losing the status change with no trace beyond a log line.
+  const alreadySeen = (await db.select({ id: webhookEvents.id, processed: webhookEvents.processed })
+    .from(webhookEvents)
+    .where(and(eq(webhookEvents.provider, "shadowfax"), eq(webhookEvents.externalId, eventExternalId)))
+    .limit(1))[0];
+  if (alreadySeen?.processed) {
     console.log("[Webhook][metric=webhook_duplicate] shadowfax duplicate delivery event.");
     return { processed: true, duplicate: true };
+  }
+  if (!alreadySeen) {
+    try {
+      await db.insert(webhookEvents).values({
+        id: nanoid(18),
+        provider: "shadowfax",
+        eventType: `delivery.${update.providerStatus.toLowerCase()}`.slice(0, 120),
+        externalId: eventExternalId.slice(0, 120),
+        payload: rawPayload,
+        processed: false,
+      });
+    } catch (err) {
+      // 23505 = unique_violation, i.e. a concurrent delivery of the same event.
+      // Anything else is a real failure and must not be laundered as a dupe.
+      const isUniqueViolation =
+        typeof err === "object" && err !== null && (err as { code?: string }).code === "23505";
+      if (!isUniqueViolation) throw err;
+      console.log("[Webhook][metric=webhook_duplicate] shadowfax duplicate delivery event.");
+      return { processed: true, duplicate: true };
+    }
   }
 
   const milestoneNote = (s: string) => {
@@ -77,6 +97,15 @@ export async function persistShadowfaxWebhookEvent(
   };
 
   await db.transaction(async (tx) => {
+    // The order row is read INSIDE the transaction and locked, mirroring
+    // updateOrderStatus (db.ts). Reading it before the transaction gave
+    // validateTransition a stale snapshot, and the subsequent write carried no
+    // status predicate — so a concurrent operator cancel could be overwritten,
+    // flipping a CANCELLED, refund-pending order back to RIDER_ASSIGNED and
+    // hiding it from the refund queue.
+    await tx.execute(sql`SELECT id FROM orders WHERE id = ${delivery.orderId} FOR UPDATE`);
+    const order = (await tx.select().from(orders).where(eq(orders.id, delivery.orderId)).limit(1))[0];
+
     const patch: Record<string, unknown> = {
       status: update.status,
       providerStatus: update.providerStatus,
@@ -127,14 +156,24 @@ export async function persistShadowfaxWebhookEvent(
         console.warn(`[Webhook] refusing order jump ${order.status} → ${mapped} (awb=${update.awbNumber}); delivery row still updated.`);
       }
       if (machineAllows) {
-        await tx.update(orders).set({ status: mapped as typeof order.status }).where(eq(orders.id, order.id));
-        await tx.insert(orderStatusHistory).values({
-          id: nanoid(18),
-          orderId: order.id,
-          status: mapped as typeof order.status,
-          note: `Delivery update: ${update.status}${update.riderName ? ` (rider ${update.riderName})` : ""}`,
-        });
-        orderAdvanced = true;
+        // Compare-and-swap on the status we validated against. If a concurrent
+        // writer moved the order since the lock was taken, this affects zero
+        // rows and the order write is skipped rather than clobbering it.
+        const advanced = await tx.update(orders)
+          .set({ status: mapped as typeof order.status })
+          .where(and(eq(orders.id, order.id), eq(orders.status, order.status)))
+          .returning({ id: orders.id });
+        if (advanced.length > 0) {
+          await tx.insert(orderStatusHistory).values({
+            id: nanoid(18),
+            orderId: order.id,
+            status: mapped as typeof order.status,
+            note: `Delivery update: ${update.status}${update.riderName ? ` (rider ${update.riderName})` : ""}`,
+          });
+          orderAdvanced = true;
+        } else {
+          console.warn(`[Webhook] order ${order.id} changed status concurrently; delivery row updated without advancing the order.`);
+        }
       }
     }
 
@@ -157,7 +196,12 @@ export async function persistShadowfaxWebhookEvent(
     await tx.update(webhookEvents).set({ processed: true })
       .where(and(eq(webhookEvents.provider, "shadowfax"), eq(webhookEvents.externalId, eventExternalId)));
 
-    if (firstSeen && !orderAdvanced && order && (update.status === "OUT_FOR_DELIVERY" || update.status === "DELIVERED")) {
+    // Notify on a genuine forward transition only. The gate used to require
+    // `!orderAdvanced`, i.e. it fired precisely when the order write was REFUSED
+    // — so the happy path (order advances) notified nobody, and the refused path
+    // told the customer "delivered" while the database still said DELIVERY_REQUESTED.
+    // `orderAdvanced` is also what keeps repeats from double-notifying.
+    if (firstSeen && orderAdvanced && order && (update.status === "OUT_FOR_DELIVERY" || update.status === "DELIVERED")) {
       const { sendDeliveryMilestoneNotification } = await import("../db");
       void sendDeliveryMilestoneNotification(order.id, update.status === "DELIVERED" ? "delivered" : "out_for_delivery")
         .catch((err) => console.error("[Webhook] milestone notify failed:", err));
