@@ -932,8 +932,7 @@ Tap "Integrations" in sidebar
 │  │  [ Test Connection ]  [ Save Credentials ]               │    │
 │  │                                                          │    │
 │  │  Webhook URL (configure in Razorpay dashboard):          │    │
-│  │  https://9housekitchen.in/api/trpc/storefront.           │    │
-│  │       razorpayWebhook                                    │    │
+│  │  https://9housekitchen.in/webhooks/razorpay             │    │
 │  └──────────────────────────────────────────────────────────┘    │
 │                                                                   │
 │  ┌─ Shadowfax ─────────────────────────────────────────────┐    │
@@ -1218,7 +1217,7 @@ REJECTED ◄── (from PLACED)
 │  RAZORPAY WEBHOOK                                                │
 │                                                                   │
 │  Razorpay POSTs to:                                              │
-│  https://9housekitchen.in/api/trpc/storefront.razorpayWebhook   │
+│  https://9housekitchen.in/webhooks/razorpay                      │
 │                                                                   │
 │  1. Receive HTTP request                                         │
 │  2. Verify HMAC signature (RAZORPAY_WEBHOOK_SECRET)             │

@@ -69,6 +69,16 @@ A production-ready, multi-brand cloud-kitchen ordering platform built for Indian
 
 ## Database Schema
 
+> **⚠️ Before running `pnpm db:generate`:** `drizzle/migrations/meta/` only holds
+> snapshots `0000`–`0003` while the journal now has twelve entries, so drizzle-kit
+> diffs against `0003` and will re-emit `CREATE TABLE` for everything added by
+> `0004`–`0011` as **unguarded** SQL — which breaks the replay-safety invariant
+> `server/db/migrationChain.test.ts` enforces. Always inspect generated SQL and
+> convert bare `CREATE TABLE` / `CREATE INDEX` / `ADD COLUMN` to their
+> `IF NOT EXISTS` forms (or wrap them in `DO $$ ... IF NOT EXISTS ... $$`), matching
+> the style of the existing migrations. Deploy always uses
+> `drizzle-kit migrate`, never `db:push`.
+
 Supports 30+ tables including:
 - `restaurants`, `restaurantSchedules` — Multi-brand/multi-outlet
 - `menuCategories`, `categorySchedules`, `menuItems`, `productSchedules` — Full scheduling
@@ -174,7 +184,12 @@ pnpm test
 5. Set up reverse proxy (nginx/caddy) for HTTPS (HSTS already sent by app).
 6. Configure Razorpay webhook URL (RAW-BODY, production): `https://your-domain.com/webhooks/razorpay`
    with secret in `RAZORPAY_WEBHOOK_SECRET`. Verify at `GET /webhooks/health`.
-   Legacy tRPC `storefront.razorpayWebhook` remains for dashboard test buttons only.
+   The legacy tRPC `storefront.razorpayWebhook` procedure has been REMOVED. It
+   could never verify a genuine Razorpay signature (the HMAC covers the raw
+   request bytes, which a re-serialised object cannot reproduce), so it was an
+   unauthenticated order-minting oracle. The only webhook path is
+   `POST /webhooks/razorpay`. Use Razorpay's dashboard "Send Test Event" against
+   that URL rather than the tRPC route.
 7. Configure Shadowfax webhook URL: `https://your-domain.com/webhooks/shadowfax`.
    Shadowfax must send YOUR secret in the `Authorization` header
    (`SHADOWFAX_WEBHOOK_SECRET`) — there is no HMAC scheme. Keep
@@ -214,13 +229,21 @@ curl -H "apikey: $EVOLUTION_API_KEY" \
   "$EVOLUTION_API_URL/webhook/find/whatsapp-main"
 ```
 
-Test simulation (use the real `WHATSAPP_WEBHOOK_SECRET` as `TOKEN`):
+Test simulation (the secret MUST travel in the `Authorization` header):
 
 ```bash
-curl -X POST "https://9housekitchen.in/api/webhooks/whatsapp?token=TOKEN" \
+curl -X POST "https://9housekitchen.in/api/webhooks/whatsapp" \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $WHATSAPP_WEBHOOK_SECRET" \
   -d '{"event":"MESSAGES_UPSERT","instance":"whatsapp-main","data":{"key":{"remoteJid":"14150001111@s.whatsapp.net","fromMe":false,"id":"TESTMSG1"},"message":{"conversation":"Your OTP is 482193"},"messageTimestamp":'$(date +%s)'}}'
 ```
+
+> **Auth is header-only.** `?token=` / `?secret=` / `?signature=` query-string
+> fallbacks have been removed: nginx writes the full query string into
+> `/var/log/nginx/access.log`, which leaked the webhook secret into your logs and
+> browser history. If your Evolution instance or Razorpay dashboard still has the
+> secret in the URL, move it to the header before deploying or every callback
+> will 401.
 
 No Nginx changes needed (`/api/` is already proxied to the app).
 

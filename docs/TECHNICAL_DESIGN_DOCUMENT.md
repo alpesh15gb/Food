@@ -794,7 +794,7 @@ Encrypted Vault (integration_secrets table):
 ### Webhook Flow
 
 ```
-Razorpay → POST /api/trpc/storefront.razorpayWebhook
+Razorpay → POST /webhooks/razorpay   (raw-body HMAC; the tRPC path was removed)
   │
   ├── 1. Parse raw body
   ├── 2. Extract X-Razorpay-Signature header

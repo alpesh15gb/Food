@@ -1321,7 +1321,7 @@ docker compose -f deploy/docker-compose.yml --env-file deploy/config.env up -d -
 | `storefront.verifyPayment` | Mutation | Verify Razorpay payment signature |
 | `storefront.getOrder` | Query | Get order details and status |
 | `storefront.getOrderTimeline` | Query | Get order status history |
-| `storefront.razorpayWebhook` | Webhook | Handle Razorpay payment events |
+| `POST /webhooks/razorpay` | Webhook | Razorpay payment events (raw-body HMAC; replaced the removed `storefront.razorpayWebhook`) |
 | `storefront.shadowfaxWebhook` | Webhook | Handle Shadowfax delivery events |
 
 ### Admin API (tRPC)

@@ -2109,7 +2109,7 @@ Creates or updates a setting.
 
 ### Razorpay Webhook
 
-**URL:** `https://9housekitchen.in/api/trpc/storefront.razorpayWebhook`  
+**URL:** `https://9housekitchen.in/webhooks/razorpay`  (the former `/api/trpc/storefront.razorpayWebhook` has been removed)  
 **Method:** POST  
 **Auth:** HMAC signature verification (not session-based)  
 **Content-Type:** application/json
