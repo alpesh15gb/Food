@@ -72,7 +72,7 @@ function normalizePhone(phone: string | null | undefined): string | null {
 }
 
 /** Parse restaurant GST rate safely: finite 0-100, else fallback. */
-function parseGstRate(raw: unknown, fallback = 5): number {
+export function parseGstRate(raw: unknown, fallback = 5): number {
   const n = typeof raw === "number" ? raw : parseFloat(String(raw ?? ""));
   if (!Number.isFinite(n) || n < 0 || n > 100) return fallback;
   return n;
@@ -1211,12 +1211,17 @@ export async function createOrderFromValidatedCart(args: {
         })
       );
 
-      await tx.insert(orderStatusHistory).values({
-        id: id(),
-        orderId,
-        status: "PENDING_PAYMENT",
-        note: isFreeOrder ? "Free order created (100% discount)." : "Order created; awaiting payment.",
-      });
+      // A free order is inserted as PLACED and never passes through PENDING_PAYMENT,
+      // so writing a PENDING_PAYMENT row for it produced a history entry the order
+      // was never actually in.
+      if (!isFreeOrder) {
+        await tx.insert(orderStatusHistory).values({
+          id: id(),
+          orderId,
+          status: "PENDING_PAYMENT",
+          note: "Order created; awaiting payment.",
+        });
+      }
 
       if (isFreeOrder) {
         // Free order: record machine-gated PLACED history, no payment row.
@@ -1334,7 +1339,14 @@ export async function updateOrderStatus(
   if (status === "CANCELLED" || status === "REJECTED") {
     updateData.cancelledAt = new Date();
     updateData.cancelReason = typeof note === "string" ? note.slice(0, 500) : note;
-    updateData.paymentStatus = "CANCELLED";
+    // Money already captured must not be relabelled "CANCELLED" — that state means
+    // "no funds were taken" and it hides captured revenue from every refund report,
+    // leaving operators to discover stranded money by hand. Anything that was paid
+    // or in flight goes to REFUND_PENDING so the refund queue picks it up.
+    const moneyMovedStates = new Set(["PAID", "REFUND_PENDING", "REFUNDED"]);
+    updateData.paymentStatus = moneyMovedStates.has(String(order.paymentStatus ?? ""))
+      ? "REFUND_PENDING"
+      : "CANCELLED";
   }
 
   await db.transaction(async (tx) => {
