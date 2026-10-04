@@ -78,6 +78,13 @@
       "when": 1788555719171,
       "tag": "0010_otp_whatsapp_meta",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1788555779171,
+      "tag": "0011_item_tax_default",
+      "breakpoints": true
     }
   ]
 }

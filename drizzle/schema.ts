@@ -377,7 +377,12 @@ export const menuItems = pgTable("menu_items", {
   availableNote: varchar("available_note", { length: 160 }),
   isOpen: boolean("is_open").notNull().default(true),
   isCustomizable: boolean("is_customizable").notNull().default(false),
-  taxPercent: numeric("tax_percent", { precision: 5, scale: 2 }).default("0"),
+  // NULL means "no per-item rate configured" -> inherit the restaurant's
+  // gst_percentage. An explicit 0 means a genuinely zero-rated item and must
+  // stay 0. The previous default of "0" made every unconfigured item look
+  // deliberately zero-rated, which forced the per-item branch for every cart
+  // and taxed every line at 0% — silently discarding the restaurant's GST.
+  taxPercent: numeric("tax_percent", { precision: 5, scale: 2 }),
   packagingFeePaise: integer("packaging_fee_paise").default(0),
   stock: integer("stock"),
   maxQuantityPerOrder: integer("max_quantity_per_order").default(10),

@@ -42,8 +42,7 @@ const modifierIdsSchema = z.object({
   specialInstructions: z.string().max(300).optional(),
 });
 
-const checkoutInput = z.object({
-  slug: z.string().min(2),
+const checkoutInput = z.object({  slug: z.string().min(2),
   lines: z.array(modifierIdsSchema).min(1).max(50),
   address: addressSchema,
   couponCode: z.string().max(48).optional(),
@@ -55,6 +54,67 @@ const checkoutInput = z.object({
   // Issue 3: Idempotency key to prevent duplicate orders from retries
   idempotencyKey: z.string().min(8).max(64).optional(),
 });
+
+/**
+ * Coupon usage counts for the quote preview.
+ *
+ * The quote called `validateCoupon` without these, and every limit check reads
+ * `args.X ?? 0`, so `perCustomerLimit`, `totalUsageLimit` and `isNewCustomerOnly`
+ * could never trip in the preview. The customer was shown "Coupon applied — you
+ * saved Rs 100" and a reduced total, and then checkout — which passes real counts
+ * inside its locked transaction — refused the same coupon and threw, leaving the
+ * order unplaceable at a total the customer was never able to pay.
+ *
+ * Mirrors the checkout queries in db.ts: confirmed orders only, so a pending
+ * order of the customer's own does not block a legitimate retry.
+ */
+async function couponUsageCounts(
+  db: NonNullable<Awaited<ReturnType<typeof import("../db").getDb>>>,
+  args: { couponId: string; restaurantId: string; phone: string }
+): Promise<{
+  totalCouponUsageCount: number;
+  customerCouponUsageCount: number;
+  customerOrderCount: number;
+}> {
+  const { orders, couponUsage } = await import("../../drizzle/schema");
+  const { eq, sql } = await import("drizzle-orm");
+
+  const countRows = async (query: Promise<Array<{ count: number }>>) =>
+    Number((await query)[0]?.count ?? 0);
+
+  const totalCouponUsageCount = await countRows(
+    db.select({ count: sql<number>`count(*)::int` })
+      .from(couponUsage)
+      .innerJoin(orders, eq(couponUsage.orderId, orders.id))
+      .where(
+        sql`${couponUsage.couponId} = ${args.couponId}
+            AND ${orders.status} NOT IN ('CANCELLED', 'REJECTED', 'PENDING_PAYMENT', 'PAYMENT_CONFIRMED')`
+      )
+  );
+
+  if (!args.phone) {
+    return { totalCouponUsageCount, customerCouponUsageCount: 0, customerOrderCount: 0 };
+  }
+
+  const customerCouponUsageCount = await countRows(
+    db.select({ count: sql<number>`count(*)::int` })
+      .from(couponUsage)
+      .innerJoin(orders, eq(couponUsage.orderId, orders.id))
+      .where(
+        sql`${couponUsage.couponId} = ${args.couponId}
+            AND ${orders.customerPhone} = ${args.phone}
+            AND ${orders.status} NOT IN ('CANCELLED', 'REJECTED', 'PENDING_PAYMENT', 'PAYMENT_CONFIRMED')`
+      )
+  );
+
+  const customerOrderCount = await countRows(
+    db.select({ count: sql<number>`count(*)::int` })
+      .from(orders)
+      .where(sql`${orders.restaurantId} = ${args.restaurantId} AND ${orders.customerPhone} = ${args.phone}`)
+  );
+
+  return { totalCouponUsageCount, customerCouponUsageCount, customerOrderCount };
+}
 
 export const storefrontRouter = router({
   // =========================================================================
@@ -658,6 +718,8 @@ export const storefrontRouter = router({
         selectedVariantId: z.string().optional(),
       })).min(1).max(50),
       couponCode: z.string().max(48).optional(),
+      /** Used to evaluate per-customer coupon limits in the preview. */
+      phone: z.string().max(24).optional(),
     }))
     .query(async ({ input }) => {
       const { getStorefront } = await import("../db");
@@ -744,6 +806,11 @@ export const storefrontRouter = router({
               totalUsageLimit: row.totalUsageLimit, perCustomerLimit: row.perCustomerLimit,
             },
             cartTotalPaise: base.itemTotalPaise, now: new Date(),
+            ...(await couponUsageCounts(db, {
+              couponId: row.id,
+              restaurantId: storefront.restaurant.id,
+              phone: (await import("../security/phoneValidation")).normalizePhone(input.phone ?? ""),
+            })),
           });
           if (!r.valid) couponError = r.error;
           else couponDiscountPaise = r.discountPaise;

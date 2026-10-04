@@ -41,6 +41,8 @@ export function useCartQuote(args: {
   slug: string | undefined;
   cart: CartLine[];
   couponCode?: string;
+  /** Needed so the server can evaluate per-customer coupon limits. */
+  phone?: string;
   enabled?: boolean;
 }): {
   quote: CartQuote | null;
@@ -56,7 +58,7 @@ export function useCartQuote(args: {
   isError: boolean;
   errorMessage: string | undefined;
 } {
-  const { slug, cart, couponCode, enabled = true } = args;
+  const { slug, cart, couponCode, phone, enabled = true } = args;
 
   const lines = useMemo(
     () =>
@@ -72,7 +74,12 @@ export function useCartQuote(args: {
   const normalizedCoupon = couponCode?.trim().toUpperCase() || undefined;
 
   const query = trpc.storefront.quote.useQuery(
-    { slug: slug ?? "", lines, ...(normalizedCoupon ? { couponCode: normalizedCoupon } : {}) },
+    {
+      slug: slug ?? "",
+      lines,
+      ...(normalizedCoupon ? { couponCode: normalizedCoupon } : {}),
+      ...(phone?.trim() ? { phone: phone.trim() } : {}),
+    },
     {
       enabled: enabled && !!slug && lines.length > 0,
       staleTime: 30_000,

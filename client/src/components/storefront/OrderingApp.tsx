@@ -190,7 +190,15 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
   }, [cart, restaurant]);
 
   const { quote, rupees: serverTotals, isFetching: quoteFetching, errorMessage: quoteError } =
-    useCartQuote({ slug: storefrontSlug, cart, couponCode: couponInput });
+    useCartQuote({
+      slug: storefrontSlug,
+      cart,
+      couponCode: couponInput,
+      // Lets the server apply per-customer coupon limits in the preview, so a
+      // coupon the customer has already spent is refused in the cart rather than
+      // priced here and then rejected at checkout.
+      phone: customerPhone,
+    });
 
   const itemTotal = serverTotals?.itemTotal ?? estimate.itemTotal;
   const packaging = serverTotals?.packaging ?? estimate.packaging;

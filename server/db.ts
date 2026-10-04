@@ -453,7 +453,10 @@ export async function createMenuItem(input: {
     isRecommended: false,
     spiceLevel: null,
     preparationMinutes: null,
-    taxPercent: "0",
+    // NULL = "no per-item rate" -> the restaurant's gst_percentage applies.
+    // Writing "0" here marked every new dish as zero-rated, so the whole cart
+    // was taxed at 0% and the restaurant's configured GST was never collected.
+    taxPercent: null,
     packagingFeePaise: null,
     stock: null,
     maxQuantityPerOrder: 10,
