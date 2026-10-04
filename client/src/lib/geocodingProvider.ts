@@ -250,13 +250,42 @@ export async function reverseGeocode(lat: number, lng: number): Promise<Partial<
   return fallbackNominatimReverse(lat, lng);
 }
 
+/**
+ * Nominatim fallback reverse geocoder.
+ *
+ * Two problems this fixes:
+ *  - No timeout. If Nominatim hung, the promise never settled, so area/city/PIN
+ *    were never populated and the customer was left staring at an address form
+ *    that silently could not be completed by autofill — with no error. Bounded
+ *    with AbortController, matching the 2.5 s budget used by the server's IP
+ *    lookup.
+ *  - Failures were not cached, so every pin drag re-hit Nominatim (which allows
+ *    at most ~1 req/s) and could rate-limit the app for everyone behind the same
+ *    IP. Negative results are now cached briefly.
+ */
+const NOMINATIM_TIMEOUT_MS = 2_500;
+const NEGATIVE_CACHE_MS = 60_000;
+const negativeReverseCache = new Map<string, number>();
+
 async function fallbackNominatimReverse(lat: number, lng: number): Promise<Partial<GeocodeResult>> {
+  const cacheKey = `${lat.toFixed(5)},${lng.toFixed(5)}`;
+  const failedAt = negativeReverseCache.get(cacheKey);
+  if (failedAt !== undefined) {
+    if (Date.now() - failedAt < NEGATIVE_CACHE_MS) return {};
+    negativeReverseCache.delete(cacheKey);
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), NOMINATIM_TIMEOUT_MS);
   try {
     const res = await fetch(
       `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&zoom=18`,
-      { headers: { "Accept-Language": "en" } }
+      { headers: { "Accept-Language": "en" }, signal: controller.signal }
     );
-    if (!res.ok) return {};
+    if (!res.ok) {
+      negativeReverseCache.set(cacheKey, Date.now());
+      return {};
+    }
     const data = await res.json();
     const addr = data.address ?? {};
     const result: Partial<GeocodeResult> = {
@@ -267,10 +296,14 @@ async function fallbackNominatimReverse(lat: number, lng: number): Promise<Parti
       postalCode: addr.postcode ?? undefined,
       street: addr.road ?? undefined,
     };
-    const cacheKey = `${lat.toFixed(5)},${lng.toFixed(5)}`;
     reverseGeocodeCache.set(cacheKey, result);
     return result;
   } catch {
+    // Includes the abort above. Cache the failure so a slow provider is not
+    // retried on every single pin drag.
+    negativeReverseCache.set(cacheKey, Date.now());
     return {};
+  } finally {
+    clearTimeout(timer);
   }
 }

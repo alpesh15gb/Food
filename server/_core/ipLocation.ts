@@ -52,30 +52,68 @@ export function extractClientIp(headers: Record<string, string | string[] | unde
   return null;
 }
 
+/** IPv4 octets are all in range (the regex already enforces 1-3 digits). */
+function isPublicIpv4(value: string): boolean {
+  const v4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(value);
+  if (!v4) return false;
+  if (v4.slice(1).some((part) => Number(part) > 255)) return false;
+  const a = Number(v4[1]);
+  const b = Number(v4[2]);
+  const c = Number(v4[3]);
+  if (a === 10 || a === 127 || a === 0) return false;
+  if (a === 172 && b >= 16 && b <= 31) return false;
+  if (a === 192 && b === 168) return false;
+  if (a === 169 && b === 254) return false; // link-local / cloud metadata
+  if (a === 100 && b >= 64 && b <= 127) return false; // CGNAT
+  if (a === 192 && b === 0 && c === 2) return false; // TEST-NET-1 (documentation)
+  if (a === 198 && (b === 18 || b === 19)) return false; // 198.18.0.0/15 benchmarking
+  if (a >= 224) return false; // multicast 224/4 + reserved 240.0.0.0/4
+  return true;
+}
+
 export function isPublicIp(value: string): boolean {
-  const ip = value.trim();
+  const ip = value.trim().toLowerCase();
   if (!ip) return false;
-  if (ip === "::1" || ip === "::" || ip.toLowerCase() === "localhost") return false;
-  // IPv4
-  const v4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(ip);
-  if (v4) {
-    const [a, b] = [Number(v4[1]), Number(v4[2])];
-    if (v4.slice(1).some((part) => Number(part) > 255)) return false;
-    if (a === 10 || a === 127 || a === 0) return false;
-    if (a === 172 && b >= 16 && b <= 31) return false;
-    if (a === 192 && b === 168) return false;
-    if (a === 169 && b === 254) return false; // link-local / cloud metadata
-    if (a === 100 && b >= 64 && b <= 127) return false; // CGNAT
-    return true;
-  }
+  if (ip === "::1" || ip === "::" || ip === "localhost") return false;
+
+  // IPv4-mapped (::ffff:a.b.c.d) and IPv4-compatible (::a.b.c.d) IPv6.
+  // Dual-stack listeners hand these to us verbatim, so they must be judged by
+  // the IPv4 rules — skipping straight to the IPv6 branch let
+  // ::ffff:169.254.169.254 (cloud metadata) and ::ffff:127.0.0.1 through as
+  // "public" because the only IPv6 fallback test was `includes(":")`.
+  const mapped = /^::(?:ffff:)?((?:\d{1,3}\.){3}\d{1,3})$/.exec(ip);
+  if (mapped) return isPublicIpv4(mapped[1]);
+
+  if (isPublicIpv4(ip)) return true;
   // IPv6 unique-local (fc00::/7) and link-local (fe80::/10).
-  const lower = ip.toLowerCase();
-  if (/^f[cd][0-9a-f]{2}:/.test(lower)) return false;
-  if (/^fe[89ab][0-9a-f]:/.test(lower)) return false;
-  return lower.includes(":");
+  if (/^f[cd][0-9a-f]{2}:/.test(ip)) return false;
+  if (/^fe[89ab][0-9a-f]:/.test(ip)) return false;
+  return ip.includes(":");
 }
 
 const PROVIDER_TIMEOUT_MS = 2500;
+
+/**
+ * Cache policy.
+ *
+ * A hit is a 10-minute TTL because a mobile carrier CGNAT address really can
+ * move between cities.
+ *
+ * A miss gets a deliberately short 30s TTL instead of being cached for the full
+ * 10 minutes: one transient provider blip (or one exhausted upstream quota)
+ * used to cache `null` and disable the IP fallback for that IP for ten minutes,
+ * so the customer who happened to hit the outage lost their map seed long after
+ * the provider recovered. Short is enough to absorb a retry storm without
+ * outliving the outage.
+ */
+const POSITIVE_TTL_MS = 10 * 60 * 1000;
+const NEGATIVE_TTL_MS = 30 * 1000;
+/**
+ * Hard ceiling on distinct cached IPs. A public storefront with unique visitor
+ * IPs (mobile + CGNAT churn) would otherwise grow this Map without bound for the
+ * life of the process.
+ */
+const MAX_CACHE_ENTRIES = 5000;
 
 /**
  * Resolve an IP to an approximate location.
@@ -94,8 +132,25 @@ export async function locateByIp(ip: string): Promise<IpLocation | null> {
   const result =
     (await fetchIpwho(key)) ?? (await fetchIpapi(key)) ?? null;
 
-  // Short TTL: a mobile carrier CGNAT address can move between cities.
-  cache.set(key, { value: result, expires: Date.now() + 10 * 60 * 1000 });
+  const now = Date.now();
+  // Prune before inserting: expired entries are dead weight, and a public
+  // storefront sees a unique IP per visitor, so the Map must not be append-only.
+  // forEach + delete rather than for..of: this module targets a downlevel
+  // lib where Map iteration is not directly iterable.
+  const stale: string[] = [];
+  cache.forEach((v, k) => { if (v.expires <= now) stale.push(k); });
+  for (const k of stale) cache.delete(k);
+  // Still oversized after pruning (everything fresh): evict oldest-first so the
+  // cache stays a bound on memory rather than on traffic.
+  while (cache.size >= MAX_CACHE_ENTRIES) {
+    const oldest = cache.keys().next();
+    if (oldest.done) break;
+    cache.delete(oldest.value);
+  }
+  cache.set(key, {
+    value: result,
+    expires: now + (result ? POSITIVE_TTL_MS : NEGATIVE_TTL_MS),
+  });
   return result;
 }
 
@@ -164,4 +219,9 @@ async function fetchIpapi(ip: string): Promise<IpLocation | null> {
 /** Exposed for tests / diagnostics. */
 export function _clearIpLocationCache(): void {
   cache.clear();
+}
+
+/** Exposed for tests / diagnostics: how many IPs are currently memoized. */
+export function _ipLocationCacheSize(): number {
+  return cache.size;
 }

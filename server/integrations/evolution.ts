@@ -49,30 +49,29 @@ export function buildSetWebhookPayload(publicWebhookUrl: string) {
 
 /**
  * Evolution v2.3.7 Baileys webhooks carry no documented HMAC signature, so
- * authentication is a shared secret presented either as `?token=` or as an
- * Authorization header (bare or `Bearer <secret>`). Compared constant-time.
- * Never rely on body fields to prove origin.
+ * authentication is a shared secret presented in the Authorization header
+ * (bare or `Bearer <secret>`). Compared constant-time.
+ *
+ * HEADER ONLY. A `?token=` query fallback used to be accepted, which put the
+ * secret in nginx/Express access logs, proxy logs and browser history.
+ * Never rely on body fields to prove origin either.
  */
 export function isValidWhatsappWebhookAuth(
-  queryToken: string | undefined,
   authorizationHeader: string | undefined,
   expectedSecret: string,
 ): boolean {
   if (!expectedSecret) return false;
-  const candidates = [queryToken, authorizationHeader?.replace(/^(Bearer|Token)\s+/i, "")].filter(
-    (v): v is string => typeof v === "string" && v.length > 0,
-  );
+  const presented = authorizationHeader?.replace(/^(Bearer|Token)\s+/i, "");
+  if (typeof presented !== "string" || presented.length === 0) return false;
   const expected = Buffer.from(expectedSecret, "utf8");
-  for (const c of candidates) {
-    const provided = Buffer.from(c, "utf8");
-    if (provided.length !== expected.length) continue;
-    try {
-      if (timingSafeEqual(provided, expected)) return true;
-    } catch {
-      continue;
-    }
+  const provided = Buffer.from(presented, "utf8");
+  // Compare byte lengths before timingSafeEqual (it throws on a length mismatch).
+  if (provided.length !== expected.length) return false;
+  try {
+    return timingSafeEqual(provided, expected);
+  } catch {
+    return false;
   }
-  return false;
 }
 
 // =============================================================================
@@ -198,10 +197,18 @@ export function extractOtpCandidate(text: string | null): string | null {
   return runs.find((r) => r.length === 6) ?? runs[0];
 }
 
-/** Mask digits for logs: "482193" → "48**93". Never log full OTPs in prod. */
+/**
+ * Mask digits for logs: "482193" → "48****".
+ *
+ * Only the first two digits survive. The previous form kept the LAST two as
+ * well ("48**93"), which collapsed a 900,000-value 6-digit space to 10,000 —
+ * a 90x shrink of the brute-force space for anyone holding a log line, and a
+ * direct contradiction of the module header's "production logs never contain
+ * OTP digits" claim. Debug-gated logs are still logs.
+ */
 export function maskOtp(code: string): string {
-  if (code.length <= 4) return "*".repeat(code.length);
-  return `${code.slice(0, 2)}${"*".repeat(code.length - 4)}${code.slice(-2)}`;
+  if (code.length <= 2) return "*".repeat(code.length);
+  return `${code.slice(0, 2)}${"*".repeat(code.length - 2)}`;
 }
 
 // =============================================================================
@@ -226,9 +233,25 @@ export type OtpMatch = { rowId: number; phone: string; purpose: string };
 
 /**
  * Match an inbound OTP against pending verifications.
- * - Skips used/expired/received/attemp-exhausted rows.
- * - Prefers rows explicitly expecting this sender, then most recent.
+ *
+ * - Skips used/expired/received/attempt-exhausted rows.
+ * - A row that DECLARES an expected sender only competes when the inbound
+ *   sender matches it. Rows with no expectation (`expected_sender IS NULL`,
+ *   which is every row today — no caller populates the column) compete on
+ *   recency alone.
  * - Compares via HMAC (timing-safe); the plaintext candidate is discarded.
+ *
+ * Honesty note: `expected_sender` is NOT populated anywhere in the codebase
+ * today (createOtp is called without options), so the "sender-aware" path is
+ * currently inert and ordering is effectively newest-live-row-first. The code is
+ * written so that populating it STRENGTHENS matching and can never weaken it:
+ * a row pinned to a different sender is excluded, never demoted.
+ *
+ * The candidate pool must come from a query filtered to live rows for the
+ * sending phone (see markWhatsappOtpReceived in server/db.ts) — this function
+ * only re-validates and orders what it is given, so an over-broad pool both
+ * costs HMAC work and widens the blast radius of a guess.
+ *
  * Returns the single best match or null. One match max — never fan out.
  */
 export function matchInboundOtp(
@@ -243,17 +266,27 @@ export function matchInboundOtp(
   if (live.length === 0) return null;
 
   const normSender = senderDigits ? senderDigits.replace(/\D/g, "") : null;
-  const keyed = normSender
-    ? live.filter((r) => r.expectedSender && r.expectedSender.replace(/\D/g, "").endsWith(normSender.slice(-10)))
-    : [];
-  // Strongest signal first: explicit sender expectation, then recency.
-  // Unkeyed rows still compete (sender often unknown) — recency decides.
-  const ordered = [...keyed, ...live.filter((r) => !keyed.includes(r))].sort((a, b) => {
-    const aKeyed = keyed.includes(a) ? 0 : 1;
-    const bKeyed = keyed.includes(b) ? 0 : 1;
-    if (aKeyed !== bKeyed) return aKeyed - bKeyed;
-    return b.createdAt.getTime() - a.createdAt.getTime();
-  });
+  // Sender agreement, tolerant of country-code prefixes (compare last 10 digits).
+  const senderAgrees = (r: PendingOtpRow): boolean | null => {
+    const want = (r.expectedSender ?? "").replace(/\D/g, "");
+    if (!want) return null; // unconstrained row
+    if (!normSender) return false; // sender unknown → cannot honour the constraint
+    const tail = normSender.slice(-10);
+    return want.endsWith(tail) || tail.endsWith(want);
+  };
+
+  // Strongest signal first: rows that explicitly expect this sender, then rows
+  // that express no expectation, then most recent. Rows pinned to a DIFFERENT
+  // sender are dropped outright — testing them would let an unrelated sender's
+  // message consume someone else's pending OTP.
+  const ordered = live
+    .filter((r) => senderAgrees(r) !== false)
+    .sort((a, b) => {
+      const aKeyed = senderAgrees(a) === true ? 0 : 1;
+      const bKeyed = senderAgrees(b) === true ? 0 : 1;
+      if (aKeyed !== bKeyed) return aKeyed - bKeyed;
+      return b.createdAt.getTime() - a.createdAt.getTime();
+    });
 
   for (const row of ordered) {
     // Canonical HMAC compare (same construction as verifyOtp). Plaintext
@@ -262,8 +295,17 @@ export function matchInboundOtp(
       if (verifyOtpHash(row.phone, row.purpose, code, row.code)) {
         return { rowId: row.id, phone: row.phone, purpose: row.purpose };
       }
-    } catch {
-      continue;
+    } catch (err) {
+      // verifyOtpHash only THROWS on a configuration fault (OTP_HMAC_SECRET
+      // missing or too short) — never on a candidate mismatch, which returns
+      // false. Swallowing it as "no match" made a misconfigured secret look
+      // exactly like an idle deployment: zero captures and zero errors. Fail
+      // loud instead. One log per call, not per row.
+      console.error(
+        "[Evolution][metric=otp_match_config_error] inbound OTP matching aborted — OTP HMAC secret unusable:",
+        err instanceof Error ? err.message : String(err),
+      );
+      return null;
     }
   }
   return null;

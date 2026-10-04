@@ -3,7 +3,7 @@
  * Wraps all storefront components in a `.storefront` scoped container.
  * Holds ALL state, performs ALL data fetching, routes to screens.
  */
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useLocation } from "wouter";
 import { toast } from "sonner";
 import { X } from "lucide-react";
@@ -61,9 +61,15 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
   const initiatePayment = trpc.storefront.initiatePayment.useMutation();
   const verifyPayment = trpc.storefront.verifyPayment.useMutation();
 
-  const storefront = storefrontQuery.data
-    ? adaptStorefront(storefrontQuery.data)
-    : null;
+  // Memoised on the raw payload. `adaptStorefront` builds fresh `restaurant`,
+  // `menu` and `categories` arrays every call, so without this the returned
+  // identities changed on every render and EVERY downstream useMemo (estimate,
+  // search results, cartQuantities, soldOutLineIds, amountToMinOrder) missed —
+  // re-filtering the whole menu and re-rendering every MenuCard on each keystroke.
+  const storefront = useMemo(
+    () => (storefrontQuery.data ? adaptStorefront(storefrontQuery.data) : null),
+    [storefrontQuery.data]
+  );
   const restaurant = storefront?.restaurant;
   const categories = storefront?.categories ?? [];
   const liveMenu = storefront?.menu ?? [];
@@ -128,22 +134,40 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
   // Re-entry guard: state alone lags a frame, so rapid double-clicks could
   // fire startSecurePayment twice before `processing` flips.
   const paymentInFlight = useRef(false);
-  // Idempotency key for the current checkout attempt. Rotated only when the cart
-  // changes or a payment actually completes, so a retry after a dismissed modal
-  // reuses the same key (server replays the existing order) while a genuinely new
-  // order gets a fresh one.
+  // Idempotency key for the CURRENT checkout attempt.
+  //
+  // It must be minted when an attempt begins, not derived from render-time state:
+  // the previous version regenerated on `[cart, couponInput]`, and the coupon
+  // field commits on every keystroke, so touching it between a failed attempt and
+  // its retry produced a new key — missing the server's replay branch and creating
+  // a second order, a second stock decrement and a second coupon burn.
   const paymentAttemptKeyRef = useRef("");
-  useEffect(() => {
+  const mintAttemptKey = useCallback(() => {
     paymentAttemptKeyRef.current =
       typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
         ? crypto.randomUUID()
         : `ck-${Date.now()}-${Math.random().toString(36).slice(2, 12)}`;
-  }, [cart, couponInput]);
+    return paymentAttemptKeyRef.current;
+  }, []);
+  // Seed once so the very first attempt has a key; a completed or abandoned
+  // payment mints a fresh one for the next genuine attempt.
+  useEffect(() => {
+    mintAttemptKey();
+  }, [mintAttemptKey]);
   const [deliveryAddress, setDeliveryAddress] =
     useState<DeliveryLocation | null>(null);
   const [locationOpen, setLocationOpen] = useState(false);
   const [customerPhone, setCustomerPhone] = useState(
-    () => localStorage.getItem("ck_phone_prefill") ?? ""
+    // Guarded: `window.localStorage` THROWS when storage is blocked (Safari
+    // private mode, third-party-cookie block). An unguarded read here happened
+    // during render, so the storefront never mounted at all.
+    () => {
+      try {
+        return localStorage.getItem("ck_phone_prefill") ?? "";
+      } catch {
+        return "";
+      }
+    }
   );
   const persistPhone = (v: string) => {
     setCustomerPhone(v);
@@ -188,6 +212,26 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
       grandTotal: Math.max(0, itemTotal + packaging + delivery + taxes),
     };
   }, [cart, restaurant]);
+
+  // Hard ceiling on a single line's quantity. The server rejects anything above
+  // `maxQuantityPerOrder` by THROWING, which fails the whole quote and leaves the
+  // customer with a permanent "We could not price your cart" and no way to recover
+  // from inside the cart. Matching the server's own default keeps the two in step.
+  const MAX_LINE_QTY = 20;
+
+  // Per-item ceiling, keyed by menu item id. `maxQuantityPerOrder` is optional
+  // server metadata; when it is absent we fall back to MAX_LINE_QTY.
+  const maxForItem = useCallback(
+    (itemId: string): number => {
+      const menuItem = liveMenu.find((m) => m.id === itemId);
+      const configured = (menuItem as { maxQuantityPerOrder?: number | null })
+        ?.maxQuantityPerOrder;
+      return typeof configured === "number" && configured >= 1
+        ? Math.min(configured, MAX_LINE_QTY)
+        : MAX_LINE_QTY;
+    },
+    [liveMenu]
+  );
 
   const { quote, rupees: serverTotals, isFetching: quoteFetching, errorMessage: quoteError } =
     useCartQuote({
@@ -291,6 +335,13 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
     }
   };
 
+  // A coupon belongs to the restaurant that issued it. Carrying it across a slug
+  // change made the next restaurant's checkout die on "Coupon X is not valid for
+  // this restaurant" while the cart itself correctly reset.
+  useEffect(() => {
+    setCouponInput("");
+  }, [storefrontSlug]);
+
   // --- Cart quantity map (for MenuCard inline steppers) ---
   const cartQuantities = useMemo(() => {
     const map: Record<string, number> = {};
@@ -302,14 +353,60 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
     return map;
   }, [cart]);
 
-  /** Cart lines whose dish is no longer available — their "+" is frozen. */
+  /**
+   * Which cart line a menu card's stepper drives, and how much headroom is left.
+   *
+   * The stepper displays the SUM of all lines for an item, but must never assign
+   * that sum to a single line: two customised lines at qty 1 render "2", so "+"
+   * used to set line 0 to 3 (a cart of 4 after one press) and "-" set it to 1
+   * (no-op, button dead). Instead the stepper mutates ONE line at a time and the
+   * ceiling is the remaining headroom across all lines, so repeated presses walk
+   * the lines down and then remove them.
+   */
+  const itemStepTarget = useCallback(
+    (itemId: string): { lineId: string | null; headroom: number } => {
+      const defaultId = `${itemId}-default`;
+      const lines = cart.filter((line) => line.item.id === itemId);
+      const target =
+        lines.find((l) => l.id === defaultId) ?? lines[0] ?? null;
+      const total = lines.reduce((sum, l) => sum + l.quantity, 0);
+      return { lineId: target?.id ?? null, headroom: Math.max(0, maxForItem(itemId) - total) };
+    },
+    [cart, maxForItem]
+  );
+
+  /**
+   * Cart lines whose dish is no longer available — their "+" is frozen.
+   *
+   * Availability must come from the LIVE menu, not from the snapshot frozen into
+   * `line.item` when the dish was added and round-tripped through localStorage.
+   * Reading the snapshot meant a dish that sold out since the last visit still
+   * looked available (so the customer built an order the server refuses), while a
+   * dish that came back stayed frozen forever.
+   */
+  const availabilityByItemId = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const item of liveMenu) map.set(item.id, item.availability);
+    return map;
+  }, [liveMenu]);
+
+  const isLineAvailable = useCallback(
+    (line: CartLine): boolean => {
+      const live = availabilityByItemId.get(line.item.id);
+      // A dish that is no longer on the menu at all cannot be ordered.
+      if (live === undefined) return false;
+      return live === "AVAILABLE";
+    },
+    [availabilityByItemId]
+  );
+
   const soldOutLineIds = useMemo(() => {
     const ids = new Set<string>();
     for (const line of cart) {
-      if (line.item.availability !== "AVAILABLE") ids.add(line.id);
+      if (!isLineAvailable(line)) ids.add(line.id);
     }
     return ids;
-  }, [cart]);
+  }, [cart, isLineAvailable]);
 
   // --- Search & filter ---
   const results = useMemo(
@@ -352,24 +449,38 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
           )
     );
 
-  // For MenuCard inline quantity: resolve the line the stepper should drive.
-  // Plain adds use `${itemId}-default`, but a customised line gets a unique
-  // `${itemId}-${Date.now()}` id — matching only the `-default` id left the
-  // stepper with nothing to mutate, so its − and + buttons did nothing at all
-  // for any customised item.
-  const changeItemQty = (itemId: string, quantity: number) => {
+  // For MenuCard inline quantity: mutate ONE line at a time. See itemStepTarget
+  // for why the displayed sum must never be assigned to a single line.
+  const changeItemQty = (itemId: string, delta: number) => {
     setCart((current) => {
-      const defaultIndex = current.findIndex(
-        (line) => line.id === `${itemId}-default`
-      );
+      const lines = current.filter((line) => line.item.id === itemId);
+      if (!lines.length) return current;
       const target =
-        defaultIndex !== -1
-          ? defaultIndex
-          : current.findIndex((line) => line.item.id === itemId);
-      if (target === -1) return current;
-      if (quantity < 1) return current.filter((_, i) => i !== target);
+        lines.find((l) => l.id === `${itemId}-default`) ?? lines[0];
+      const index = current.findIndex((l) => l.id === target.id);
+      if (index === -1) return current;
+
+      const ceiling = maxForItem(itemId);
+      const total = lines.reduce((sum, l) => sum + l.quantity, 0);
+
+      if (delta < 0) {
+        // Prefer draining this line; only remove it once it is already at 1 so a
+        // single press never deletes a customised line outright.
+        if (target.quantity > 1) {
+          return current.map((line, i) =>
+            i === index ? { ...line, quantity: line.quantity - 1 } : line
+          );
+        }
+        return current.filter((_, i) => i !== index);
+      }
+
+      // Never exceed the ceiling across all lines for this item.
+      if (total >= ceiling) {
+        toast.error(`Maximum ${ceiling} per order.`);
+        return current;
+      }
       return current.map((line, i) =>
-        i === target ? { ...line, quantity } : line
+        i === index ? { ...line, quantity: line.quantity + 1 } : line
       );
     });
   };
@@ -377,6 +488,14 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
   const simpleAdd = (item: MenuItem) => {
     if (item.availability !== "AVAILABLE") {
       toast.error(`${item.name} is not available right now.`);
+      return;
+    }
+    const ceiling = maxForItem(item.id);
+    const inCart = cart
+      .filter((line) => line.item.id === item.id)
+      .reduce((sum, line) => sum + line.quantity, 0);
+    if (inCart >= ceiling) {
+      toast.error(`Maximum ${ceiling} per order.`);
       return;
     }
     setCart((current) => {
@@ -426,6 +545,15 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
 
   const addCustomItem = () => {
     if (!selected) return;
+    const ceiling = maxForItem(selected.id);
+    const inCart = cart
+      .filter((line) => line.item.id === selected.id)
+      .reduce((sum, line) => sum + line.quantity, 0);
+    if (inCart + customQty > ceiling) {
+      toast.error(`Maximum ${ceiling} per order.`);
+      return;
+    }
+    if (customQty < 1) return;
     const groups = selected.addonGroups ?? [];
     const variants = selected.variants ?? [];
     const variant = variants.find((v) => v.id === variantId) ?? null;
@@ -566,6 +694,16 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
         description: "Please try again in a moment.",
       });
     }
+    // A coupon the server has already refused must not be forwarded: it made
+    // createOrderFromValidatedCart throw mid-checkout, leaving the cart
+    // unorderable until the customer guessed to empty the field.
+    const typedCoupon = couponInput.trim();
+    if (typedCoupon && quote && !quote.couponApplied) {
+      return toast.error(
+        quote.couponError ?? `Coupon "${typedCoupon.toUpperCase()}" could not be applied.`,
+        { description: "Clear the coupon field to continue without it." }
+      );
+    }
     // Prefer the server's own verdict; fall back to the local comparison only
     // while the quote is still loading. `quote.belowMinimum` mirrors checkout.
     if (quote?.belowMinimum) {
@@ -613,6 +751,11 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
     }
     paymentInFlight.current = true;
     setProcessing(true);
+    // Mint per attempt: a retry after a failed/dismissed payment must REUSE this
+    // key so the server replays the existing order rather than creating a second
+    // one. Only a genuinely new attempt (cart changed, or a payment completed)
+    // should get a fresh key.
+    if (!paymentAttemptKeyRef.current) mintAttemptKey();
     try {
       const dropPincode = /^\d{6}$/.test(deliveryAddress.postalCode ?? "")
         ? deliveryAddress.postalCode
@@ -732,7 +875,7 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
           selectedVariantId: line.selectedVariantId ?? undefined,
           specialInstructions: line.note,
         })),
-        ...(couponInput.trim()
+        ...(couponInput.trim() && quote?.couponApplied
           ? { couponCode: couponInput.trim().toUpperCase() }
           : {}),
         address: {
@@ -814,6 +957,9 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
             }
             // Clear the cart so back-button can't re-pay the same lines.
             clearCart();
+            // The order is settled: the next attempt is a genuinely new order and
+            // must not replay this one.
+            mintAttemptKey();
             // Persist the tracking token so confirmation/tracking can authenticate.
             const paidToken = created.trackingToken ?? "";
             navigate(
@@ -990,6 +1136,8 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
           taxes={taxes}
           onMenu={goMenu}
           onQuantity={changeQty}
+          maxQuantityFor={maxForItem}
+          canIncreaseLine={isLineAvailable}
           onCheckout={startSecurePayment}
           processing={processing}
           customerPhone={customerPhone}
@@ -1119,7 +1267,8 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
             query={query}
             onAdd={openItem}
             cartQuantities={cartQuantities}
-            onQuantityChange={changeItemQty}
+            onStep={changeItemQty}
+            stepHeadroomFor={(id) => itemStepTarget(id).headroom}
           />
         </div>
 
@@ -1136,6 +1285,7 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
         quantity={totalQuantity}
         total={grandTotal}
         disabled={processing}
+        pricingPending={quoteFetching}
         onClick={() => setCartOpen(true)}
       />
 
@@ -1183,6 +1333,7 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
                 delivery={delivery}
                 taxes={taxes}
                 onQuantity={changeQty}
+                maxQuantityFor={maxForItem}
                 onCheckout={startSecurePayment}
                 processing={processing}
                 customerPhone={customerPhone}

@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from "react";
 import { ArrowRight, ShoppingBag } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { formatINR } from "@/lib/types";
@@ -14,6 +15,7 @@ export default function CartSidebar({
   delivery,
   taxes,
   onQuantity,
+  maxQuantityFor,
   onCheckout,
   processing,
   customerPhone,
@@ -38,6 +40,8 @@ export default function CartSidebar({
   delivery: number;
   taxes: number;
   onQuantity: (id: string, qty: number) => void;
+  /** Per-item ceiling, so "+" freezes before the server rejects the whole quote. */
+  maxQuantityFor?: (itemId: string) => number;
   onCheckout: () => void;
   processing: boolean;
   customerPhone: string;
@@ -161,6 +165,7 @@ export default function CartSidebar({
                       value={line.quantity}
                       onChange={(next) => onQuantity(line.id, next)}
                       canIncrease={!soldOut}
+                      max={maxQuantityFor?.(line.item.id)}
                       removeLabel={`Remove ${line.item.name}`}
                     />
                   </div>
@@ -270,11 +275,14 @@ export default function CartSidebar({
 /**
  * Coupon input.
  *
- * Validation is the server's job, but the *timing* of the request is ours:
- * validating on every keystroke sent "SAVE20" as four separate quotes and
- * flashed "Coupon \"S\" is not valid" under the field while the customer was
- * still typing. Commits are debounced, and committed on Enter or blur.
+ * Validation is the server's job, but the *timing* of the request is ours. Each
+ * quote runs the full `getStorefront` (six sequential queries) plus variant and
+ * modifier lookups, so committing on every keystroke meant typing "SAVE20" fired
+ * six of them and left six cache entries. The field now keeps local draft state
+ * and commits once, after a short idle debounce — or immediately on Enter/blur.
  */
+const COUPON_DEBOUNCE_MS = 500;
+
 function CouponField({
   couponCode,
   onCouponCodeChange,
@@ -290,6 +298,37 @@ function CouponField({
   couponDiscount?: number;
   pricingPending?: boolean;
 }) {
+  const [draft, setDraft] = useState(couponCode);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const committedRef = useRef(couponCode);
+
+  // Adopt an externally-changed value (e.g. an offer chip prefilled it) without
+  // clobbering what the customer is mid-way through typing.
+  useEffect(() => {
+    if (couponCode !== committedRef.current) {
+      committedRef.current = couponCode;
+      setDraft(couponCode);
+    }
+  }, [couponCode]);
+
+  useEffect(() => () => {
+    if (timerRef.current) clearTimeout(timerRef.current);
+  }, []);
+
+  const commit = (value: string) => {
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = null;
+    if (value === committedRef.current) return;
+    committedRef.current = value;
+    onCouponCodeChange(value);
+  };
+
+  const schedule = (value: string) => {
+    setDraft(value);
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => commit(value), COUPON_DEBOUNCE_MS);
+  };
+
   // Only report the server's verdict once the field has settled, otherwise the
   // message describes a half-typed code rather than what the customer entered.
   const settled = !pricingPending;
@@ -305,11 +344,11 @@ function CouponField({
       </label>
       <input
         id="cart-coupon"
-        value={couponCode}
-        onChange={(e) => onCouponCodeChange(e.target.value.toUpperCase())}
-        onBlur={() => onCouponCodeChange(couponCode)}
+        value={draft}
+        onChange={(e) => schedule(e.target.value.toUpperCase())}
+        onBlur={() => commit(draft)}
         onKeyDown={(e) => {
-          if (e.key === "Enter") onCouponCodeChange(couponCode);
+          if (e.key === "Enter") commit(draft);
         }}
         placeholder="Enter code"
         maxLength={48}

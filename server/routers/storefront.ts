@@ -9,7 +9,6 @@ import {
   createRazorpayPaymentOrder,
   getRazorpayConfig,
   confirmPayment,
-  handleRazorpayWebhook,
 } from "../integrations/razorpay";
 
 // --- Issue 4: Strict address validation ---
@@ -193,7 +192,16 @@ export const storefrontRouter = router({
       if (!ipLimit.allowed) {
         throw new Error(`Too many requests. Please try again in ${ipLimit.retryAfterSeconds} seconds.`);
       }
-      const result = await createOtp(phone);
+      const result = await createOtp(phone, {
+        // Inbound WhatsApp OTP capture correlates a message against pending OTPs.
+        // The inbound sender for a customer-supplied code IS that customer, so
+        // recording it lets the matcher require the message to come from the same
+        // number — otherwise any sender's code-looking message is tested against
+        // every other customer's pending OTP. The column was added by migration
+        // 0010 but no caller ever populated it, leaving the documented
+        // "sender-aware" correlation permanently dead.
+        expectedSender: phone,
+      });
       // Actually deliver the code. Previously the OTP was created, hashed and
       // stored, then `sendOtp` returned success — the only use of `result.code`
       // was a dev-only console log. The customer advanced to the "enter code"
@@ -396,9 +404,16 @@ export const storefrontRouter = router({
       postalCode: z.string().regex(/^\d{6}$/).optional(),
     }))
     .query(async ({ input }) => {
-      const { checkServiceability, validateGeoLocation, selectBestOutlet, parseRadiusKm } = await import("../domain/locationService");
+      const {
+        checkServiceability,
+        validateGeoLocation,
+        selectBestOutlet,
+        findNearestOutlet,
+        parseRadiusKm,
+        resolveRadiusKm,
+      } = await import("../domain/locationService");
       const { getDb, parseGstRate } = await import("../db");
-      const { restaurants, outlets } = await import("../../drizzle/schema");
+      const { restaurants, restaurantSchedules, outlets } = await import("../../drizzle/schema");
       const { eq } = await import("drizzle-orm");
 
       // Validate coordinates server-side
@@ -433,19 +448,29 @@ export const storefrontRouter = router({
         return { serviceable: false as const, reason: "NO_ACTIVE_OUTLET" as const, outletName: null, distanceKm: null };
       }
 
-      // Capture full outlet rows for diagnostics — db.select() returns every
-      // column including latitudeNum/longitudeNum numeric mirrors, which
-      // selectBestOutlet consumes via outletCoordinates (numerics preferred).
-      let capturedOutlets: any[] = [];
-      const getOutlets = async (restId: string) => {
-        const rows = (await db.select().from(outlets).where(eq(outlets.restaurantId, restId))) as any[];
-        capturedOutlets = rows;
-        return rows as any;
-      };
+      // ONE outlet load, ONE selection. The previous version loaded the outlet
+      // rows three times (once to guess a pickup pincode for the provider check,
+      // once inside the authoritative service, once again for logging) and could
+      // therefore bind the provider pair-check to a DIFFERENT outlet than the one
+      // finally selected. Outlets are a handful of rows for one restaurant, and
+      // selection is deterministic, so a single snapshot is both cheaper and the
+      // only way the pair-check and the chosen outlet cannot disagree.
+      const capturedOutlets = (await db.select().from(outlets).where(eq(outlets.restaurantId, restaurant.id))) as any[];
+      const getOutlets = async () => capturedOutlets;
 
-      // Thread restaurant delivery radius into outlet selection.
-      const defaultRadiusKm = restaurant.deliveryRadiusKm ? parseFloat(String(restaurant.deliveryRadiusKm)) : 5;
-      const effectiveDefaultRadiusKm = Number.isFinite(defaultRadiusKm) ? defaultRadiusKm : 5;
+      // Opening hours + temporary closures. This check used to load the outlets
+      // table only, so at 23:30 for a kitchen that closes at 23:00 it answered
+      // {serviceable:true}, the client proceeded, and the authoritative
+      // pre-payment gate in db.ts threw "Restaurant is currently closed." — a
+      // guaranteed-to-fail order that the customer had already been told was fine.
+      const schedules = (await db.select().from(restaurantSchedules)
+        .where(eq(restaurantSchedules.restaurantId, restaurant.id))) as any[];
+
+      // One shared, clamped radius policy. This endpoint used to accept any
+      // finite number as the default radius — including the string "0", which
+      // makes every customer "outside the delivery area" — and unlike
+      // locationService.parseRadiusKm it had no 100km upper bound.
+      const effectiveDefaultRadiusKm = resolveRadiusKm(restaurant.deliveryRadiusKm);
       // Shadowfax Unified API has NO route/lat-lng serviceability endpoint
       // (spec §6, §41) — provider checks are pincode-pair based. Radius
       // selection runs first; the provider then verifies outlet pincode
@@ -459,69 +484,69 @@ export const storefrontRouter = router({
       const providerAdvisory = providerConfigured
         ? (await resolveShadowfaxConfig(restaurant.id).catch(() => null))?.environment === "staging"
         : false;
-      // Pre-select the nearest outlet so the provider pair-check can use its
-      // pincode (radius gate still runs authoritatively inside the service).
-      let outletPincode: string | null = null;
-      if (providerConfigured && input.postalCode) {
-        try {
-          const allOutlets = await getOutlets(restaurant.id) as Array<{ postalCode?: unknown; [k: string]: unknown }>;
-          const sel = selectBestOutlet(
-            allOutlets as never,
-            loc.latitude!, loc.longitude!,
-            effectiveDefaultRadiusKm,
-          );
-          const pin = sel ? String((sel.outlet as { postalCode?: unknown }).postalCode ?? "") : "";
-          outletPincode = /^\d{6}$/.test(pin) ? pin : null;
-        } catch {
-          outletPincode = null;
-        }
-      }
       const result = await checkServiceability(
         loc.latitude!,
         loc.longitude!,
         restaurant.id,
         getOutlets,
-        providerConfigured && input.postalCode && outletPincode
-          ? async () => {
+        providerConfigured && input.postalCode
+          ? async (_pickup, _drop, selectedOutlet) => {
+              // `selectedOutlet` is the outlet checkServiceability actually chose,
+              // so the pickup pincode can never drift from the serving outlet.
+              const pin = String(selectedOutlet?.postalCode ?? "");
+              const pickupPincode = /^\d{6}$/.test(pin) ? pin : null;
+              if (!pickupPincode) {
+                console.log("[serviceability] shadowfax pair skipped", {
+                  slug: input.slug, outletId: selectedOutlet?.id ?? null, deliveryPincode: input.postalCode,
+                  reason: "outlet has no usable pickup pincode",
+                });
+                return { serviceable: true, estimatedMinutes: undefined };
+              }
               const provider = getDeliveryProvider(restaurant.id);
               try {
                 const pair = await (provider as unknown as {
                   checkPincodeServiceability: (i: { pickupPincode: string; deliveryPincode: string }) => Promise<{ serviceable: boolean }>;
-                }).checkPincodeServiceability({ pickupPincode: outletPincode as string, deliveryPincode: input.postalCode! });
+                }).checkPincodeServiceability({ pickupPincode, deliveryPincode: input.postalCode! });
                 console.log("[serviceability] shadowfax pair", {
-                  slug: input.slug, outletPincode, deliveryPincode: input.postalCode, serviceable: pair.serviceable,
+                  slug: input.slug, outletId: selectedOutlet?.id ?? null, outletPincode: pickupPincode, deliveryPincode: input.postalCode, serviceable: pair.serviceable,
                 });
                 return { serviceable: pair.serviceable, estimatedMinutes: undefined };
               } catch (err) {
                 console.log("[serviceability] shadowfax pair error", {
-                  slug: input.slug, outletPincode, deliveryPincode: input.postalCode,
+                  slug: input.slug, outletId: selectedOutlet?.id ?? null, outletPincode: pickupPincode, deliveryPincode: input.postalCode,
                   error: err instanceof Error ? err.message : String(err),
                 });
+                // Re-thrown so the domain layer reports SHADOWFAX_UNAVAILABLE.
+                // A provider we could not reach must never be reported to the
+                // customer as "our delivery partner doesn't serve this pincode".
                 throw err;
               }
             }
           : undefined,
-        { defaultRadiusKm: effectiveDefaultRadiusKm, providerAdvisory },
+        {
+          defaultRadiusKm: effectiveDefaultRadiusKm,
+          providerAdvisory,
+          availability: {
+            isOpen: restaurant.isOpen,
+            tempClosureStart: restaurant.tempClosureStart,
+            tempClosureEnd: restaurant.tempClosureEnd,
+            tempClosureMessage: restaurant.tempClosureMessage,
+            schedules,
+          },
+        },
       );
 
-      const diagSelection = (() => {
-        try {
-          return selectBestOutlet(capturedOutlets as never, loc.latitude!, loc.longitude!, effectiveDefaultRadiusKm);
-        } catch {
-          return null;
-        }
-      })();
-      const loggedSelectedId = diagSelection
-        ? (diagSelection.outlet as { id?: unknown }).id ?? (result.serviceable ? (result as { outletId?: unknown }).outletId ?? null : null)
-        : (result.serviceable ? (result as { outletId?: unknown }).outletId ?? null : null);
+      // Diagnostics reuse the same snapshot + the same selection rules; the
+      // authoritative result still decides the response.
+      const diagSelection = selectBestOutlet(capturedOutlets as never, loc.latitude!, loc.longitude!, effectiveDefaultRadiusKm)
+        ?? findNearestOutlet(capturedOutlets as never, loc.latitude!, loc.longitude!);
+      const loggedSelectedId = (diagSelection?.outlet as { id?: unknown } | undefined)?.id ?? null;
       const loggedRadiusKm = diagSelection
         ? parseRadiusKm((diagSelection.outlet as { deliveryRadiusKm?: unknown }).deliveryRadiusKm, effectiveDefaultRadiusKm)
         : effectiveDefaultRadiusKm;
       const loggedDistanceKm = diagSelection
         ? Math.round(diagSelection.distanceKm * 100) / 100
-        : (result.serviceable
-            ? (result as { distanceKm?: number }).distanceKm ?? null
-            : (result as { distanceKm?: number | null }).distanceKm ?? null);
+        : ((result as { distanceKm?: number | null }).distanceKm ?? null);
       const loggedProviderServiceable = result.serviceable
         ? (result as { providerServiceable?: unknown }).providerServiceable ?? "NOT_CHECKED"
         : result.reason === "SHADOWFAX_NOT_SERVICEABLE"
@@ -535,6 +560,7 @@ export const storefrontRouter = router({
         selectedOutletId: loggedSelectedId, radiusKm: loggedRadiusKm, distanceKm: loggedDistanceKm,
         serviceable: result.serviceable, reason: result.serviceable ? "SERVICEABLE" : result.reason,
         providerServiceable: loggedProviderServiceable,
+        detail: result.serviceable ? undefined : result.detail,
       });
 
       return result;
@@ -739,25 +765,52 @@ export const storefrontRouter = router({
       // joined back to `restaurants.id` through menu_items, exactly as checkout does.
       const tenantId = storefront.restaurant.id;
       const variantIds = Array.from(new Set(input.lines.flatMap(l => l.selectedVariantId ? [l.selectedVariantId] : [])));
-      const variantMap = new Map<string, number>();
+      // variantId -> { pricePaise, menuItemId, isAvailable }. The owning item and
+      // availability are carried too: tenant membership alone is not enough.
+      const variantMap = new Map<string, { pricePaise: number; menuItemId: string; isAvailable: boolean }>();
       if (variantIds.length) {
         const rows = await db
-          .select({ id: productVariants.id, pricePaise: productVariants.pricePaise })
+          .select({
+            id: productVariants.id,
+            pricePaise: productVariants.pricePaise,
+            menuItemId: productVariants.menuItemId,
+            isAvailable: productVariants.isAvailable,
+          })
           .from(productVariants)
           .innerJoin(menuItems, eq(productVariants.menuItemId, menuItems.id))
           .where(and(inArray(productVariants.id, variantIds), eq(menuItems.restaurantId, tenantId)));
-        for (const r of rows) variantMap.set(r.id, r.pricePaise);
+        for (const r of rows) {
+          variantMap.set(r.id, {
+            pricePaise: r.pricePaise,
+            menuItemId: r.menuItemId,
+            isAvailable: r.isAvailable ?? true,
+          });
+        }
       }
       const allOptIds = Array.from(new Set(input.lines.flatMap(l => l.modifierOptionIds ?? [])));
-      const optMap = new Map<string, { pricePaise: number; name: string }>();
+      // optionId -> { pricePaise, name, menuItemId, isAvailable }
+      const optMap = new Map<string, { pricePaise: number; name: string; menuItemId: string; isAvailable: boolean }>();
       if (allOptIds.length) {
         const rows = await db
-          .select({ id: addonOptions.id, pricePaise: addonOptions.pricePaise, name: addonOptions.name })
+          .select({
+            id: addonOptions.id,
+            pricePaise: addonOptions.pricePaise,
+            name: addonOptions.name,
+            isAvailable: addonOptions.isAvailable,
+            menuItemId: addonGroups.menuItemId,
+          })
           .from(addonOptions)
           .innerJoin(addonGroups, eq(addonOptions.addonGroupId, addonGroups.id))
           .innerJoin(menuItems, eq(addonGroups.menuItemId, menuItems.id))
           .where(and(inArray(addonOptions.id, allOptIds), eq(menuItems.restaurantId, tenantId)));
-        for (const r of rows) optMap.set(r.id, { pricePaise: r.pricePaise, name: r.name });
+        for (const r of rows) {
+          optMap.set(r.id, {
+            pricePaise: r.pricePaise,
+            name: r.name,
+            menuItemId: r.menuItemId,
+            isAvailable: r.isAvailable ?? true,
+          });
+        }
       }
       // Any id the tenant cannot see is a hard error rather than a silent 0-priced
       // line: silently quoting ₹0 would under-charge the restaurant and hide a bug.
@@ -765,6 +818,32 @@ export const storefrontRouter = router({
       const unknownOptionIds = allOptIds.filter(id => !optMap.has(id));
       if (unknownVariantIds.length || unknownOptionIds.length) {
         throw new Error("Some selected options do not belong to this restaurant's menu.");
+      }
+      // PROVENANCE. Checkout verifies that a variant belongs to the line's own
+      // menu item and that every modifier is still available; the quote did not,
+      // so it happily priced a line carrying ANOTHER dish's ₹0 variant or a
+      // since-disabled option — and then checkout refused the same basket. That
+      // surfaced as an unreachable total rather than a quote the customer could
+      // act on. Reachable via a restored cart, whose ids were never re-validated.
+      for (const l of input.lines) {
+        if (l.selectedVariantId) {
+          const v = variantMap.get(l.selectedVariantId)!;
+          if (v.menuItemId !== l.menuItemId) {
+            throw new Error(`Variant "${l.selectedVariantId}" does not belong to this dish.`);
+          }
+          if (!v.isAvailable) {
+            throw new Error("A selected option is currently unavailable.");
+          }
+        }
+        for (const optId of l.modifierOptionIds ?? []) {
+          const o = optMap.get(optId)!;
+          if (o.menuItemId !== l.menuItemId) {
+            throw new Error(`Modifier "${optId}" does not belong to this dish.`);
+          }
+          if (!o.isAvailable) {
+            throw new Error("A selected option is currently unavailable.");
+          }
+        }
       }
       const catalog = storefront.items.map(i => ({
         id: i.id, name: i.name, pricePaise: i.pricePaise,
@@ -776,7 +855,7 @@ export const storefrontRouter = router({
       }));
       const lines = input.lines.map(l => ({
         menuItemId: l.menuItemId, quantity: l.quantity,
-        variantPricePaise: l.selectedVariantId ? (variantMap.get(l.selectedVariantId) ?? 0) : 0,
+        variantPricePaise: l.selectedVariantId ? (variantMap.get(l.selectedVariantId)?.pricePaise ?? 0) : 0,
         modifiers: (l.modifierOptionIds ?? []).map(id => ({
           optionId: id, name: optMap.get(id)?.name ?? id, pricePaise: optMap.get(id)?.pricePaise ?? 0,
         })),
@@ -906,15 +985,30 @@ export const storefrontRouter = router({
     }),
 
   // =========================================================================
-  // Webhooks — Issue 7: HMAC verification for Razorpay
+  // Razorpay webhooks — see POST /webhooks/razorpay
   // =========================================================================
-  razorpayWebhook: publicProcedure
-    .input(z.object({
-      event: z.string(),
-      payload: z.record(z.string(), z.unknown()),
-      signature: z.string().optional(),
-    }))
-    .mutation(({ input }) => handleRazorpayWebhook(input.event, input.payload, input.signature)),
+  // There is deliberately NO tRPC webhook procedure here any more.
+  //
+  // It was a publicProcedure whose only "verification" compared
+  // JSON.stringify(payload) against Razorpay's signature — an HMAC over the RAW
+  // request bytes, which a re-serialised object can never reproduce. So it could
+  // not verify a genuine webhook, and it was invoked with preVerified:true,
+  // meaning an unauthenticated caller could drive order state changes.
+  //
+  // The real route is registerWebhookRoutes (server/integrations/webhookRoutes.ts),
+  // mounted BEFORE express.json() so the raw body survives, HMAC-verified over
+  // those exact bytes. processRazorpayWebhookEvent now additionally requires a
+  // private proof token that only that route can present, so this path could not
+  // work even if it were re-added.
+  //
+  // Note for operators: docs/APP_FLOW.md and TECHNICAL_DESIGN_DOCUMENT.md still
+  // name the tRPC path as the Razorpay webhook URL. They must be corrected to
+  // POST /webhooks/razorpay.
+  razorpayWebhookRemoved: publicProcedure.query(() => {
+    throw new Error(
+      "This endpoint has been removed. Configure Razorpay to POST to /webhooks/razorpay."
+    );
+  }),
 
   shadowfaxWebhook: publicProcedure
     .input(z.object({

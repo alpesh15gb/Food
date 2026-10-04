@@ -17,6 +17,7 @@ export default function CheckoutScreen({
   onMenu,
   onQuantity,
   canIncreaseLine,
+  maxQuantityFor,
   onCheckout,
   processing,
   customerPhone,
@@ -44,6 +45,8 @@ export default function CheckoutScreen({
   onQuantity: (id: string, qty: number) => void;
   /** Whether a line's "+" is interactive (sold-out dishes are frozen). */
   canIncreaseLine?: (line: CartLine) => boolean;
+  /** Per-item ceiling, so "+" freezes before the server rejects the whole quote. */
+  maxQuantityFor?: (itemId: string) => number;
   onCheckout: () => void;
   processing: boolean;
   customerPhone: string;
@@ -193,6 +196,7 @@ export default function CheckoutScreen({
                     value={line.quantity}
                     onChange={(next) => onQuantity(line.id, next)}
                     canIncrease={canIncreaseLine?.(line) ?? true}
+                    max={maxQuantityFor?.(line.item.id)}
                     removeLabel={`Remove ${line.item.name}`}
                   />
                 </div>

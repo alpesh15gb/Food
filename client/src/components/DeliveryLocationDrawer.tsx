@@ -76,6 +76,19 @@ type AccuracyLevel = "HIGH" | "GOOD" | "LOW" | "POOR" | "UNKNOWN";
 // Default map center: center of India (used only until GPS or search provides real coordinates)
 const DEFAULT_MAP_CENTER = { lat: 20.5937, lng: 78.9629 };
 
+/**
+ * Normalise a PIN code to six bare digits.
+ *
+ * Reverse geocoding and place lookup routinely return "560 038", "560038, IN" or a
+ * "+91" prefix. `formValid` and `confirmAddress` both demand /^\d{6}$/, so an
+ * autofilled value containing a space silently left "Confirm Location" disabled
+ * with no field to fix and no message. Applied to EVERY path that writes a
+ * postcode — typing, reverse geocode, place details, and a seeded existing
+ * location — not just the keystroke handler.
+ */
+const normalizePincode = (value: string | null | undefined): string =>
+  (value ?? "").replace(/\D/g, "").slice(0, 6);
+
 // =============================================================================
 // Component
 // =============================================================================
@@ -96,6 +109,8 @@ export default function DeliveryLocationDrawer({
   );
   const [geoState, setGeoState] = useState<GeoLocationState | null>(null);
   const [gpsError, setGpsError] = useState<string | null>(null);
+  /** Accuracy copy for the map/address steps (gpsError only renders on choose_method). */
+  const [accuracyNote, setAccuracyNote] = useState<string | null>(null);
 
   // Address form
   const [flatHouse, setFlatHouse] = useState(existingLocation?.flatHouse ?? "");
@@ -104,7 +119,7 @@ export default function DeliveryLocationDrawer({
   const [landmark, setLandmark] = useState(existingLocation?.landmark ?? "");
   const [area, setArea] = useState(existingLocation?.area ?? "");
   const [city, setCity] = useState(existingLocation?.city ?? "");
-  const [postalCode, setPostalCode] = useState(existingLocation?.postalCode ?? "");
+  const [postalCode, setPostalCode] = useState(normalizePincode(existingLocation?.postalCode));
 
   // Map state
   const mapRef = useRef<google.maps.Map | null>(null);
@@ -132,6 +147,19 @@ export default function DeliveryLocationDrawer({
   const [searchResults, setSearchResults] = useState<PlaceSearchResult[]>([]);
   const [searching, setSearching] = useState(false);
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /**
+   * Monotonic token guarding every async write of address fields.
+   *
+   * `reverseGeocode` and `getPlaceDetails` both resolve out of order with no
+   * cancellation, so a slow GPS reverse-geocode could land AFTER the customer had
+   * already searched and picked a place, overwriting the place's area/city/PIN with
+   * stale GPS-derived values while the coordinates still came from the place. That
+   * mismatched pair (Jayanagar pin + Koramangala PIN) then failed serviceability or,
+   * worse, passed it. Every async field write now checks its token first.
+   */
+  const geoTokenRef = useRef(0);
+  const beginGeoWrite = () => ++geoTokenRef.current;
+  const isCurrentGeoWrite = (token: number) => token === geoTokenRef.current;
 
   const reset = useCallback(() => {
     // Drop any in-flight debounce: a pending lookup resolving after a reset
@@ -211,19 +239,33 @@ export default function DeliveryLocationDrawer({
     const needsConfirmation = result.method === "network_ip" || requiresMapConfirmation(result.level);
     setStep(needsConfirmation ? "map_confirm" : "address_form");
 
-    reverseGeocode(result.latitude, result.longitude).then((geocode) => {
-      if (geocode.area) setArea(geocode.area);
-      if (geocode.city) setCity(geocode.city);
-      if (geocode.postalCode) setPostalCode(geocode.postalCode);
-      if (geocode.street) setStreet(geocode.street);
-    });
+    // Any subsequent user action (Back, a place search) invalidates this write.
+    const token = beginGeoWrite();
+    reverseGeocode(result.latitude, result.longitude)
+      .then((geocode) => {
+        if (!isCurrentGeoWrite(token)) return;
+        if (geocode.area) setArea(geocode.area);
+        if (geocode.city) setCity(geocode.city);
+        if (geocode.postalCode) setPostalCode(normalizePincode(geocode.postalCode));
+        if (geocode.street) setStreet(geocode.street);
+      })
+      .catch(() => {
+        // Silently unhandled rejections left the address form permanently
+        // unfillable by autofill, with no error anywhere.
+      });
 
     // Tell the customer how much to trust the pin instead of silently showing it.
+    // This must be a value the map step actually renders: `gpsError` is only shown
+    // on choose_method, so the metre-bearing accuracy copy was written to a banner
+    // that was not mounted and never seen.
     if (needsConfirmation) {
       const note = describeAccuracy(result.level, result.accuracyMeters);
-      if (result.level !== "HIGH" && result.level !== "GOOD") setGpsError(note);
+      if (result.level !== "HIGH" && result.level !== "GOOD") {
+        setGpsError(note);
+        setAccuracyNote(note);
+      }
     }
-  }, [locateByIp]);
+  }, [locateByIp, beginGeoWrite, isCurrentGeoWrite]);
 
   // --- Method B: Search Address (Google Places Autocomplete) ---
   const handleSearchInput = useCallback((value: string) => {
@@ -253,7 +295,10 @@ export default function DeliveryLocationDrawer({
     setSearchResults([]);
     setSearching(true);
 
+    // A place selection supersedes any in-flight GPS reverse-geocode.
+    const token = beginGeoWrite();
     const details = await getPlaceDetails(placeId);
+    if (!isCurrentGeoWrite(token)) return;
     setSearching(false);
 
     if (details) {
@@ -269,11 +314,11 @@ export default function DeliveryLocationDrawer({
       });
       if (details.area) setArea(details.area);
       if (details.city) setCity(details.city);
-      if (details.postalCode) setPostalCode(details.postalCode);
+      if (details.postalCode) setPostalCode(normalizePincode(details.postalCode));
       if (details.street) setStreet(details.street);
       setStep("map_confirm");
     }
-  }, []);
+  }, [beginGeoWrite, isCurrentGeoWrite]);
 
   // --- Map ready handler ---
   const handleMapReady = useCallback((map: google.maps.Map) => {
@@ -317,15 +362,23 @@ export default function DeliveryLocationDrawer({
   useEffect(() => {
     if (step !== "map_confirm" || !geoState?.mapInteracted) return;
     const timer = setTimeout(() => {
-      reverseGeocode(geoState.latitude, geoState.longitude).then((result) => {
-        if (result.area) setArea(result.area);
-        if (result.city) setCity(result.city);
-        if (result.postalCode) setPostalCode(result.postalCode);
-        if (result.street) setStreet(result.street);
-      });
+      // Dragging the pin is a deliberate user action, so it takes ownership of the
+      // address fields from here on.
+      const token = beginGeoWrite();
+      reverseGeocode(geoState.latitude, geoState.longitude)
+        .then((result) => {
+          if (!isCurrentGeoWrite(token)) return;
+          if (result.area) setArea(result.area);
+          if (result.city) setCity(result.city);
+          if (result.postalCode) setPostalCode(normalizePincode(result.postalCode));
+          if (result.street) setStreet(result.street);
+        })
+        .catch(() => {
+          /* a failed reverse-geocode must not throw unhandled */
+        });
     }, 1000);
     return () => clearTimeout(timer);
-  }, [step, geoState?.latitude, geoState?.longitude, geoState?.mapInteracted]);
+  }, [step, geoState?.latitude, geoState?.longitude, geoState?.mapInteracted, beginGeoWrite, isCurrentGeoWrite]);
 
   // Cleanup idle listener and the debounced lookup
   useEffect(() => {
@@ -499,6 +552,19 @@ export default function DeliveryLocationDrawer({
                 </p>
               </div>
 
+              {/* The measured accuracy, on the step where the pin is corrected.
+                  Previously written to `gpsError`, which renders only on
+                  choose_method — so the customer was told nothing here. */}
+              {accuracyNote && (
+                <div
+                  role="status"
+                  className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-700"
+                >
+                  <AlertTriangle className="mr-1 inline h-3 w-3" />
+                  {accuracyNote}
+                </div>
+              )}
+
               {(accuracyLevel === "POOR" || accuracyLevel === "UNKNOWN") && (
                 <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-700">
                   <AlertTriangle className="mr-1 inline h-3 w-3" />
@@ -634,7 +700,7 @@ export default function DeliveryLocationDrawer({
                     // demands six bare digits, so an autofilled value with a space
                     // or "+91" silently left the Confirm button disabled with no
                     // field to fix — strip to digits as the customer types.
-                    onChange={(e) => setPostalCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                    onChange={(e) => setPostalCode(normalizePincode(e.target.value))}
                     inputMode="numeric"
                     autoComplete="postal-code"
                     maxLength={6}

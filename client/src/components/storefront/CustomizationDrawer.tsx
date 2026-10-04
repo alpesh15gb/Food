@@ -94,6 +94,14 @@ export default function CustomizationDrawer({
     return count < min;
   });
 
+  // The header labels variants "Required", so enforce it. `missingRequired` only
+  // inspected addon groups, letting a dish with variants be ordered with none
+  // selected — a constraint neither the client nor the server actually applied.
+  const missingVariant =
+    variants.some((v) => v.isAvailable) && !selectedVariant;
+
+  const blocked = missingRequired.length > 0 || missingVariant;
+
   return (
     <Drawer open={!!item} onOpenChange={(open) => !open && onClose()}>
       <DrawerContent
@@ -302,6 +310,15 @@ export default function CustomizationDrawer({
             </p>
           )}
 
+          {missingVariant && (
+            <p
+              className="mt-4 text-xs font-bold"
+              style={{ color: "var(--sf-red)" }}
+            >
+              Please choose a variant to continue.
+            </p>
+          )}
+
           {/* Special instructions */}
           <div className="mt-6">
             <label
@@ -315,6 +332,10 @@ export default function CustomizationDrawer({
               id="special-note"
               value={note}
               onChange={(event) => onNote(event.target.value)}
+              // Mirrors the server's `specialInstructions: z.string().max(300)`.
+              // Without this a longer note was accepted here and then rejected the
+              // whole order with a raw validation error and no cart-side hint.
+              maxLength={300}
               placeholder="Less spicy, no onions..."
               className="mt-2 min-h-20 w-full resize-none rounded-[var(--sf-radius-btn)] border p-3 text-sm outline-none focus:ring-2"
               style={{
@@ -341,7 +362,7 @@ export default function CustomizationDrawer({
         >
           <Button
             onClick={onAdd}
-            disabled={missingRequired.length > 0}
+            disabled={blocked}
             className="h-13 w-full cursor-pointer touch-manipulation rounded-[var(--sf-radius-btn)] text-sm font-extrabold tabular-nums text-white transition-all duration-200 hover:brightness-110 active:scale-95 disabled:cursor-not-allowed [-webkit-tap-highlight-color:transparent]"
             style={{ background: "var(--sf-primary)" }}
           >

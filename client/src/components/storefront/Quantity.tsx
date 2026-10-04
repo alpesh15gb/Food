@@ -5,6 +5,7 @@ export default function Quantity({
   onChange,
   compact = false,
   min = 1,
+  max,
   removable = true,
   canIncrease = true,
   removeLabel = "Remove item",
@@ -22,6 +23,13 @@ export default function Quantity({
    */
   min?: number;
   /**
+   * Hard ceiling for this line. The server rejects a quantity above
+   * `maxQuantityPerOrder` by THROWING, which errors the whole cart quote — so
+   * without a ceiling, tapping "+" past the limit bricked the cart with a
+   * permanent "We could not price your cart". Omit for no client-side ceiling.
+   */
+  max?: number;
+  /**
    * Whether 0 may be emitted. At the floor the decrement button becomes an
    * explicit remove and reports 0, which `OrderingApp.changeQty` treats as
    * "drop this line". Pass false where 0 is not a valid state (the customisation
@@ -35,6 +43,8 @@ export default function Quantity({
 }) {
   const atFloor = value <= min;
   const canRemove = removable && min <= 1 && atFloor;
+  const atCeiling = max != null && value >= max;
+  const plusDisabled = !canIncrease || atCeiling;
 
   return (
     <div
@@ -69,7 +79,8 @@ export default function Quantity({
       <button
         type="button"
         aria-label="Increase quantity"
-        disabled={!canIncrease}
+        disabled={plusDisabled}
+        title={atCeiling ? `Maximum ${max} per order` : undefined}
         onClick={() => onChange(value + 1)}
         className="grid h-full min-h-[44px] w-9 min-w-[44px] cursor-pointer touch-manipulation place-items-center rounded-r-[var(--sf-radius-btn)] outline-none transition-colors duration-150 hover:bg-[var(--sf-primary-soft)] active:scale-95 focus-visible:ring-2 focus-visible:ring-[var(--sf-primary)] focus-visible:ring-inset disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent [-webkit-tap-highlight-color:transparent]"
         style={{ color: "var(--sf-primary)" }}

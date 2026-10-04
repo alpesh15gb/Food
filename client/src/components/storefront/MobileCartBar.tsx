@@ -6,11 +6,14 @@ export default function MobileCartBar({
   quantity,
   total,
   disabled = false,
+  pricingPending = false,
   onClick,
 }: {
   quantity: number;
   total: number;
   disabled?: boolean;
+  /** True while the server reprices, so a stale total is not shown as final. */
+  pricingPending?: boolean;
   onClick: () => void;
 }) {
   return (
@@ -38,8 +41,20 @@ export default function MobileCartBar({
               <span className="block truncate text-xs font-semibold text-white/70">
                 {quantity} item{quantity !== 1 ? "s" : ""} in your order
               </span>
-              <span className="block truncate text-base font-extrabold tabular-nums">
+              {/* This bar is the first number the customer reads, so it must not
+                  present a stale total as final while the server reprices. */}
+              <span
+                className={`block truncate text-base font-extrabold tabular-nums ${
+                  pricingPending && !disabled ? "opacity-70" : ""
+                }`}
+                aria-busy={pricingPending || undefined}
+              >
                 {disabled ? "Processing…" : formatINR(total)}
+                {pricingPending && !disabled && (
+                  <span className="ml-1.5 text-xs font-semibold text-white/70">
+                    updating…
+                  </span>
+                )}
               </span>
             </span>
             <span className="flex items-center gap-2 text-sm font-extrabold">

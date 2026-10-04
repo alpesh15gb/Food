@@ -8,14 +8,18 @@ export default function MenuStream({
   query,
   onAdd,
   cartQuantities = {},
-  onQuantityChange,
+  onStep,
+  stepHeadroomFor,
 }: {
   items: MenuItem[];
   activeCategory: string;
   query: string;
   onAdd: (item: MenuItem) => void;
   cartQuantities?: Record<string, number>;
-  onQuantityChange?: (id: string, qty: number) => void;
+  /** Applies a relative -1/+1 change to one cart line for this item. */
+  onStep?: (id: string, delta: number) => void;
+  /** Remaining headroom before the per-order ceiling for this item. */
+  stepHeadroomFor?: (id: string) => number;
 }) {
   // Empty states are handled query-aware below (never fall back to the
   // full menu on zero results).
@@ -74,9 +78,8 @@ export default function MenuStream({
             item={item}
             onAdd={() => onAdd(item)}
             cartQuantity={cartQuantities[item.id] ?? 0}
-            onQuantityChange={
-              onQuantityChange ? (next) => onQuantityChange(item.id, next) : undefined
-            }
+            onStep={onStep ? (delta: number) => onStep(item.id, delta) : undefined}
+            stepHeadroom={stepHeadroomFor?.(item.id)}
           />
         ))}
       </div>

@@ -147,7 +147,13 @@ export function calculateAuthoritativeQuote(args: {
     if ((qtyByItem.get(line.menuItemId) ?? 0) > maxQty) {
       throw new CartValidationError(`Invalid quantity for "${catalogItem.name}".`);
     }
-    if (catalogItem.stock != null && line.quantity > catalogItem.stock) {
+    // Stock must be judged on the AGGREGATED quantity for the item, exactly as
+    // max-quantity is 25 lines above. Checking `line.quantity` alone let a basket
+    // split across lines (every customisation add mints a fresh line) pass the
+    // quote for more units than exist, and only fail at the atomic stock
+    // decrement during checkout — after the customer had entered their address and
+    // phone and reached payment.
+    if (catalogItem.stock != null && (qtyByItem.get(line.menuItemId) ?? 0) > catalogItem.stock) {
       throw new CartValidationError(`Insufficient stock for "${catalogItem.name}".`);
     }
 
@@ -207,8 +213,16 @@ export function calculateAuthoritativeQuote(args: {
     }
   }
 
-  // Apply restaurant-level packaging if items don't have individual packaging
-  const packagingFee = totalItemPackaging > 0 ? totalItemPackaging : packagingFeePaise;
+  // Packaging is ADDITIVE: the restaurant's flat per-order fee PLUS any per-dish
+  // packaging. The previous code used whichever was non-zero, so a single dish
+  // carrying a per-item fee silently cancelled the restaurant's own packaging fee
+  // for the entire basket — the kitchen paid for the box and charged nothing.
+  // The restaurant fee stays a flat per-order charge (it is not multiplied by
+  // item count); only the per-dish part scales with quantity.
+  const packagingFee = packagingFeePaise + totalItemPackaging;
+  if (!Number.isSafeInteger(packagingFee) || packagingFee > PG_INT_MAX) {
+    throw new CartValidationError("Cart total exceeds maximum allowed value.");
+  }
 
   // Combined discounts (general + coupon), capped to item total. Tax applies net of discounts.
   const discountPaise = Math.min(Math.round(rawDiscount), itemTotalPaise);

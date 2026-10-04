@@ -113,6 +113,35 @@ describe("Quantity stepper", () => {
     expect(html).toContain("min-w-6");
     expect(html).not.toMatch(/class="w-6 /);
   });
+
+  it("freezes plus at the ceiling so the server never rejects the whole quote", () => {
+    // Tapping "+" past maxQuantityPerOrder made the server THROW, which failed
+    // the cart quote entirely and left a permanent "We could not price your cart".
+    const atCeiling = render(<Quantity value={20} onChange={() => {}} max={20} />);
+    expect(isDisabled(atCeiling, "Increase quantity")).toBe(true);
+    expect(atCeiling).toContain("Maximum 20 per order");
+
+    const belowCeiling = render(<Quantity value={19} onChange={() => {}} max={20} />);
+    expect(isDisabled(belowCeiling, "Increase quantity")).toBe(false);
+  });
+
+  it("keeps minus live at the ceiling so a line is never stuck", () => {
+    const html = render(<Quantity value={20} onChange={() => {}} max={20} />);
+    expect(isDisabled(html, "Decrease quantity")).toBe(false);
+  });
+
+  it("treats no max as unbounded", () => {
+    const html = render(<Quantity value={99} onChange={() => {}} />);
+    expect(isDisabled(html, "Increase quantity")).toBe(false);
+  });
+
+  it("combines a sold-out freeze with a ceiling without disabling removal", () => {
+    const html = render(
+      <Quantity value={1} onChange={() => {}} canIncrease={false} max={20} />
+    );
+    expect(isDisabled(html, "Increase quantity")).toBe(true);
+    expect(isDisabled(html, "Remove item")).toBe(false);
+  });
 });
 
 describe("CartSidebar", () => {
@@ -245,5 +274,29 @@ describe("CartSidebar", () => {
     expect(html).toContain("Sold out");
     expect(html).toContain('aria-label="Remove Hyderabadi Biryani"');
     expect(plusDisabled(html)).toBe(true);
+  });
+
+  it("freezes a line's plus at the per-item ceiling", () => {
+    const html = render(
+      <CartSidebar
+        {...base}
+        cart={[line({ quantity: 20 })]}
+        totalQuantity={20}
+        maxQuantityFor={() => 20}
+      />
+    );
+    expect(plusDisabled(html)).toBe(true);
+  });
+
+  it("keeps plus live below the ceiling", () => {
+    const html = render(
+      <CartSidebar
+        {...base}
+        cart={[line({ quantity: 2 })]}
+        totalQuantity={2}
+        maxQuantityFor={() => 20}
+      />
+    );
+    expect(plusDisabled(html)).toBe(false);
   });
 });

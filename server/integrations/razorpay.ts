@@ -450,6 +450,33 @@ export async function confirmPayment(input: {
   return { success: true };
 }
 
+/** Live payment payload subset this module binds to an order. */
+export type RazorpayLivePayment = {
+  id?: string; amount?: number; currency?: string; status?: string; order_id?: string;
+};
+
+/**
+ * Bind a live Razorpay payment to the order that claims it. Pure so the money
+ * decision is testable without a network or a database; every check fails
+ * CLOSED ("mismatch") — only an exact capture of the right amount, in INR, on
+ * the stored provider order confirms.
+ *
+ * The currency check used to be missing entirely (`currency` was destructured
+ * and then ignored), so a capture in a different currency carrying the same
+ * numeric paise amount would have confirmed the order.
+ */
+export function classifyRazorpayPayment(
+  p: RazorpayLivePayment,
+  expected: { amountPaise: number; providerOrderId: string | null }
+): "match" | "mismatch" {
+  if (p.status !== "captured") return "mismatch"; // only settled money confirms (auto-capture default)
+  if (typeof p.amount !== "number" || p.amount !== expected.amountPaise) return "mismatch";
+  // Missing currency fails closed too — we only ever sell in INR.
+  if (typeof p.currency !== "string" || p.currency.toUpperCase() !== "INR") return "mismatch";
+  if (expected.providerOrderId && p.order_id && p.order_id !== expected.providerOrderId) return "mismatch";
+  return "match";
+}
+
 /**
  * Fetch the live payment from Razorpay and bind it to this order.
  * Returns "match" | "mismatch" | "unknown" (API unreachable — caller decides).
@@ -471,13 +498,8 @@ async function fetchRazorpayPayment(
     if (res.status === 401 || res.status === 403) return "unknown"; // creds wrong — signature path already decided
     if (res.status === 404) return "mismatch"; // no such payment
     if (!res.ok) return "unknown";
-    const p = (await res.json()) as {
-      id?: string; amount?: number; currency?: string; status?: string; order_id?: string;
-    };
-    if (p.status !== "captured") return "mismatch"; // only settled money confirms (auto-capture default)
-    if (typeof p.amount !== "number" || p.amount !== expected.amountPaise) return "mismatch";
-    if (expected.providerOrderId && p.order_id && p.order_id !== expected.providerOrderId) return "mismatch";
-    return "match";
+    const p = (await res.json()) as RazorpayLivePayment;
+    return classifyRazorpayPayment(p, expected);
   } catch {
     return "unknown";
   } finally {
@@ -517,11 +539,17 @@ export async function handleRazorpayWebhook(
     // NOTE (P0 MP-001): HMAC must be computed over the raw request body bytes,
     // not JSON.stringify(payload). The tRPC webhook path receives parsed JSON,
     // so signature verification here is best-effort and WILL reject real
-    // Razorpay webhooks. Use POST /webhooks/razorpay (raw-body) in production.
-    // Kept for backwards-compat with existing dashboard test buttons only.
+    // Razorpay webhooks. It is also no longer trusted to change state: even a
+    // signature that passes here cannot present processRazorpayWebhookEvent's
+    // module-private raw-route proof, so it is refused below. Production uses
+    // POST /webhooks/razorpay (raw-body) exclusively.
     const rawBody = JSON.stringify(payload);
-    const expectedSig = createHmac("sha256", webhookSecret).update(rawBody).digest("hex");
-    if (expectedSig.length !== signature.length || !timingSafeEqual(Buffer.from(expectedSig), Buffer.from(signature))) {
+    const expectedBuf = Buffer.from(createHmac("sha256", webhookSecret).update(rawBody).digest("hex"), "utf8");
+    const providedBuf = Buffer.from(signature, "utf8");
+    // Compare BYTE lengths, not `str.length`: a signature containing non-ASCII
+    // has more UTF-8 bytes than UTF-16 code units, so the old guard let it
+    // through and timingSafeEqual threw — an uncaught 500 on the tRPC path.
+    if (expectedBuf.length !== providedBuf.length || !timingSafeEqual(expectedBuf, providedBuf)) {
       console.warn("[Razorpay] Webhook signature verification failed (tRPC best-effort path — use /webhooks/razorpay for production)");
       return { processed: false, error: "Invalid webhook signature." };
     }
@@ -538,14 +566,42 @@ export async function handleRazorpayWebhookRaw(args: {
   event: string;
   payload: Record<string, unknown>;
 }): Promise<{ processed: boolean; error?: string }> {
-  return processRazorpayWebhookEvent(args.event, args.payload);
+  return processRazorpayWebhookEvent(args.event, args.payload, RAW_ROUTE_PROOF);
 }
+
+/**
+ * Module-private capability proving the caller verified the HMAC over the exact
+ * provider bytes. A Symbol is used (rather than a boolean flag) precisely
+ * because a plain `preVerified: true` is forgeable by ANY caller — the tRPC
+ * `storefront.razorpayWebhook` procedure is a publicProcedure and could reach
+ * the state machine through it. Only this module can mint the proof, so the
+ * verified raw-body route (webhookRoutes.ts) is the single path that can drive
+ * order state changes.
+ */
+const RAW_ROUTE_PROOF: unique symbol = Symbol("razorpay.rawRouteVerified");
+
+type RawRouteProof = typeof RAW_ROUTE_PROOF;
 
 /** Shared idempotent event processor (DB dedup + state transitions). */
 async function processRazorpayWebhookEvent(
   event: string,
   payload: Record<string, unknown>,
+  proof?: RawRouteProof,
 ): Promise<{ processed: boolean; error?: string }> {
+  // Fail closed: refuse any caller that cannot present the module-private proof,
+  // i.e. anything that did not arrive through the verified raw-body route. The
+  // parameter is optional purely so the untrusted tRPC path compiles — omitting
+  // it is exactly the case that must be refused.
+  if (proof !== RAW_ROUTE_PROOF) {
+    console.error(
+      `[Razorpay] Refusing to process "${event}" — caller did not verify the webhook HMAC over the raw body. ` +
+      "Use POST /webhooks/razorpay.",
+    );
+    return {
+      processed: false,
+      error: "Unverified webhook source. POST this event to /webhooks/razorpay instead.",
+    };
+  }
   const db = await getDb();
   if (!db) throw new Error("The database connection is not available.");
 
@@ -704,16 +760,17 @@ async function handlePaymentFailed(payment: Record<string, unknown>) {
       })
       .where(eq(payments.orderId, orderId));
 
-    // Issue 13: Keep order at PENDING_PAYMENT (not CANCELLED) — allow retry
-    const order = (await tx.select().from(orders).where(eq(orders.id, orderId)).limit(1))[0];
-    if (order && order.status === "PENDING_PAYMENT") {
-      await tx.insert(orderStatusHistory).values({
-        id: nanoid(18),
-        orderId,
-        status: "PENDING_PAYMENT",
-        note: `Payment attempt failed: ${failureReason}. Customer may retry.`,
-      });
-    }
+    // Issue 13: order STAYS at PENDING_PAYMENT (not CANCELLED) so the customer
+    // can retry. It therefore never ENTERS that state again here, so appending
+    // an orderStatusHistory row per failure only spammed the public tracking
+    // timeline (`getOrderForTracking` replays every row) with an unbounded
+    // duplicate "Payment attempt failed" entry — Razorpay retries failed
+    // payments, so a customer retrying three times produced three rows for one
+    // state. The audit signal stays on the payments row above (status FAILED +
+    // failureReason, which the admin surfaces) plus this log line.
+    console.warn(
+      `[Razorpay] payment attempt failed (order ${orderId}, payment ${providerPaymentId}): ${failureReason}`,
+    );
   });
 }
 

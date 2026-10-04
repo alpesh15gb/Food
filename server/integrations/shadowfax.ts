@@ -217,6 +217,22 @@ export class ShadowfaxApiError extends ShadowfaxError {
     this.name = "ShadowfaxApiError";
   }
 }
+/**
+ * The provider answered, but not with a verdict: 5xx / 429 / 408, or a body we
+ * could not read. This MUST stay distinct from "not serviceable".
+ *
+ * Serviceability is a coverage claim ("we do not deliver to this pincode") and
+ * it is permanent-sounding to the customer. A gateway error, a timeout or a DNS
+ * failure says nothing about coverage — reporting them as unserviceable blocked
+ * every checkout in production with a wrong, unfixable message. Callers map this
+ * to an unavailability reason instead.
+ */
+export class ShadowfaxUnavailableError extends ShadowfaxError {
+  constructor(message: string, providerMessage?: string) {
+    super("UNAVAILABLE", message, providerMessage);
+    this.name = "ShadowfaxUnavailableError";
+  }
+}
 
 // =============================================================================
 // Types
@@ -667,18 +683,31 @@ async function sfFetch(args: {
     });
   } catch (err) {
     if (err instanceof Error && err.name === "AbortError") throw new ShadowfaxTimeoutError();
-    throw new ShadowfaxApiError("Shadowfax request failed.", err instanceof Error ? err.message : undefined);
+    // DNS / connection reset / TLS failure: we never reached a verdict, so this
+    // is an unavailability, not a provider answer.
+    throw new ShadowfaxUnavailableError(
+      "Shadowfax could not be reached.",
+      err instanceof Error ? err.message : undefined
+    );
   } finally {
     clearTimeout(timer);
+  }
+  // Transport / status normalization happens BEFORE the body is parsed: a 5xx
+  // error page must never be handed to a caller as if it were a verdict.
+  if (res.status === 401 || res.status === 403) {
+    throw new ShadowfaxAuthenticationError(`HTTP ${res.status}`);
+  }
+  if (res.status === 408 || res.status === 425 || res.status === 429 || res.status >= 500) {
+    throw new ShadowfaxUnavailableError(`Shadowfax is unavailable (HTTP ${res.status}).`);
+  }
+  if (!res.ok) {
+    throw new ShadowfaxApiError(`Shadowfax rejected the request (HTTP ${res.status}).`);
   }
   let json: unknown = null;
   try {
     json = await res.json();
   } catch {
     throw new ShadowfaxApiError(`Shadowfax returned non-JSON (HTTP ${res.status}).`);
-  }
-  if (res.status === 401 || res.status === 403) {
-    throw new ShadowfaxAuthenticationError(`HTTP ${res.status}`);
   }
   return json;
 }
@@ -749,9 +778,20 @@ class ShadowfaxUnifiedProvider implements DeliveryProvider {
       try {
         json = await sfFetch({ path: `/v1/clients/serviceability/?${qs.toString()}`, method: "GET", token, restaurantId: this.restaurantId });
       } catch (err) {
-        if (err instanceof ShadowfaxAuthenticationError) throw err;
-        console.error(`[Shadowfax][metric=serviceability_failure] service=${service} pincode=${pincode} err=${err instanceof Error ? err.message : String(err)}`);
-        return { ok: false, raw: null };
+        // Every transport-level failure used to collapse into {ok:false}, which
+        // the caller reported as SHADOWFAX_NOT_SERVICEABLE — "we don't serve
+        // this pincode". A timeout, a DNS failure or an HTTP 503 says NOTHING
+        // about coverage, so it must propagate as an unavailability instead.
+        // The order still fails closed (the caller maps the throw to
+        // SHADOWFAX_UNAVAILABLE); only the reason the customer sees is honest.
+        const unavailable = err instanceof ShadowfaxError
+          ? err
+          : new ShadowfaxUnavailableError(
+              "Shadowfax serviceability lookup could not be completed.",
+              err instanceof Error ? err.message : String(err)
+            );
+        console.error(`[Shadowfax][metric=serviceability_unavailable] service=${service} pincode=${pincode} err=${unavailable.message}`);
+        throw unavailable;
       }
       // Spec shape: serviceability entries per pincode; treat an explicit
       // serviceable/servicable true (or status success with non-empty data)
@@ -899,29 +939,43 @@ class ShadowfaxUnifiedProvider implements DeliveryProvider {
   }
 }
 
+/** Keys under which the serviceability endpoint may return per-pincode rows. */
+const COLLECTION_KEYS = ["data", "results", "pincodes", "serviceability"] as const;
+/** Keys the endpoint uses for an explicit per-record coverage marker. */
+const SERVICEABLE_KEYS = ["serviceable", "servicable", "is_serviceable", "is_servicable", "available", "active"] as const;
+
 /** Lenient reader for the serviceability payload shape. Exported for tests. */
 export function isPincodeMarkedServiceable(json: unknown, pincode: string): boolean {
   if (!json || typeof json !== "object") return false;
   const root = json as Record<string, unknown>;
   const candidates: unknown[] = [];
-  for (const key of ["data", "results", "pincodes", "serviceability"]) {
+  for (const key of COLLECTION_KEYS) {
     const v = root[key];
     if (Array.isArray(v)) candidates.push(...v);
     else if (v && typeof v === "object") candidates.push(v);
   }
+  // An empty collection ({"status":"success","data":[]}) falls through to the
+  // envelope so an explicit envelope-level marker is still honoured.
   if (candidates.length === 0) candidates.push(root);
   for (const c of candidates) {
     if (!c || typeof c !== "object") continue;
     const rec = c as Record<string, unknown>;
     const pin = String(rec.pincode ?? rec.pin_code ?? rec.pin ?? "");
     if (pin && pin !== pincode) continue;
-    for (const k of ["serviceable", "servicable", "is_serviceable", "is_servicable", "available", "active"]) {
+    for (const k of SERVICEABLE_KEYS) {
       if (typeof rec[k] === "boolean") return rec[k] as boolean;
       if (typeof rec[k] === "string" && ["true", "yes", "y", "1"].includes((rec[k] as string).toLowerCase())) return true;
       if (typeof rec[k] === "number") return (rec[k] as number) !== 0;
     }
+    // `status: "success"` says the REQUEST completed — it is not a coverage
+    // claim for a pincode. It only counts as a positive marker when the record
+    // is scoped to the pincode we asked about. The previous `&& !pin` shortcut
+    // made the empty-payload envelope above return true: nothing was pushed, the
+    // envelope was read as a record with an empty pin, and "success" promoted it
+    // to serviceable. That is failing OPEN on an empty payload — precisely what
+    // the rule at the bottom of this function forbids.
     const status = String(rec.status ?? "").toLowerCase();
-    if (status === "success" && !pin) return true;
+    if (status === "success" && pin && pin === pincode) return true;
   }
   // Explicit false anywhere for our pincode fails closed; absence of any
   // positive marker also fails closed (never assume serviceable).

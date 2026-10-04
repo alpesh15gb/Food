@@ -53,19 +53,20 @@ function upsert(sender: string, text: string, opts?: { fromMe?: boolean; id?: st
   };
 }
 
-describe("webhook auth (shared secret, no body trust)", () => {
+describe("webhook auth (shared secret in the header only, no body trust)", () => {
   const secret = "test-webhook-secret-abc123";
-  it("accepts query token and Authorization header forms", () => {
-    expect(isValidWhatsappWebhookAuth(secret, undefined, secret)).toBe(true);
-    expect(isValidWhatsappWebhookAuth(undefined, secret, secret)).toBe(true);
-    expect(isValidWhatsappWebhookAuth(undefined, `Bearer ${secret}`, secret)).toBe(true);
+  it("accepts the Authorization header, bare or Bearer-prefixed", () => {
+    expect(isValidWhatsappWebhookAuth(secret, secret)).toBe(true);
+    expect(isValidWhatsappWebhookAuth(`Bearer ${secret}`, secret)).toBe(true);
+    expect(isValidWhatsappWebhookAuth(`Token ${secret}`, secret)).toBe(true);
   });
   it("rejects wrong, missing, and empty-secret configs", () => {
-    expect(isValidWhatsappWebhookAuth("nope", undefined, secret)).toBe(false);
-    expect(isValidWhatsappWebhookAuth(undefined, undefined, secret)).toBe(false);
-    expect(isValidWhatsappWebhookAuth(secret, undefined, "")).toBe(false);
+    expect(isValidWhatsappWebhookAuth("nope", secret)).toBe(false);
+    expect(isValidWhatsappWebhookAuth(undefined, secret)).toBe(false);
+    expect(isValidWhatsappWebhookAuth("", secret)).toBe(false);
+    expect(isValidWhatsappWebhookAuth(secret, "")).toBe(false);
     // The Evolution API key is NOT an accepted webhook credential.
-    expect(isValidWhatsappWebhookAuth("evolution-api-key", undefined, secret)).toBe(false);
+    expect(isValidWhatsappWebhookAuth("evolution-api-key", secret)).toBe(false);
   });
 });
 
@@ -139,8 +140,13 @@ describe("OTP extraction (keyword-gated, 4–8 digits)", () => {
     expect(messageHasOtpKeyword("hello there")).toBe(false);
   });
   it("masking never leaks full codes", () => {
-    expect(maskOtp("482193")).toBe("48**93");
+    // INTENTIONAL CHANGE: this used to be "48**93". Two surviving digits out of
+    // six shrank the brute-force space 90x and broke the module header's claim
+    // that production logs never contain OTP digits. Only the first two survive.
+    expect(maskOtp("482193")).toBe("48****");
     expect(maskOtp("482193")).not.toContain("482193");
+    // Only the first two digits may ever be readable in a log.
+    expect(maskOtp("482193")).not.toContain("93");
   });
 });
 

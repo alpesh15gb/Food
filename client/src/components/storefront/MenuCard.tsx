@@ -7,12 +7,21 @@ export default function MenuCard({
   item,
   onAdd,
   cartQuantity = 0,
-  onQuantityChange,
+  onStep,
+  stepHeadroom,
 }: {
   item: MenuItem;
   onAdd: () => void;
   cartQuantity?: number;
-  onQuantityChange?: (next: number) => void;
+  /**
+   * Applies a RELATIVE change (-1 / +1) rather than an absolute quantity.
+   * The card shows the sum across every cart line for this item, so writing an
+   * absolute value back to one line made the displayed count and the real cart
+   * diverge (and could silently exceed the per-order maximum).
+   */
+  onStep?: (delta: number) => void;
+  /** Remaining headroom before the per-order ceiling; freezes "+" at 0. */
+  stepHeadroom?: number;
 }) {
   const unavailable = item.availability !== "AVAILABLE";
   const hasDiscount = item.originalPrice && item.originalPrice > item.price;
@@ -81,12 +90,16 @@ export default function MenuCard({
             </span>
           )}
         </div>
-        {cartQuantity > 0 && onQuantityChange ? (
+        {cartQuantity > 0 && onStep ? (
           <Quantity
             compact
             value={cartQuantity}
-            onChange={onQuantityChange}
+            // Quantity reports an absolute target; the card works in deltas, so
+            // translate. A drop to 0 (the trash affordance) is a decrement too:
+            // changeItemQty removes the line only once it is already at 1.
+            onChange={(next) => onStep(next > cartQuantity ? 1 : -1)}
             canIncrease={!unavailable}
+            max={(stepHeadroom ?? 0) + cartQuantity}
             removeLabel={`Remove ${item.name}`}
           />
         ) : (

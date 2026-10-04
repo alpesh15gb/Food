@@ -139,19 +139,57 @@ export async function preloadMaps(): Promise<boolean> {
 
 const LOAD_TIMEOUT_MS = 25000;
 
+/**
+ * Marks a script tag that fired `load` without producing a usable
+ * `window.google.maps` (revoked key, `loading=async` failure). Such a tag can
+ * never satisfy a later attempt, so it must be discarded — otherwise the retry
+ * path below attaches `load`/`error` listeners to a script that has already fired
+ * both, the promise never settles, and the map stays blank forever with no error
+ * and no way out but a full page reload.
+ */
+function discardUnusableMapsScript(reason: string) {
+  const tag = document.querySelector<HTMLScriptElement>('script[data-maps-loader="1"]');
+  if (tag) {
+    console.error(`Discarding unusable Google Maps script tag: ${reason}`);
+    tag.remove();
+  }
+}
+
 function loadMapScript(): Promise<void> {
   // Already loaded (drawer remounts, StrictMode, retries).
   if (window.google?.maps) return Promise.resolve();
   const existing = document.querySelector<HTMLScriptElement>('script[data-maps-loader="1"]');
   if (existing) {
     return new Promise((resolve, reject) => {
-      existing.addEventListener("load", () => resolve(), { once: true });
+      const settle = () => {
+        if (window.google?.maps) resolve();
+        else {
+          // It fired, but the API never arrived. Clean up so the NEXT attempt
+          // starts fresh instead of waiting on a dead tag forever.
+          discardUnusableMapsScript("loaded without window.google.maps");
+          reject(new Error("MAPS_SCRIPT_ERROR"));
+        }
+      };
+      existing.addEventListener("load", settle, { once: true });
       existing.addEventListener("error", () => reject(new Error("MAPS_SCRIPT_ERROR")), { once: true });
+      // The tag may already have fired both events before we attached listeners,
+      // in which case neither will ever fire again. Settle on the next tick so we
+      // do not hang forever.
+      if ((existing as HTMLScriptElement & { readyState?: string }).readyState === "complete") {
+        settle();
+      } else {
+        setTimeout(() => {
+          if (!window.google?.maps) {
+            discardUnusableMapsScript("load event never arrived");
+            reject(new Error("MAPS_SCRIPT_TIMEOUT"));
+          }
+        }, LOAD_TIMEOUT_MS);
+      }
     });
   }
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
-      document.querySelector<HTMLScriptElement>('script[data-maps-loader="1"]')?.remove();
+      discardUnusableMapsScript("load timeout");
       reject(new Error("MAPS_SCRIPT_TIMEOUT"));
     }, LOAD_TIMEOUT_MS);
     mapsScriptUrl().then((src) => {
@@ -163,6 +201,11 @@ function loadMapScript(): Promise<void> {
       // and anonymous CORS on a CDN without ACAO headers blocks execution.
       script.onload = () => {
         clearTimeout(timer);
+        if (!window.google?.maps) {
+          discardUnusableMapsScript("onload without window.google.maps");
+          reject(new Error("MAPS_SCRIPT_ERROR"));
+          return;
+        }
         resolve();
       };
       script.onerror = () => {
@@ -215,6 +258,10 @@ export function MapView({
       return;
     }
     if (!window.google?.maps) {
+      // Discard the dead tag so a retry can actually retry (see
+      // discardUnusableMapsScript). Without this the tag stayed in <head> and
+      // every subsequent attempt hung on a promise that could never settle.
+      discardUnusableMapsScript("init found no window.google.maps");
       const message = "Could not load the map. Check your connection (or ad-blocker) and retry.";
       setLoadError(message);
       onLoadError?.(message);
