@@ -43,6 +43,8 @@ type StorefrontPayload = {
     deliveryFeePaise: number;
     packagingFeePaise: number;
     minOrderPaise: number;
+    /** Configured GST rate as a string (numeric column), e.g. "5", "12", "18". */
+    gstPercentage?: string | null;
     isOpen: boolean;
     opensAt: string;
     description: string | null;
@@ -91,6 +93,8 @@ type StorefrontPayload = {
     dietaryType: "veg" | "nonveg" | "egg";
     tag: string | null;
     availability: "AVAILABLE" | "SOLD_OUT" | "SCHEDULED_UNAVAILABLE" | "OUT_OF_STOCK" | "DISABLED";
+    /** Remaining units when the kitchen tracks stock; null means uncapped. */
+    stock?: number | null;
     availableNote: string | null;
     isCustomizable: boolean;
     isBestseller: boolean;
@@ -255,8 +259,15 @@ export function adaptStorefront(data: StorefrontPayload) {
         isAvailable: variant.isAvailable ?? true,
       }));
       const joinedVariants = topLevelVariantsByItem.get(item.id) ?? [];
-      const price = item.offerPricePaise
-        ? rupees(item.offerPricePaise, rupees(item.pricePaise))
+      // Mirror the server's strict offer rule (orderPricing.effectiveUnitPrice): an
+      // offer only counts when 0 < offer < list price. Truthiness alone treated an
+      // offer of 0 as a free item and an offer ABOVE list price as a markdown.
+      const hasRealOffer =
+        item.offerPricePaise != null &&
+        item.offerPricePaise > 0 &&
+        item.offerPricePaise < item.pricePaise;
+      const price = hasRealOffer
+        ? rupees(item.offerPricePaise!, rupees(item.pricePaise))
         : rupees(item.pricePaise);
       return {
         id: item.id,
@@ -264,16 +275,19 @@ export function adaptStorefront(data: StorefrontPayload) {
         name: item.name,
         description: item.description ?? "Prepared fresh by the kitchen.",
         price,
-        originalPrice: item.offerPricePaise ? rupees(item.pricePaise) : undefined,
+        originalPrice: hasRealOffer ? rupees(item.pricePaise) : undefined,
         image: item.imageUrl ?? undefined,
         kind: item.dietaryType,
         tag: item.isBestseller ? "Bestseller" : item.tag ?? undefined,
         tags: item.tags ?? undefined,
         addonGroups: [...embeddedGroups, ...joinedGroups],
         variants: [...embeddedVariants, ...joinedVariants],
-        availability: item.availability === "AVAILABLE" ? "AVAILABLE"
-          : item.availability === "SCHEDULED_UNAVAILABLE" ? "SCHEDULED_UNAVAILABLE"
-          : "SOLD_OUT",
+        availability: item.availability !== "AVAILABLE"
+          // A row can be flagged AVAILABLE while its stock counter sits at zero.
+          // Checkout rejects those, so the menu must not offer them.
+          || (typeof item.stock === "number" && item.stock <= 0)
+          ? (item.availability === "SCHEDULED_UNAVAILABLE" ? "SCHEDULED_UNAVAILABLE" : "SOLD_OUT")
+          : "AVAILABLE",
         availableNote: item.availableNote ?? undefined,
         customizable: item.isCustomizable || embeddedGroups.length + joinedGroups.length > 0 || embeddedVariants.length + joinedVariants.length > 0,
         isBestseller: item.isBestseller,
@@ -304,6 +318,10 @@ export function adaptStorefront(data: StorefrontPayload) {
       deliveryFee: rupees(data.restaurant.deliveryFeePaise),
       packagingFee: rupees(data.restaurant.packagingFeePaise),
       minOrder: rupees(data.restaurant.minOrderPaise),
+      gstPercentage: (() => {
+        const parsed = parseFloat(String(data.restaurant.gstPercentage ?? ""));
+        return Number.isFinite(parsed) && parsed >= 0 && parsed <= 100 ? parsed : 5;
+      })(),
       isOpen: data.restaurant.isOpen,
       description: data.restaurant.description,
       contactPhone: data.restaurant.contactPhone,
