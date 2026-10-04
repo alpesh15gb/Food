@@ -78,20 +78,24 @@ function doesScheduleRuleMatch(rule: ScheduleRule, now: Date): boolean {
   const currentDay = getISTDayOfWeek(now);
   const currentTimeMin = getISTTimeMinutes(now);
 
-  // Day of week check
-  if (rule.dayOfWeek != null && rule.dayOfWeek !== currentDay) {
-    // Check if this could be a cross-midnight match from previous day
-    const prevDay = (currentDay + 6) % 7; // wrap around
-    if (rule.dayOfWeek !== prevDay) return false;
+  // Day-of-week gate.
+  //
+  // A rule only carries over into the next calendar day when it declares BOTH bounds
+  // and closes at or before the time it opens (e.g. 22:00–02:00). Half-open rules —
+  // open-only ("open from 22:00") or close-only ("open until 14:00") — describe a
+  // window on their own day and must NOT spill over. Without this distinction a
+  // Saturday-only "open from 22:00" rule kept the kitchen open all Sunday.
+  const dayScoped = rule.dayOfWeek != null;
+  const dayMatches = !dayScoped || rule.dayOfWeek === currentDay;
+  const prevDay = (currentDay + 6) % 7; // wrap around
+  const spillsIntoToday =
+    dayScoped &&
+    rule.dayOfWeek === prevDay &&
+    rule.openTime != null &&
+    rule.closeTime != null &&
+    parseTimeToMinutes(rule.closeTime) <= parseTimeToMinutes(rule.openTime);
 
-    // For cross-midnight: if closeTime > openTime, it doesn't cross midnight
-    // We handle this in the time check below
-    if (rule.openTime && rule.closeTime) {
-      const openMin = parseTimeToMinutes(rule.openTime);
-      const closeMin = parseTimeToMinutes(rule.closeTime);
-      if (closeMin > openMin) return false; // normal schedule, doesn't cross midnight
-    }
-  }
+  if (!dayMatches && !spillsIntoToday) return false;
 
   // Date range check
   if (rule.startDate && now < rule.startDate) return false;
@@ -129,14 +133,14 @@ function doesScheduleRuleMatch(rule: ScheduleRule, now: Date): boolean {
     }
   }
 
-  // Only openTime set: open from that time onwards
+  // Only openTime set: from that time onwards on the rule's own day (see gate above)
   if (rule.openTime) {
     const openMin = parseTimeToMinutes(rule.openTime);
     if (!Number.isFinite(openMin)) return false;
     return currentTimeMin >= openMin;
   }
 
-  // Only closeTime set: open until that time
+  // Only closeTime set: until that time on the rule's own day (see gate above)
   if (rule.closeTime) {
     const closeMin = parseTimeToMinutes(rule.closeTime);
     if (!Number.isFinite(closeMin)) return false;

@@ -181,3 +181,53 @@ describe("isItemScheduledAvailable", () => {
     })).toBe(false);
   });
 });
+
+/**
+ * Day-boundary regression.
+ *
+ * A rule that names a single day of week must not keep the kitchen open on the
+ * FOLLOWING day unless it declares both bounds and closes at or before its opening
+ * time. Half-open rules previously fell through to an unanchored time comparison, so
+ * a Saturday-only "open from 22:00" rule read as open all Sunday.
+ *
+ * Dates below are UTC; the engine evaluates in IST (UTC+05:30).
+ *   2025-01-18 = Saturday, 2025-01-19 = Sunday, 2025-01-20 = Monday.
+ */
+describe("schedule day-boundary isolation", () => {
+  const saturdayNightOpenFrom10pm: ScheduleRule = { dayOfWeek: 6, openTime: "22:00" };
+  const saturdayUntil2pm: ScheduleRule = { dayOfWeek: 6, closeTime: "14:00" };
+
+  it("open-only rule does not leak into the next day", () => {
+    expect(isScheduledOpen([saturdayNightOpenFrom10pm], new Date("2025-01-18T17:30:00Z"))).toBe(true); // Sat 23:00 IST
+    expect(isScheduledOpen([saturdayNightOpenFrom10pm], new Date("2025-01-19T17:30:00Z"))).toBe(false); // Sun 23:00 IST
+    expect(isScheduledOpen([saturdayNightOpenFrom10pm], new Date("2025-01-19T20:30:00Z"))).toBe(false); // Mon 02:00 IST
+  });
+
+  it("close-only rule does not leak into the next day", () => {
+    expect(isScheduledOpen([saturdayUntil2pm], new Date("2025-01-18T07:30:00Z"))).toBe(true); // Sat 13:00 IST
+    expect(isScheduledOpen([saturdayUntil2pm], new Date("2025-01-19T07:30:00Z"))).toBe(false); // Sun 13:00 IST
+  });
+
+  it("still honours a genuine cross-midnight window", () => {
+    const rule: ScheduleRule = { dayOfWeek: 6, openTime: "22:00", closeTime: "02:00" };
+    expect(isScheduledOpen([rule], new Date("2025-01-18T17:30:00Z"))).toBe(true); // Sat 23:00 IST
+    expect(isScheduledOpen([rule], new Date("2025-01-18T19:30:00Z"))).toBe(true); // Sun 01:00 IST
+    expect(isScheduledOpen([rule], new Date("2025-01-19T07:30:00Z"))).toBe(false); // Sun 13:00 IST
+    expect(isScheduledOpen([rule], new Date("2025-01-19T17:30:00Z"))).toBe(false); // Sun 23:00 IST
+  });
+
+  it("spills over exactly one day past a Sunday rule", () => {
+    const sundayRule: ScheduleRule = { dayOfWeek: 0, openTime: "22:00", closeTime: "02:00" };
+    expect(isScheduledOpen([sundayRule], new Date("2025-01-19T17:30:00Z"))).toBe(true); // Sun 23:00 IST
+    expect(isScheduledOpen([sundayRule], new Date("2025-01-19T19:30:00Z"))).toBe(true); // Mon 01:00 IST
+    expect(isScheduledOpen([sundayRule], new Date("2025-01-19T21:30:00Z"))).toBe(false); // Mon 03:00 IST
+  });
+
+  it("does not report a restaurant open when every rule belongs to another day", () => {
+    const config: RestaurantScheduleConfig = {
+      isOpen: true,
+      schedules: [saturdayNightOpenFrom10pm],
+    };
+    expect(isRestaurantOpen(config, new Date("2025-01-19T12:00:00Z"))).toBe(false); // Sun 17:30 IST
+  });
+});
