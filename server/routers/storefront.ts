@@ -308,7 +308,7 @@ export const storefrontRouter = router({
     }))
     .query(async ({ input }) => {
       const { checkServiceability, validateGeoLocation, selectBestOutlet, parseRadiusKm } = await import("../domain/locationService");
-      const { getDb } = await import("../db");
+      const { getDb, parseGstRate } = await import("../db");
       const { restaurants, outlets } = await import("../../drizzle/schema");
       const { eq } = await import("drizzle-orm");
 
@@ -594,23 +594,45 @@ export const storefrontRouter = router({
       const { calculateAuthoritativeQuote, validateCoupon } = await import("../domain/orderPricing");
       const storefront = await getStorefront(input.slug);
       if (!storefront) throw new Error("Restaurant not found.");
-      const { getDb } = await import("../db");
+      const { getDb, parseGstRate } = await import("../db");
       const db = await getDb();
       if (!db) throw new Error("Database unavailable.");
-      const { addonGroups, addonOptions, productVariants, coupons } = await import("../../drizzle/schema");
+      const { addonGroups, addonOptions, menuItems, productVariants, coupons } = await import("../../drizzle/schema");
       const { inArray, eq, and } = await import("drizzle-orm");
       // Resolve DB-verified variant/modifier prices (same as checkout).
-      const variantIds = input.lines.flatMap(l => l.selectedVariantId ? [l.selectedVariantId] : []);
+      //
+      // Tenant scoping is essential here: variant and modifier ids arrive straight
+      // from the client, and selecting them by raw id would read (and echo back the
+      // name + price of) another restaurant's catalog rows. Both lookups are therefore
+      // joined back to `restaurants.id` through menu_items, exactly as checkout does.
+      const tenantId = storefront.restaurant.id;
+      const variantIds = Array.from(new Set(input.lines.flatMap(l => l.selectedVariantId ? [l.selectedVariantId] : [])));
       const variantMap = new Map<string, number>();
       if (variantIds.length) {
-        const rows = await db.select().from(productVariants).where(inArray(productVariants.id, variantIds));
+        const rows = await db
+          .select({ id: productVariants.id, pricePaise: productVariants.pricePaise })
+          .from(productVariants)
+          .innerJoin(menuItems, eq(productVariants.menuItemId, menuItems.id))
+          .where(and(inArray(productVariants.id, variantIds), eq(menuItems.restaurantId, tenantId)));
         for (const r of rows) variantMap.set(r.id, r.pricePaise);
       }
-      const allOptIds = input.lines.flatMap(l => l.modifierOptionIds ?? []);
+      const allOptIds = Array.from(new Set(input.lines.flatMap(l => l.modifierOptionIds ?? [])));
       const optMap = new Map<string, { pricePaise: number; name: string }>();
       if (allOptIds.length) {
-        const rows = await db.select().from(addonOptions).where(inArray(addonOptions.id, allOptIds));
+        const rows = await db
+          .select({ id: addonOptions.id, pricePaise: addonOptions.pricePaise, name: addonOptions.name })
+          .from(addonOptions)
+          .innerJoin(addonGroups, eq(addonOptions.addonGroupId, addonGroups.id))
+          .innerJoin(menuItems, eq(addonGroups.menuItemId, menuItems.id))
+          .where(and(inArray(addonOptions.id, allOptIds), eq(menuItems.restaurantId, tenantId)));
         for (const r of rows) optMap.set(r.id, { pricePaise: r.pricePaise, name: r.name });
+      }
+      // Any id the tenant cannot see is a hard error rather than a silent 0-priced
+      // line: silently quoting ₹0 would under-charge the restaurant and hide a bug.
+      const unknownVariantIds = variantIds.filter(id => !variantMap.has(id));
+      const unknownOptionIds = allOptIds.filter(id => !optMap.has(id));
+      if (unknownVariantIds.length || unknownOptionIds.length) {
+        throw new Error("Some selected options do not belong to this restaurant's menu.");
       }
       const catalog = storefront.items.map(i => ({
         id: i.id, name: i.name, pricePaise: i.pricePaise,
@@ -640,7 +662,7 @@ export const storefrontRouter = router({
             lines, catalog,
             packagingFeePaise: storefront.restaurant.packagingFeePaise,
             deliveryFeePaise: storefront.restaurant.deliveryFeePaise,
-            taxPercent: parseFloat(String(storefront.restaurant.gstPercentage ?? "5")),
+            taxPercent: parseGstRate(storefront.restaurant.gstPercentage, 5),
           });
           const r = validateCoupon({
             coupon: {
@@ -657,14 +679,69 @@ export const storefrontRouter = router({
           else couponDiscountPaise = r.discountPaise;
         }
       }
+      const taxPercent = parseGstRate(storefront.restaurant.gstPercentage, 5);
       const quote = calculateAuthoritativeQuote({
         lines, catalog,
         packagingFeePaise: storefront.restaurant.packagingFeePaise,
         deliveryFeePaise: storefront.restaurant.deliveryFeePaise,
         couponDiscountPaise,
-        taxPercent: parseFloat(String(storefront.restaurant.gstPercentage ?? "5")),
+        taxPercent,
       });
-      return { ...quote, couponError, couponApplied: couponDiscountPaise > 0 };
+      // Mirror checkout's minimum-order gate so the cart can disable its CTA before
+      // the customer reaches a server error.
+      const minOrderPaise = storefront.restaurant.minOrderPaise ?? 0;
+      return {
+        ...quote,
+        couponError,
+        couponApplied: couponDiscountPaise > 0,
+        taxPercent,
+        minOrderPaise,
+        belowMinimum: minOrderPaise > 0 && quote.itemTotalPaise < minOrderPaise,
+        amountToMinOrderPaise: Math.max(0, minOrderPaise - quote.itemTotalPaise),
+      };
+    }),
+
+  /**
+   * IP-derived location fallback.
+   *
+   * Mobile GPS is refused, denied or too coarse surprisingly often — on desktop,
+   * inside dense Indian high-rises, and on carrier CGNAT. Zomato/Swiggy handle this
+   * by seeding the map from the request IP and asking the customer to correct it,
+   * rather than dropping them back to a blank form.
+   *
+   * Resolved server-side so the customer's address is not handed to a third party
+   * from the browser, and so CORS never blocks the fallback. Always approximate:
+   * the response is flagged `approximate` and the UI must let the customer move it.
+   */
+  locateByIp: publicProcedure
+    .query(async ({ ctx }) => {
+      const { extractClientIp, locateByIp } = await import("../_core/ipLocation");
+      const ip = extractClientIp(ctx.req.headers as Record<string, string | string[] | undefined>);
+      if (!ip) {
+        return {
+          found: false as const,
+          reason: "Could not determine your network address. Please enter your address manually.",
+        };
+      }
+      const location = await locateByIp(ip);
+      if (!location) {
+        return {
+          found: false as const,
+          reason: "We could not estimate your location from your network. Please enter it manually.",
+        };
+      }
+      return {
+        found: true as const,
+        approximate: true as const,
+        latitude: location.latitude,
+        longitude: location.longitude,
+        city: location.city,
+        region: location.region,
+        postalCode: location.postalCode,
+        country: location.country,
+        // Surfaced to the customer as an explicit confidence statement.
+        accuracyMeters: Math.round(location.accuracyKm * 1000),
+      };
     }),
 
   // M-18: Rate limit payment verification to prevent abuse
