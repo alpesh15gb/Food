@@ -111,6 +111,49 @@ async function saveUploadedImage(
   return filename;
 }
 
+/**
+ * Move the ORDER after its delivery was cancelled.
+ *
+ * Cancelling only `deliveries` left `orders.status` untouched, so the customer
+ * polled "Rider assigned" forever for a delivery that would never arrive, the
+ * order was counted as an open order, and no refund was ever triggered. The order
+ * transition goes through updateOrderStatus so the state machine, payment status
+ * and history bookkeeping all stay consistent.
+ *
+ * A provider-side cancellation can still be in flight (CANCELLATION_PENDING), in
+ * which case the order is left alone until the courier confirms.
+ */
+async function syncOrderAfterDeliveryCancellation(
+  orderId: string,
+  providerConfirmed: boolean,
+  actorId: number | undefined,
+  reason: string | undefined
+): Promise<void> {
+  if (!providerConfirmed) return; // wait for the courier's confirmation webhook
+  const { updateOrderStatus } = await import("../db");
+  try {
+    await updateOrderStatus(
+      orderId,
+      "CANCELLED",
+      actorId,
+      `Delivery cancelled.${reason ? ` ${reason}` : ""}`
+    );
+  } catch (err) {
+    // The delivery is already cancelled, so failing the whole operator action
+    // would be misleading. Surface it loudly instead — this is the exact state
+    // that previously left orders stuck in flight with no refund path.
+    console.error(
+      `[admin] delivery cancelled but order ${orderId} could not be moved to CANCELLED: ${err instanceof Error ? err.message : String(err)}. Cancel and refund the order manually.`,
+      err
+    );
+    throw new TRPCError({
+      code: "INTERNAL_SERVER_ERROR",
+      message:
+        "The delivery was cancelled but the order could not be updated. Please cancel the order manually so the customer is refunded.",
+    });
+  }
+}
+
 export const adminRouter = router({
   // =========================================================================
   // Dashboard & Analytics
@@ -1240,8 +1283,35 @@ export const adminRouter = router({
       });
 
       // 9. Machine-gated order transition via the canonical helper.
+      //
+      // The AWB is already committed above, so the shipment is LIVE at the
+      // courier. If this transition throws (concurrent modification, order not
+      // found, or a rejected transition) the order would be stranded at its
+      // previous status while a rider is actually delivering — and every later
+      // webhook is gated on an allow-list that does not include that status, so
+      // the order could never reach PICKED_UP or DELIVERED. Cancel the shipment we
+      // just created so the state stays consistent and the operator can retry.
       const { updateOrderStatus } = await import("../db");
-      await updateOrderStatus(order.id, "DELIVERY_REQUESTED", ctx.user.id, `Shadowfax shipment created. AWB: ${created.awbNumber}.`);
+      try {
+        await updateOrderStatus(order.id, "DELIVERY_REQUESTED", ctx.user.id, `Shadowfax shipment created. AWB: ${created.awbNumber}.`);
+      } catch (transitionErr) {
+        console.error(
+          `[admin] dispatch order ${order.id} failed to move to DELIVERY_REQUESTED after the AWB was issued; cancelling the shipment: ${transitionErr instanceof Error ? transitionErr.message : String(transitionErr)}`
+        );
+        try {
+          await db.update(deliveries)
+            .set({ status: "CANCELLED", cancelledAt: new Date() })
+            .where(eq(deliveries.id, deliveryId));
+        } catch (cancelErr) {
+          console.error(
+            `[admin] CRITICAL: could not cancel shipment ${created.awbNumber} for order ${order.id}; it is live at the courier with no order transition. Reconcile manually.`,
+            cancelErr
+          );
+        }
+        throw new Error(
+          "Shipment was created but the order could not be updated, so it was cancelled. Nothing was dispatched — please retry."
+        );
+      }
 
       // 10. Audit
       await logAudit({
@@ -1344,6 +1414,7 @@ export const adminRouter = router({
           afterData: { deliveryId: delivery.id, awbNumber: awb, outcome: res.outcome, reason: input.reason ?? null },
           restaurantId: order.restaurantId,
         });
+        await syncOrderAfterDeliveryCancellation(order.id, res.outcome === "CANCELLED", ctx.user.id, input.reason);
         return { success: true, outcome: res.outcome } as const;
       }
       // Manual (internal-rider) deliveries have no provider to call.
@@ -1365,6 +1436,7 @@ export const adminRouter = router({
         afterData: { deliveryId: delivery.id, reason: input.reason ?? null },
         restaurantId: order.restaurantId,
       });
+      await syncOrderAfterDeliveryCancellation(order.id, true, ctx.user.id, input.reason);
       return { success: true, outcome: "CANCELLED" } as const;
     }),
 
@@ -1381,7 +1453,7 @@ export const adminRouter = router({
       if (ctx.restaurantId && input.restaurantId !== ctx.restaurantId) {
         throw new TRPCError({ code: "FORBIDDEN", message: "Report not found for this restaurant." });
       }
-      const { getDeliveryProvider, mapShadowfaxStatusToDeliveryStatus } = await import("../integrations/shadowfax");
+      const { getDeliveryProvider, mapShadowfaxStatusToDeliveryStatus, mapDeliveryStatusToOrderStatus } = await import("../integrations/shadowfax");
       const { and: andOp, inArray: inArr, sql: sqlOp } = await import("drizzle-orm");
       const staleCutoff = new Date(Date.now() - 15 * 60 * 1000);
       const rows = await db.select().from(deliveries)
@@ -1424,6 +1496,31 @@ export const adminRouter = router({
             note: `Reconciled via bulk track: ${res.status}.`,
             rawPayload: res.rawPayload ?? undefined,
           });
+          // Reconciliation is the ONLY recovery path for a missed webhook, but it
+          // used to stop at the deliveries row — so a lost `delivered` event left
+          // the customer staring at "Picked up by rider" forever, on an order
+          // that could never be moved again. Advance the ORDER too, through the
+          // canonical helper so the state machine, deliveredAt and the customer's
+          // lifetime stats stay consistent. updateOrderStatus is idempotent for a
+          // repeated target status, so re-running reconcile cannot double-count.
+          const { updateOrderStatus } = await import("../db");
+          const orderTarget = mapDeliveryStatusToOrderStatus(mapped);
+          if (orderTarget) {
+            try {
+              await updateOrderStatus(
+                row.orderId,
+                orderTarget as Parameters<typeof updateOrderStatus>[1],
+                ctx.user.id,
+                `Reconciled via bulk track: ${res.status}.`
+              );
+            } catch (syncErr) {
+              // Never fail the whole reconciliation because one order's transition
+              // was rejected — the deliveries row is already corrected.
+              console.warn(
+                `[admin] reconcile advanced delivery ${row.id} to ${mapped} but order ${row.orderId} did not move to ${orderTarget}: ${syncErr instanceof Error ? syncErr.message : String(syncErr)}`
+              );
+            }
+          }
           updated++;
         } else {
           await db.update(deliveries).set({ lastSyncedAt: new Date() }).where(eq(deliveries.id, row.id));
@@ -2123,6 +2220,8 @@ export const adminRouter = router({
           orderId,
           status: "PLACED",
           note: `Manual ${input.source} order created by admin.${input.priceOverrideReason ? ` Price override: ${input.priceOverrideReason}` : ""}`,
+          // Staff-facing: price-override reasoning must not reach the customer.
+          noteVisibility: "internal",
           actorId: ctx.user.id,
         });
       });

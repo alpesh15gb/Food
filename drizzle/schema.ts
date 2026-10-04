@@ -574,6 +574,13 @@ export const orderStatusHistory = pgTable("order_status_history", {
   orderId: varchar("order_id", { length: 36 }).notNull().references(() => orders.id, { onDelete: "cascade" }),
   status: orderStatusEnum("status").notNull(),
   note: varchar("note", { length: 500 }),
+  /**
+   * Who may read `note`. Defaults to "internal" so a new note is never published
+   * by accident: getOrderForTracking returns only "customer" rows. Operator-typed
+   * reasons and the courier AWB (the key the delivery provider's own tracking API
+   * uses) must stay staff-only unless explicitly marked.
+   */
+  noteVisibility: varchar("note_visibility", { length: 16 }).notNull().default("internal"),
   actorId: integer("actor_id"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (t) => [index("order_history_order_idx").on(t.orderId, t.createdAt)]);

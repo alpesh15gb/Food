@@ -1,7 +1,7 @@
 /**
  * Database layer — typed query helpers for the complete cloud-kitchen platform.
  */
-import { desc, eq, and, or, like, sql, count, sum, between, inArray } from "drizzle-orm";
+import { desc, eq, and, or, like, sql, count, sum, between, inArray, notInArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { TRPCError } from "@trpc/server";
 import { Pool } from "pg";
@@ -710,14 +710,15 @@ export async function createOrderFromValidatedCart(args: {
   }
 
   // --- Server-authoritative outlet selection (nearest serviceable outlet) ---
-  const { selectBestOutlet } = await import("./domain/locationService");
+  const { selectBestOutlet, resolveRadiusKm } = await import("./domain/locationService");
   const allOutlets = await db.select().from(outlets).where(
     and(eq(outlets.restaurantId, storefront.restaurant.id), eq(outlets.isActive, true), eq(outlets.isOpen, true))
   );
-  const restaurantRadius = (() => {
-    const r = parseFloat(String(storefront.restaurant.deliveryRadiusKm ?? "5"));
-    return Number.isFinite(r) && r > 0 && r <= 100 ? r : 5;
-  })();
+  // Shared with the pre-payment serviceability gate so "we can deliver here" and
+  // "we will accept this order" can never disagree on the radius. This inline copy
+  // was a THIRD policy, which is how a customer could be told an address was
+  // deliverable and then be refused at checkout.
+  const restaurantRadius = resolveRadiusKm(storefront.restaurant.deliveryRadiusKm);
   const outletSelection = selectBestOutlet(allOutlets, Number(lat), Number(lng), restaurantRadius);
   if (!outletSelection) {
     throw new Error("No outlet can deliver to your location. Please choose a different delivery address.");
@@ -1223,6 +1224,7 @@ export async function createOrderFromValidatedCart(args: {
           orderId,
           status: "PENDING_PAYMENT",
           note: "Order created; awaiting payment.",
+          noteVisibility: "customer",
         });
       }
 
@@ -1233,6 +1235,7 @@ export async function createOrderFromValidatedCart(args: {
           orderId,
           status: "PLACED",
           note: "Free order confirmed (₹0 settled by coupon).",
+          noteVisibility: "customer",
         });
       } else {
         if (!Number.isSafeInteger(finalQuote.totalPaise) || finalQuote.totalPaise <= 0) {
@@ -1370,6 +1373,10 @@ export async function updateOrderStatus(
       orderId,
       status,
       note: (note ?? `Status changed to ${status}`).slice(0, 500),
+      // A note typed by an operator is staff-facing (cancellation/rejection
+      // reasons routinely name internal detail), so it stays internal. The
+      // auto-generated milestone text is safe to show the customer.
+      noteVisibility: note ? "internal" : "customer",
       actorId: actorId ?? null,
     });
 
@@ -1542,6 +1549,80 @@ export async function getOrderWithItems(orderId: string) {
 }
 
 /**
+ * Customer-visible order timeline notes (fail-closed allow-list).
+ *
+ * order_status_history is the OPERATOR log. Besides the milestones a customer
+ * should read, it carries the courier AWB — the key Shadowfax's own tracking API
+ * is queried with — raw provider status text, admin price-override
+ * justifications, and any reason an operator typed into the console. The public
+ * tracking page is reachable by anyone holding the order number + tracking
+ * token, so `getOrderForTracking` replays notes through this allow-list.
+ *
+ * Everything not matched here is suppressed and the row still renders as its
+ * bare milestone (`status` + `createdAt`), which is the part the customer
+ * actually reads. A new internal note therefore cannot leak by default: adding
+ * it here is a deliberate, reviewed act.
+ *
+ * Patterns are anchored so an operator free-text note cannot ride in on the same
+ * prefix as a system message (e.g. "Status changed to CANCELLED - fraudster").
+ */
+const CUSTOMER_FACING_ORDER_NOTES: readonly RegExp[] = [
+  // db.ts createOrder — order exists, payment not taken yet.
+  /^Order created; awaiting payment\.$/,
+  // db.ts createOrder — coupon settled the whole total, so there is no payment row.
+  /^Free order confirmed \(₹0 settled by coupon\)\.$/,
+  // db.ts updateOrderStatus — the note-less default. Anchored to the exact
+  // `Status changed to <ORDER_STATUS>` shape, not a prefix.
+  /^Status changed to (PENDING_PAYMENT|PAYMENT_CONFIRMED|PLACED|RESTAURANT_ACCEPTED|PREPARING|READY_FOR_PICKUP|DELIVERY_REQUESTED|RIDER_ASSIGNED|PICKED_UP|OUT_FOR_DELIVERY|DELIVERED|CANCELLED|REJECTED|REFUND_PENDING|REFUNDED)$/,
+  // razorpay.ts — payment + refund milestones.
+  /^Payment verified via (Razorpay webhook|checkout callback)\.$/,
+  /^Full refund of ₹[0-9.,]+ pending\.$/,
+  /^Refund of ₹[0-9.,]+ processed\.$/,
+  /^Partial refund of ₹[0-9.,]+ processed \(total refunded ₹[0-9.,]+\)\.$/,
+  // shadowfaxWebhook.ts — provider milestone mirrored onto the order timeline.
+  // The rider name is already published as delivery.riderName, so it adds nothing.
+  /^Delivery update: [A-Z_]+( \(rider [^)]+\))?$/,
+  // shadowfax.ts — own-rider manual dispatch.
+  /^Manual delivery dispatched to .+\.$/,
+  // kds.ts — kitchen progress.
+  /^Accepted from KDS$/,
+  /^Started preparing from KDS$/,
+  /^Marked ready from KDS$/,
+  // storefront.ts — checkout hold released after the payment provider refused.
+  /^Payment provider unreachable — hold released automatically\.$/,
+  // admin.ts shadowfaxDispatch — customer-safe replacement for the old
+  // "Shadowfax shipment created. AWB: <awb>" note, which published the AWB.
+  /^Delivery requested — a rider is being assigned\.$/,
+];
+
+/**
+ * True when an order_status_history note may be published on the tracking page.
+ * Exported so the policy is unit-testable without a database.
+ */
+export function isCustomerVisibleOrderNote(note: string | null | undefined): boolean {
+  if (typeof note !== "string") return false;
+  const trimmed = note.trim();
+  if (!trimmed) return false;
+  return CUSTOMER_FACING_ORDER_NOTES.some((re) => re.test(trimmed));
+}
+
+/**
+ * Deterministic ordering for "one delivery row per order" lookups.
+ *
+ * The schema deliberately allows several rows per order (a CANCELLED/FAILED
+ * provider row alongside a live manual row), so `limit(1)` with no ORDER BY can
+ * return the dead row: the customer then sees no rider and no tracking link for
+ * an order that is being delivered right now, and support views show a shipment
+ * that no longer exists. Live rows sort first; ties break on the newest row.
+ */
+export function deliveryLookupOrder() {
+  return [
+    sql`CASE WHEN ${deliveries.status} IN ('CANCELLED','FAILED') THEN 1 ELSE 0 END`,
+    desc(deliveries.createdAt),
+  ];
+}
+
+/**
  * Issue 1: Secure order tracking — requires tracking token.
  * Returns a restricted subset of order data safe for public consumption.
  * Never exposes: payment provider IDs, full customer PII, admin notes.
@@ -1565,20 +1646,47 @@ export async function getOrderForTracking(orderNumber: string, trackingToken: st
     selectedModifiers: orderItems.selectedModifiers,
   }).from(orderItems).where(eq(orderItems.orderId, order.id));
 
+  // Only notes explicitly marked customer-visible are returned. Internal rows
+  // (operator reasons, provider internals such as the courier AWB) are filtered
+  // out here rather than trusted to every writer to remember a convention.
   const history = await db.select({
     status: orderStatusHistory.status,
     note: orderStatusHistory.note,
     createdAt: orderStatusHistory.createdAt,
   }).from(orderStatusHistory)
-    .where(eq(orderStatusHistory.orderId, order.id))
+    .where(and(
+      eq(orderStatusHistory.orderId, order.id),
+      eq(orderStatusHistory.noteVisibility, "customer")
+    ))
     .orderBy(orderStatusHistory.createdAt);
 
+  // The schema allows several delivery rows per order (a cancelled provider row
+  // plus a live manual one). Ordering matters: an unordered limit(1) let Postgres
+  // return the dead row, which hid the rider name and live tracking link for an
+  // order that was being delivered right now.
   const delivery = (await db.select({
     status: deliveries.status,
     estimatedDelivery: deliveries.estimatedDelivery,
     trackingUrl: deliveries.trackingUrl,
     riderName: deliveries.riderName,
-  }).from(deliveries).where(eq(deliveries.orderId, order.id)).limit(1))[0];
+  }).from(deliveries)
+    .where(and(
+      eq(deliveries.orderId, order.id),
+      notInArray(deliveries.status, ["CANCELLED", "FAILED", "RETURNED", "DELIVERY_EXCEPTION"])
+    ))
+    .orderBy(desc(deliveries.createdAt))
+    .limit(1))[0]
+    // Fall back to the most recent row of any status so a failed/returned
+    // shipment still renders something rather than no delivery block at all.
+    ?? (await db.select({
+      status: deliveries.status,
+      estimatedDelivery: deliveries.estimatedDelivery,
+      trackingUrl: deliveries.trackingUrl,
+      riderName: deliveries.riderName,
+    }).from(deliveries)
+      .where(eq(deliveries.orderId, order.id))
+      .orderBy(desc(deliveries.createdAt))
+      .limit(1))[0];
 
   // Restricted response — no PII, no payment internals
   return {
@@ -1893,13 +2001,27 @@ export async function markWhatsappOtpReceived(args: {
   const now = new Date();
 
   // Candidate pool: live rows only (unused, unexpired, attempts left).
-  // Bounded + recency-ordered; the matcher re-validates everything.
+  //
+  // Two problems with the previous shape:
+  //  - It was GLOBAL and recency-capped at 25. With 26 concurrent signups the
+  //    customer's own row simply was not in the pool, so their inbound OTP was
+  //    dropped with a cheerful `{processed:false, matched:false}` and no error.
+  //  - Nothing tied a row to the sender, so any sender's code-looking message was
+  //    HMAC-tested against every other customer's pending OTP.
+  //
+  // The sender is now the primary filter (country-code tolerant, because inbound
+  // WhatsApp reports the number with or without 91), and the cap is applied AFTER
+  // that filter so it can no longer evict the intended row.
+  const senderFilter = args.senderDigits
+    ? sql`right(${otpVerifications.phone}, 10) = right(${args.senderDigits}, 10)`
+    : null;
   const candidates = await db.select().from(otpVerifications)
     .where(and(
       sql`${otpVerifications.usedAt} IS NULL`,
       sql`${otpVerifications.receivedAt} IS NULL`,
       sql`${otpVerifications.expiresAt} > ${now}`,
       sql`${otpVerifications.attempts} < 5`,
+      ...(senderFilter ? [senderFilter] : []),
     ))
     .orderBy(desc(otpVerifications.createdAt))
     .limit(25);

@@ -169,6 +169,7 @@ export async function persistShadowfaxWebhookEvent(
             orderId: order.id,
             status: mapped as typeof order.status,
             note: `Delivery update: ${update.status}${update.riderName ? ` (rider ${update.riderName})` : ""}`,
+            noteVisibility: "customer",
           });
           orderAdvanced = true;
         } else {

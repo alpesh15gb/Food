@@ -85,6 +85,13 @@
       "when": 1788555779171,
       "tag": "0011_item_tax_default",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1788555839171,
+      "tag": "0012_history_note_visibility",
+      "breakpoints": true
     }
   ]
 }

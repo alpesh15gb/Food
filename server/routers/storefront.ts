@@ -456,7 +456,6 @@ export const storefrontRouter = router({
       // selection is deterministic, so a single snapshot is both cheaper and the
       // only way the pair-check and the chosen outlet cannot disagree.
       const capturedOutlets = (await db.select().from(outlets).where(eq(outlets.restaurantId, restaurant.id))) as any[];
-      const getOutlets = async () => capturedOutlets;
 
       // Opening hours + temporary closures. This check used to load the outlets
       // table only, so at 23:30 for a kitchen that closes at 23:00 it answered
@@ -465,6 +464,35 @@ export const storefrontRouter = router({
       // guaranteed-to-fail order that the customer had already been told was fine.
       const schedules = (await db.select().from(restaurantSchedules)
         .where(eq(restaurantSchedules.restaurantId, restaurant.id))) as any[];
+
+      // Per-outlet opening windows. outlets.isOpen is a static manual flag and is
+      // never derived from outlet_schedules, so an outlet whose own window is shut
+      // (e.g. a weekend-only outlet on a weekday) still looked trading here and
+      // only failed at checkout with "The selected outlet is currently closed."
+      // Filter the snapshot so the closed outlet is not even a candidate.
+      const { outletSchedules } = await import("../../drizzle/schema");
+      const { isScheduledOpen } = await import("../domain/scheduling");
+      const outletScheduleRows = (await db.select().from(outletSchedules)
+        .where(eq(outletSchedules.outletId, restaurant.id))) as any[];
+      // Guard against an accidental cross-join: only rows for outlets we actually
+      // loaded for this restaurant are considered.
+      const outletIds = new Set(capturedOutlets.map((o: { id: string }) => o.id));
+      const schedulesByOutlet = new Map<string, any[]>();
+      for (const row of outletScheduleRows) {
+        const outletId = (row as { outletId?: string }).outletId;
+        if (!outletId || !outletIds.has(outletId)) continue;
+        const list = schedulesByOutlet.get(outletId) ?? [];
+        list.push(row);
+        schedulesByOutlet.set(outletId, list);
+      }
+      const tradingOutlets = capturedOutlets.filter((o: { id: string }) =>
+        isScheduledOpen(schedulesByOutlet.get(o.id) ?? [], new Date())
+      );
+
+      // Every downstream consumer (radius selection, the courier pair-check, the
+      // diagnostics block) must see the SAME candidate set, so this snapshot is
+      // filtered to outlets that are actually trading right now.
+      const getOutlets = async () => tradingOutlets;
 
       // One shared, clamped radius policy. This endpoint used to accept any
       // finite number as the default radius — including the string "0", which

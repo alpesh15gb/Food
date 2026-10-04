@@ -1084,6 +1084,7 @@ export async function createManualDelivery(
       orderId,
       status: "RIDER_ASSIGNED",
       note: `Manual delivery dispatched to ${riderInfo.riderName}.`,
+      noteVisibility: "customer",
     });
   }
 

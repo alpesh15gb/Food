@@ -437,6 +437,7 @@ export async function confirmPayment(input: {
         orderId: input.localOrderId,
         status: "PLACED",
         note: `Payment verified via ${input.source === "webhook" ? "Razorpay webhook" : "checkout callback"}.`,
+        noteVisibility: "customer",
       });
     }
   });

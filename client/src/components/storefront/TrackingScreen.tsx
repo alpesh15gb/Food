@@ -4,12 +4,24 @@
  * stops on terminal states. Rider name + provider live-tracking link surface
  * automatically once Shadowfax webhooks/dispatch populate them.
  */
+import { useRef } from "react";
 import { Bike, Check, Clock3, ExternalLink, MapPin } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { formatINR } from "@/lib/types";
 import { trpc } from "@/lib/trpc";
 
-const TERMINAL_STATUSES = ["DELIVERED", "CANCELLED", "REJECTED", "REFUNDED"];
+const TERMINAL_STATUSES = [
+  "DELIVERED",
+  "CANCELLED",
+  "REJECTED",
+  "REFUNDED",
+  // A normal full refund goes DELIVERED -> REFUND_PENDING. Omitting it polled
+  // every 20s forever on an order that was never going to change again.
+  "REFUND_PENDING",
+];
+
+/** Give up on automatic polling after this many consecutive failures. */
+const MAX_POLL_FAILURES = 3;
 
 export default function TrackingScreen({
   orderNumber,
@@ -25,17 +37,29 @@ export default function TrackingScreen({
   variant: "confirmation" | "tracking";
 }) {
   const hasCredentials = orderNumber.length >= 5 && trackingToken.length >= 16;
+  // Counts consecutive failures so a permanently broken link (stale or mistyped
+  // token -> NOT_FOUND) stops hammering the server instead of polling every 20s
+  // forever while simultaneously rendering the "Couldn't load your order" state.
+  const consecutiveFailures = useRef(0);
   const tracking = trpc.storefront.orderTracking.useQuery(
     { orderNumber, trackingToken },
     {
       enabled: hasCredentials,
       // Live "partner on the way" feel without hammering the server; stop
-      // polling once the order reaches a terminal state.
+      // polling once the order reaches a terminal state, or after repeated
+      // failures (the manual "Try again" button remains).
       refetchInterval: (query) => {
         const status = String(
           (query.state.data as { status?: string } | undefined)?.status ?? ""
         );
-        return TERMINAL_STATUSES.includes(status) ? false : 20000;
+        if (status && TERMINAL_STATUSES.includes(status)) return false;
+        if (query.state.status === "error") {
+          consecutiveFailures.current += 1;
+          if (consecutiveFailures.current >= MAX_POLL_FAILURES) return false;
+        } else if (query.state.status === "success") {
+          consecutiveFailures.current = 0;
+        }
+        return 20000;
       },
     }
   );
@@ -51,9 +75,15 @@ export default function TrackingScreen({
     });
   };
 
-  const eta = tracking.data?.estimatedMinutes
-    ? `~${tracking.data.estimatedMinutes} min`
-    : formatEtaTime(tracking.data?.delivery?.estimatedDelivery);
+  const status = String(tracking.data?.status ?? "");
+  const isTerminal = TERMINAL_STATUSES.includes(status);
+  // `estimatedMinutes` is written once at order creation and never updated, so
+  // showing it on a delivered or cancelled order displays a frozen "ETA ~45 min"
+  // that reads as if the food is still coming. Only show it while in flight.
+  const eta =
+    isTerminal || !tracking.data?.estimatedMinutes
+      ? formatEtaTime(tracking.data?.delivery?.estimatedDelivery)
+      : `~${tracking.data.estimatedMinutes} min`;
 
   return (
     <main
