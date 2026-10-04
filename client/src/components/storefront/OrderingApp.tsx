@@ -128,6 +128,17 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
   // Re-entry guard: state alone lags a frame, so rapid double-clicks could
   // fire startSecurePayment twice before `processing` flips.
   const paymentInFlight = useRef(false);
+  // Idempotency key for the current checkout attempt. Rotated only when the cart
+  // changes or a payment actually completes, so a retry after a dismissed modal
+  // reuses the same key (server replays the existing order) while a genuinely new
+  // order gets a fresh one.
+  const paymentAttemptKeyRef = useRef("");
+  useEffect(() => {
+    paymentAttemptKeyRef.current =
+      typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+        ? crypto.randomUUID()
+        : `ck-${Date.now()}-${Math.random().toString(36).slice(2, 12)}`;
+  }, [cart, couponInput]);
   const [deliveryAddress, setDeliveryAddress] =
     useState<DeliveryLocation | null>(null);
   const [locationOpen, setLocationOpen] = useState(false);
@@ -699,6 +710,11 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
     try {
       const created = await initiatePayment.mutateAsync({
         slug: storefrontSlug,
+        // Stable across retries of THIS checkout attempt. The server replays the
+        // existing order instead of minting a second one, so a dismissed Razorpay
+        // modal or a double-tap cannot create two orders, decrement stock twice,
+        // or burn a single-use coupon twice.
+        idempotencyKey: paymentAttemptKeyRef.current || undefined,
         lines: cart.map((line) => ({
           menuItemId: line.item.id,
           quantity: line.quantity,
@@ -727,6 +743,22 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
         customerPhone,
       });
 
+      // A 100%-off coupon produces a ₹0 order. The server creates it as
+      // PLACED/PAID and deliberately returns no Razorpay order, so opening the
+      // widget with an empty key used to throw, leave the order hidden from the
+      // customer, and let a retry create a duplicate.
+      if (created.freeOrder) {
+        clearCart();
+        toast.success("Order placed — no payment needed.");
+        navigate(
+          `/${storefrontSlug}/confirmation?order=${created.orderNumber}` +
+            (created.trackingToken ? `&token=${created.trackingToken}` : "")
+        );
+        paymentInFlight.current = false;
+        setProcessing(false);
+        return;
+      }
+
       // Load Razorpay checkout
       if (!window.Razorpay) {
         const script = document.createElement("script");
@@ -751,17 +783,31 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
         order_id: created.providerOrderId,
         handler: async (response: any) => {
           try {
-            await verifyPayment.mutateAsync({
+            const result = await verifyPayment.mutateAsync({
               orderId: created.orderId,
               providerOrderId: response.razorpay_order_id,
               providerPaymentId: response.razorpay_payment_id,
               signature: response.razorpay_signature,
             });
+            // `confirmPayment` REPORTS business failures (bad signature, amount
+            // mismatch, already-confirmed-by-another-payment) as a resolved
+            // `{success:false}` rather than throwing, so this tRPC call resolves
+            // on failure too. Without this check the customer was shown "order
+            // confirmed" for an order the server never marked paid, and the cart
+            // was cleared so they could not retry.
+            if (!result?.success) {
+              const reason =
+                result?.error ?? "Payment could not be verified.";
+              toast.error("Payment received but not confirmed.", {
+                description: `${reason} If you were charged, contact ${restaurant?.contactPhone ?? "the restaurant"} with order ${created.orderNumber} — your money is safe and we will settle it.`,
+                duration: 12000,
+              });
+              return;
+            }
             // Clear the cart so back-button can't re-pay the same lines.
             clearCart();
             // Persist the tracking token so confirmation/tracking can authenticate.
-            const paidToken =
-              (created as { trackingToken?: string }).trackingToken ?? "";
+            const paidToken = created.trackingToken ?? "";
             navigate(
               `/${storefrontSlug}/confirmation?order=${created.orderNumber}` +
                 (paidToken ? `&token=${paidToken}` : "")

@@ -551,11 +551,20 @@ async function processRazorpayWebhookEvent(
 
   // Idempotency: prefer Razorpay webhook event id (payload.id) as externalId.
   const innerPayload = payload as Record<string, any>;
-  const eventId = innerPayload?.id
+  const entityId = innerPayload?.id
     ?? innerPayload?.payment?.entity?.id
     ?? innerPayload?.order?.entity?.id
     ?? innerPayload?.refund?.entity?.id
     ?? null;
+
+  // The dedupe key must identify the EVENT, not just the entity it refers to.
+  // Razorpay's refund envelope carries `refund.entity.id = rfnd_x` on BOTH
+  // `refund.created` and `refund.processed`, so keying on the entity alone
+  // collapsed the two: the second event hit `existing?.processed` and returned
+  // early, so `handleRefundProcessed` never ran and the refund stayed PENDING
+  // forever — real money refunded while the ledger still read "in flight", and
+  // the monitoring alert for refunds pending >24h could never clear.
+  const eventId = entityId ? `${event}:${entityId}` : null;
 
   // --- Issue 16: Reject events with null external_id ---
   if (!eventId) {
@@ -592,7 +601,14 @@ async function processRazorpayWebhookEvent(
         if (paymentEntity) {
           const orderId = paymentEntity.notes?.cloudKitchenOrderId;
           if (orderId) {
-            await confirmPayment({
+            // `confirmPayment` REPORTS business failures (amount mismatch, illegal
+            // transition, live-status mismatch) as `{success:false}` rather than
+            // throwing. Discarding that result marked the event processed and
+            // answered 200, so Razorpay never retried and the order was stranded
+            // in PENDING_PAYMENT with captured money — and because
+            // `payments.status` was never set to CAPTURED, `initiateRefund`
+            // rejected it, leaving the money unrefundable through the app.
+            const result = await confirmPayment({
               localOrderId: orderId,
               providerOrderId: paymentEntity.order_id ?? "",
               providerPaymentId: paymentEntity.id,
@@ -600,6 +616,13 @@ async function processRazorpayWebhookEvent(
               source: "webhook",
               preVerified: true, // C-02: HMAC already verified above, skip re-verification
             });
+            if (!result.success) {
+              // Leave the event UNPROCESSED so a redelivery retries, and surface
+              // the reason instead of silently swallowing captured money.
+              throw new Error(
+                `Payment captured but confirmation failed for order ${orderId}: ${result.error ?? "unknown"}`
+              );
+            }
           }
         }
         break;
@@ -656,6 +679,22 @@ async function handlePaymentFailed(payment: Record<string, unknown>) {
   if (!db) return;
 
   await db.transaction(async (tx) => {
+    // Guard on the stored provider payment id, not the order. Razorpay can
+    // deliver a late `payment.failed` for an EARLIER attempt (pay_A) after the
+    // customer completed with a second method (pay_B). Blindly overwriting the
+    // row flipped a CAPTURED payment to FAILED, and since `initiateRefund`
+    // requires status CAPTURED, that customer's captured money could never be
+    // refunded again.
+    const storedPayment = (await tx.select().from(payments).where(eq(payments.orderId, orderId)).limit(1))[0];
+    if (!storedPayment) return;
+
+    // Any status where money has moved (or is moving) is immune: a later failure
+    // for the same or an earlier attempt says nothing about it.
+    const moneyMoved = new Set(["CAPTURED", "REFUND_PENDING", "REFUNDED"]);
+    const sameAttempt = storedPayment.providerPaymentId === providerPaymentId;
+    if (moneyMoved.has(String(storedPayment.status)) || !sameAttempt) return;
+
+    // Only overwrite when this failure belongs to the attempt already recorded.
     await tx
       .update(payments)
       .set({
@@ -734,9 +773,17 @@ async function handleRefundProcessed(refundEntity: Record<string, unknown>) {
     // M-14: Only mark fully REFUNDED if cumulative refunds >= payment amount
     const payment = (await tx.select().from(payments).where(eq(payments.id, existingRefund.paymentId)).limit(1))[0];
     const order = (await tx.select().from(orders).where(eq(orders.id, existingRefund.orderId)).limit(1))[0];
+    // Exclude FAILED reservations, matching the sum `initiateRefund` uses to
+    // compute the refundable balance. Including them double-counted a refund
+    // that never executed, so a ₹500 failed attempt plus a real ₹100 refund
+    // read as ₹600 refunded against a ₹500 payment and closed the order as
+    // REFUNDED while ₹400 of captured revenue was still the merchant's.
     const allRefunds = await tx.select({ total: sql<number>`COALESCE(SUM(${refunds.amountPaise}), 0)` })
       .from(refunds)
-      .where(eq(refunds.paymentId, existingRefund.paymentId));
+      .where(and(
+        eq(refunds.paymentId, existingRefund.paymentId),
+        sql`${refunds.status} != 'FAILED'`
+      ));
     const totalRefunded = Number(allRefunds[0]?.total ?? 0);
     const isFullyRefunded = Boolean(payment && totalRefunded >= payment.amountPaise);
 

@@ -495,20 +495,61 @@ export const storefrontRouter = router({
             if (scopedRestaurant && existing[0].restaurantId !== scopedRestaurant.id) {
               throw new Error("Duplicate order request. Please retry with a new idempotency key.");
             }
-            // Idempotent return: real trackingToken + provider binding + amount.
-            const payment = (await db.select({
+            const existingPayment = (await db.select({
               providerOrderId: payments.providerOrderId,
               amountPaise: payments.amountPaise,
+              status: payments.status,
             }).from(payments).where(eq(payments.orderId, existing[0].id)).limit(1))[0];
+            const existingOrder = (await db.select({
+              status: orders.status,
+              paymentStatus: orders.paymentStatus,
+            }).from(orders).where(eq(orders.id, existing[0].id)).limit(1))[0];
+
+            // A settled or compensated order must never be handed back for
+            // checkout. Returning a live providerOrderId for an already-PAID
+            // order invites a second capture (refused downstream with no
+            // compensation), and returning a CANCELLED one hands the customer an
+            // order the kitchen will never fulfil.
+            const settled = ["PAID", "REFUND_PENDING", "REFUNDED"].includes(
+              String(existingPayment?.status ?? "")
+            );
+            const compensated = existingOrder?.status === "CANCELLED";
+            if (settled || compensated) {
+              throw new Error(
+                compensated
+                  ? "This order was already cancelled. Please start a new order."
+                  : "This order has already been paid. Please start a new order."
+              );
+            }
+
+            // A ₹0 order was created as PLACED/PAID with no Razorpay order, so the
+            // replay must be reported as a free order rather than as a checkout
+            // with an empty providerOrderId.
+            if (existingOrder?.paymentStatus === "PAID" && (existing[0].totalPaise ?? 0) === 0) {
+              return {
+                orderId: existing[0].id,
+                orderNumber: existing[0].orderNumber,
+                trackingToken: existing[0].trackingToken,
+                keyId: "",
+                providerOrderId: "",
+                amountPaise: 0,
+                currency: "INR",
+                freeOrder: true as const,
+                alreadyExists: true,
+              };
+            }
+
+            // Idempotent return: real trackingToken + provider binding + amount.
             const idempotentConfig = await getRazorpayConfig(existing[0].restaurantId);
             return {
               orderId: existing[0].id,
               orderNumber: existing[0].orderNumber,
               trackingToken: existing[0].trackingToken,
               keyId: idempotentConfig.keyId ?? "",
-              providerOrderId: payment?.providerOrderId ?? "",
-              amountPaise: payment?.amountPaise ?? existing[0].totalPaise,
+              providerOrderId: existingPayment?.providerOrderId ?? "",
+              amountPaise: existingPayment?.amountPaise ?? existing[0].totalPaise,
               currency: "INR",
+              freeOrder: false as const,
               alreadyExists: true,
             };
           }
