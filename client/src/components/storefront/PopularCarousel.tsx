@@ -53,7 +53,9 @@ export default function PopularCarousel({
         ref={trackRef}
         className="hide-scrollbar -mx-4 mt-8 flex gap-4 overflow-x-auto px-4 pb-2 sm:mx-0 sm:px-0"
       >
-        {items.map((item) => (
+        {items.map((item) => {
+          const unavailable = item.availability !== "AVAILABLE";
+          return (
           <article key={item.id} className="w-[180px] max-w-[52vw] shrink-0 sm:w-[210px]">
             <div className="relative z-10 mx-auto aspect-square h-28 w-28 sm:h-32 sm:w-32">
               {item.image ? (
@@ -72,6 +74,11 @@ export default function PopularCarousel({
                   🍽️
                 </div>
               )}
+              {unavailable && (
+                <div className="absolute inset-0 grid place-items-center rounded-full bg-black/60 text-[9px] font-extrabold text-white">
+                  {item.availability === "SOLD_OUT" ? "Sold out" : "N/A"}
+                </div>
+              )}
             </div>
             <div className="sf-card -mt-10 flex min-w-0 flex-col px-4 pb-4 pt-12">
               <h3 className="line-clamp-2 min-h-[2.5rem] text-sm font-extrabold leading-snug" style={{ color: "var(--sf-text)" }}>
@@ -85,17 +92,19 @@ export default function PopularCarousel({
                   {formatINR(item.price)}
                 </span>
                 <button
+                  disabled={unavailable}
                   onClick={() => onAdd(item)}
-                  className="grid h-8 min-h-[44px] w-8 min-w-[44px] shrink-0 cursor-pointer touch-manipulation place-items-center rounded-full text-white transition-all duration-200 hover:brightness-110 active:scale-90 [-webkit-tap-highlight-color:transparent]"
+                  className="grid h-8 min-h-[44px] w-8 min-w-[44px] shrink-0 cursor-pointer touch-manipulation place-items-center rounded-full text-white transition-all duration-200 hover:brightness-110 active:scale-90 disabled:cursor-not-allowed disabled:opacity-40 focus-visible:ring-2 focus-visible:ring-[var(--sf-primary)] focus-visible:ring-offset-2 [-webkit-tap-highlight-color:transparent]"
                   style={{ background: "var(--sf-primary)" }}
-                  aria-label={`Add ${item.name}`}
+                  aria-label={unavailable ? `${item.name} is unavailable` : `Add ${item.name}`}
                 >
                   <Plus className="h-4 w-4" />
                 </button>
               </div>
             </div>
           </article>
-        ))}
+          );
+        })}
       </div>
     </section>
   );

@@ -120,7 +120,7 @@ export default function HeroBanner({ restaurant, firstItemImage, thumbs = [], me
                 className="inline-flex cursor-pointer touch-manipulation items-center rounded-full px-7 py-3 text-sm font-extrabold transition-all duration-200 hover:brightness-110 active:scale-95 [-webkit-tap-highlight-color:transparent]"
                 style={{ background: "var(--sf-text)", color: "var(--sf-bg)" }}
               >
-                Order in now
+                Popular picks
               </a>
             </div>
 

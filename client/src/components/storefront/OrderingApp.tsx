@@ -3,7 +3,7 @@
  * Wraps all storefront components in a `.storefront` scoped container.
  * Holds ALL state, performs ALL data fetching, routes to screens.
  */
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useLocation } from "wouter";
 import { toast } from "sonner";
 import { X } from "lucide-react";
@@ -16,6 +16,7 @@ import DeliveryLocationDrawer, {
 
 import type { CartLine } from "./types";
 import { normalizePhone } from "./types";
+import { useCartQuote } from "./useCartQuote";
 import MenuSkeleton from "./MenuSkeleton";
 import TopBar from "./TopBar";
 import HeroBanner from "./HeroBanner";
@@ -95,7 +96,10 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
   }, [storefront?.theme]);
 
   // --- Screen routing ---
-  const path = window.location.pathname;
+  // Read the router's location rather than window.location directly: wouter is
+  // already subscribed, and reading the raw path misses in-app navigation.
+  const [wouterPath] = useLocation();
+  const path = wouterPath;
   const screen = path.includes("/cart")
     ? "cart"
     : path.includes("/checkout")
@@ -117,6 +121,10 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
   const [optionIds, setOptionIds] = useState<string[]>([]);
   const [note, setNote] = useState("");
   const [processing, setProcessing] = useState(false);
+  // Coupon the customer has typed/applied. Sent to `storefront.quote` so the
+  // server validates it and prices the discount, and to `initiatePayment` so the
+  // same code is actually redeemed.
+  const [couponInput, setCouponInput] = useState("");
   // Re-entry guard: state alone lags a frame, so rapid double-clicks could
   // fire startSecurePayment twice before `processing` flips.
   const paymentInFlight = useRef(false);
@@ -149,46 +157,104 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
   const loggedInPhone = customerMe.data?.phone ?? null;
 
   // --- Pricing ---
-  const itemTotal = cart.reduce(
-    (sum, line) => sum + line.unitPrice * line.quantity,
-    0
-  );
-  const packaging = cart.length ? (restaurant?.packagingFee ?? 15) : 0;
-  const delivery = cart.length ? (restaurant?.deliveryFee ?? 30) : 0;
-  const taxes = Math.round((itemTotal + packaging) * 0.05);
-  const grandTotal = Math.max(0, itemTotal + packaging + delivery + taxes);
+  //
+  // `estimate` is the local fallback shown while the server quote is in flight (and
+  // if it fails). It mirrors the restaurant's configured GST on itemTotal + packaging
+  // and is deliberately never treated as the price owed — `serverTotals` wins as soon
+  // as the server answers, so the number displayed is the number checkout charges.
+  const estimate = useMemo(() => {
+    const itemTotal = cart.reduce((sum, line) => sum + line.unitPrice * line.quantity, 0);
+    const packaging = cart.length ? (restaurant?.packagingFee ?? 15) : 0;
+    const delivery = cart.length ? (restaurant?.deliveryFee ?? 30) : 0;
+    const gstRate = parseFloat(String(restaurant?.gstPercentage ?? "5"));
+    const rate = Number.isFinite(gstRate) ? gstRate : 5;
+    const taxes = Math.round((itemTotal + packaging) * (rate / 100));
+    return {
+      itemTotal,
+      packaging,
+      delivery,
+      taxes,
+      grandTotal: Math.max(0, itemTotal + packaging + delivery + taxes),
+    };
+  }, [cart, restaurant]);
+
+  const { quote, rupees: serverTotals, isFetching: quoteFetching, errorMessage: quoteError } =
+    useCartQuote({ slug: storefrontSlug, cart, couponCode: couponInput });
+
+  const itemTotal = serverTotals?.itemTotal ?? estimate.itemTotal;
+  const packaging = serverTotals?.packaging ?? estimate.packaging;
+  const delivery = serverTotals?.delivery ?? estimate.delivery;
+  const taxes = serverTotals?.taxes ?? estimate.taxes;
+  const grandTotal = serverTotals?.grandTotal ?? estimate.grandTotal;
   const totalQuantity = cart.reduce((sum, line) => sum + line.quantity, 0);
+
+  // Minimum-order gap. `useCartQuote` keeps the previous quote on screen while
+  // repricing, so a stale `belowMinimum` would gate the CTA against a cart the
+  // customer has already changed. While a fetch is in flight (or before the
+  // first answer) fall back to the local estimate — paired with the local
+  // `minOrder`, because mixing a stale server item total with a local minimum
+  // would drift just as badly.
+  const minOrder = restaurant?.minOrder ?? 0;
+  const amountToMinOrder = useMemo(
+    () =>
+      quoteFetching || !quote
+        ? Math.max(0, minOrder - estimate.itemTotal)
+        : Math.max(0, quote.amountToMinOrderPaise / 100),
+    [quote, quoteFetching, minOrder, estimate.itemTotal]
+  );
 
   // --- Cart persistence: survive reloads, clear after successful payment ---
   const cartKey = storefrontSlug ? `ck_cart:${storefrontSlug}` : null;
-  const restoredCartKey = useRef<string | null>(null);
+  const restoredKeyRef = useRef<string | null>(null);
+  // The lines `restoredKeyRef` just adopted for this key. Non-null means "the
+  // cart state has not caught up with the restore yet" — see the persist effect.
+  const pendingRestoreRef = useRef<CartLine[] | null>(null);
+
   useEffect(() => {
-    if (!cartKey || restoredCartKey.current === cartKey) return;
-    restoredCartKey.current = cartKey;
+    if (!cartKey || restoredKeyRef.current === cartKey) return;
+    restoredKeyRef.current = cartKey;
+    let clean: CartLine[] = [];
     try {
       const raw = localStorage.getItem(cartKey);
-      if (!raw) return;
-      const parsed = JSON.parse(raw) as CartLine[];
-      if (!Array.isArray(parsed)) return;
-      const clean = parsed.filter(
-        (line) =>
-          line &&
-          typeof line.id === "string" &&
-          line.item &&
-          typeof line.item.id === "string" &&
-          typeof line.quantity === "number" &&
-          Number.isInteger(line.quantity) &&
-          line.quantity >= 1 &&
-          typeof line.unitPrice === "number" &&
-          Number.isFinite(line.unitPrice)
-      );
-      if (clean.length) setCart(clean);
+      if (raw) {
+        const parsed = JSON.parse(raw) as unknown;
+        if (Array.isArray(parsed)) {
+          clean = parsed.filter(
+            (line): line is CartLine =>
+              !!line &&
+              typeof line.id === "string" &&
+              !!line.item &&
+              typeof line.item.id === "string" &&
+              typeof line.quantity === "number" &&
+              Number.isInteger(line.quantity) &&
+              line.quantity >= 1 &&
+              typeof line.unitPrice === "number" &&
+              Number.isFinite(line.unitPrice)
+          );
+        }
+      }
     } catch {
       /* corrupt snapshot — start fresh */
     }
+    pendingRestoreRef.current = clean;
+    // Always assign: on a slug swap the previous restaurant's lines must be
+    // dropped even when the new slug has no snapshot of its own.
+    setCart(clean);
   }, [cartKey]);
+
   useEffect(() => {
-    if (!cartKey || restoredCartKey.current !== cartKey) return;
+    if (!cartKey || restoredKeyRef.current !== cartKey) return;
+    // This effect is declared after the restore, so it runs in the same commit —
+    // at which point `cart` can still hold the PREVIOUS slug's lines. Writing
+    // then would persist one restaurant's dishes under another restaurant's key,
+    // which checkout rejects with "Item ... is not in the menu". Wait until the
+    // restored value is actually the live cart before touching storage.
+    if (pendingRestoreRef.current !== null) {
+      if (cart !== pendingRestoreRef.current) return;
+      // Restored value is live and storage already matches it; nothing to write.
+      pendingRestoreRef.current = null;
+      return;
+    }
     try {
       if (cart.length === 0) localStorage.removeItem(cartKey);
       else localStorage.setItem(cartKey, JSON.stringify(cart));
@@ -196,6 +262,7 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
       /* private mode — persistence skipped */
     }
   }, [cart, cartKey]);
+
   const clearCart = () => {
     setCart([]);
     try {
@@ -209,11 +276,20 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
   const cartQuantities = useMemo(() => {
     const map: Record<string, number> = {};
     for (const line of cart) {
-      // Extract base item id (strip -default or timestamp suffix)
-      const baseId = line.item.id;
-      map[baseId] = (map[baseId] ?? 0) + line.quantity;
+      // Sum every line that carries this base item id, including customised
+      // ones — the menu card shows what the customer perceives as "in cart".
+      map[line.item.id] = (map[line.item.id] ?? 0) + line.quantity;
     }
     return map;
+  }, [cart]);
+
+  /** Cart lines whose dish is no longer available — their "+" is frozen. */
+  const soldOutLineIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const line of cart) {
+      if (line.item.availability !== "AVAILABLE") ids.add(line.id);
+    }
+    return ids;
   }, [cart]);
 
   // --- Search & filter ---
@@ -243,20 +319,47 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
       quantity < 1
         ? current.filter((line) => line.id !== id)
         : current.map((line) =>
-            line.id === id ? { ...line, quantity } : line
+            line.id === id
+              ? {
+                  ...line,
+                  // A dish can sell out while it sits in the cart. Allow the
+                  // line to be reduced or removed but never increased, or the
+                  // stepper builds an order the server rejects at checkout.
+                  quantity: soldOutLineIds.has(id)
+                    ? Math.min(line.quantity, quantity)
+                    : quantity,
+                }
+              : line
           )
     );
 
-  // For MenuCard inline quantity: find the matching cart line by base item id
+  // For MenuCard inline quantity: resolve the line the stepper should drive.
+  // Plain adds use `${itemId}-default`, but a customised line gets a unique
+  // `${itemId}-${Date.now()}` id — matching only the `-default` id left the
+  // stepper with nothing to mutate, so its − and + buttons did nothing at all
+  // for any customised item.
   const changeItemQty = (itemId: string, quantity: number) => {
-    const line = cart.find((l) => l.id === `${itemId}-default`);
-    if (line) {
-      changeQty(line.id, quantity);
-    }
+    setCart((current) => {
+      const defaultIndex = current.findIndex(
+        (line) => line.id === `${itemId}-default`
+      );
+      const target =
+        defaultIndex !== -1
+          ? defaultIndex
+          : current.findIndex((line) => line.item.id === itemId);
+      if (target === -1) return current;
+      if (quantity < 1) return current.filter((_, i) => i !== target);
+      return current.map((line, i) =>
+        i === target ? { ...line, quantity } : line
+      );
+    });
   };
 
   const simpleAdd = (item: MenuItem) => {
-    if (item.availability !== "AVAILABLE") return;
+    if (item.availability !== "AVAILABLE") {
+      toast.error(`${item.name} is not available right now.`);
+      return;
+    }
     setCart((current) => {
       const found = current.find(
         (line) => line.id === `${item.id}-default`
@@ -281,6 +384,13 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
   };
 
   const openItem = (item: MenuItem) => {
+    // Gate here, not just in `simpleAdd`: the popular carousel and the menu card
+    // both route here, and a sold-out dish used to still open the customisation
+    // drawer and land in the cart, only for checkout to reject it.
+    if (item.availability !== "AVAILABLE") {
+      toast.error(`${item.name} is not available right now.`);
+      return;
+    }
     const full = item as StorefrontMenuItem;
     const groups = full.addonGroups ?? [];
     const variants = full.variants ?? [];
@@ -363,7 +473,11 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
         phone: normalizePhone(otpPhone),
         code: otpCode,
       });
-      localStorage.setItem("ck_phone_prefill", normalizePhone(otpPhone));
+      // Route through `persistPhone` so the checkout field updates too. Writing
+      // localStorage directly left `customerPhone` holding the pre-login value,
+      // so a customer who just verified their number still saw an empty (or
+      // different) contact field and was asked for it again at checkout.
+      persistPhone(normalizePhone(otpPhone));
       setAuthOpen(false);
       setOtpStep("phone");
       setOtpPhone("");
@@ -425,8 +539,25 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
       return;
     }
     if (cart.length === 0) return toast.error("Add items to your cart first.");
-    // Server enforces itemTotal >= minOrder (fees excluded) — match it here.
-    if (itemTotal < (restaurant?.minOrder ?? 0)) {
+    // A failed quote is reported first: falling through to the local min-order
+    // comparison would blame the customer's basket for what is really a pricing
+    // outage.
+    if (quoteError && !quote) {
+      return toast.error("We could not price your cart.", {
+        description: "Please try again in a moment.",
+      });
+    }
+    // Prefer the server's own verdict; fall back to the local comparison only
+    // while the quote is still loading. `quote.belowMinimum` mirrors checkout.
+    if (quote?.belowMinimum) {
+      return toast.error(
+        `Minimum order is ${formatINR((quote.minOrderPaise || 0) / 100)}`,
+        {
+          description: `Add ${formatINR(quote.amountToMinOrderPaise / 100)} more to continue.`,
+        }
+      );
+    }
+    if (!quote && itemTotal < (restaurant?.minOrder ?? 0)) {
       return toast.error(
         `Minimum order is ${formatINR(restaurant?.minOrder ?? 0)}`
       );
@@ -577,6 +708,9 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
           selectedVariantId: line.selectedVariantId ?? undefined,
           specialInstructions: line.note,
         })),
+        ...(couponInput.trim()
+          ? { couponCode: couponInput.trim().toUpperCase() }
+          : {}),
         address: {
           flatHouse: deliveryAddress.flatHouse,
           building: deliveryAddress.building,
@@ -658,6 +792,57 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
           ? error.message
           : "We couldn't start payment."
       );
+    }
+  };
+
+  // --- Cart slide-over: modal behaviour ---
+  // Hand-rolled rather than a <dialog>/Drawer, so the accessibility contract has
+  // to be supplied here: the page behind must not scroll or stay tabbable, Escape
+  // must close, and focus must come back to whatever opened it.
+  const cartPanelRef = useRef<HTMLDivElement | null>(null);
+  const cartOpenerRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    if (!cartOpen) return;
+    cartOpenerRef.current =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+    // Focus the panel itself rather than its first control: the close button and
+    // the quantity steppers carry aria-labels, but the totals are plain text, so
+    // landing on the dialog node announces "Your order" without skipping context.
+    cartPanelRef.current?.focus();
+    const { body } = document;
+    const previousOverflow = body.style.overflow;
+    body.style.overflow = "hidden";
+    return () => {
+      body.style.overflow = previousOverflow;
+      cartOpenerRef.current?.focus?.();
+    };
+  }, [cartOpen]);
+
+  const handleCartPanelKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (event.key === "Escape") {
+      event.stopPropagation();
+      setCartOpen(false);
+      return;
+    }
+    if (event.key !== "Tab") return;
+    const panel = cartPanelRef.current;
+    if (!panel) return;
+    const focusable = panel.querySelectorAll<HTMLElement>(
+      'a[href], button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
+    );
+    if (!focusable.length) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    const active = document.activeElement;
+    if (event.shiftKey && (active === first || active === panel)) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && active === last) {
+      event.preventDefault();
+      first.focus();
     }
   };
 
@@ -743,6 +928,7 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
         <CheckoutScreen
           screen={screen}
           cart={cart}
+          totalQuantity={totalQuantity}
           total={grandTotal}
           itemTotal={itemTotal}
           packaging={packaging}
@@ -752,11 +938,17 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
           onQuantity={changeQty}
           onCheckout={startSecurePayment}
           processing={processing}
-          restaurant={restaurant}
           customerPhone={customerPhone}
           onCustomerPhone={persistPhone}
           orderingClosed={orderingClosed}
           orderingReason={orderingReason}
+          couponCode={couponInput}
+          onCouponCodeChange={setCouponInput}
+          couponError={quote?.couponError}
+          couponApplied={quote?.couponApplied}
+          couponDiscount={quote ? (quote.couponDiscountPaise || 0) / 100 : 0}
+          pricingPending={quoteFetching}
+          amountToMinOrder={amountToMinOrder}
         />
       </div>
     );
@@ -784,6 +976,12 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
             ...restaurant,
             logo: restaurant.logo || undefined,
             bannerImage: restaurant.bannerImage || undefined,
+            // The hero's open/closed badge must follow the same schedule-aware
+            // verdict as the banner below it. Passing the raw `isOpen` manual
+            // toggle made the hero read "Open every day" while the page
+            // underneath announced the kitchen was not taking orders.
+            isOpen: !orderingClosed,
+            eta: orderingClosed ? "" : restaurant.eta,
           }}
           firstItemImage={liveMenu[0]?.image}
           thumbs={[liveMenu[0]?.image, liveMenu[1]?.image].filter(Boolean) as string[]}
@@ -821,7 +1019,14 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
               </p>
             </div>
           )}
-          <OffersStrip offers={offers} />
+          <OffersStrip
+            offers={offers}
+            appliedCode={couponInput}
+            onApply={(code) => {
+              setCouponInput(code.trim().toUpperCase());
+              setCartOpen(true);
+            }}
+          />
         </div>
 
         {/* Popular right now */}
@@ -890,7 +1095,13 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
             onClick={() => setCartOpen(false)}
           />
           <div
-            className="absolute inset-y-0 right-0 w-full max-w-[400px] min-w-0 overflow-y-auto p-4"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Your order"
+            ref={cartPanelRef}
+            onKeyDown={handleCartPanelKeyDown}
+            tabIndex={-1}
+            className="absolute inset-y-0 right-0 flex w-full max-w-[400px] min-w-0 flex-col p-4"
             style={{ background: "var(--sf-bg-subtle)" }}
           >
             <div className="mb-3 flex min-w-0 items-center justify-between gap-3">
@@ -906,22 +1117,34 @@ export default function OrderingApp({ slug, trackingNumber }: { slug?: string; t
                 <X className="h-4 w-4" />
               </button>
             </div>
-            <CartSidebar
-              cart={cart}
-              total={grandTotal}
-              itemTotal={itemTotal}
-              packaging={packaging}
-              delivery={delivery}
-              taxes={taxes}
-              onQuantity={changeQty}
-              onCheckout={startSecurePayment}
-              processing={processing}
-              restaurant={restaurant}
-              customerPhone={customerPhone}
-              onCustomerPhone={persistPhone}
-              orderingClosed={orderingClosed}
-              orderingReason={orderingReason}
-            />
+            {/* The panel itself is the scroll container so the header stays put
+                and the whole cart remains reachable on short viewports. */}
+            <div className="min-h-0 flex-1 overflow-y-auto pb-4">
+              <CartSidebar
+                cart={cart}
+                totalQuantity={totalQuantity}
+                total={grandTotal}
+                itemTotal={itemTotal}
+                packaging={packaging}
+                delivery={delivery}
+                taxes={taxes}
+                onQuantity={changeQty}
+                onCheckout={startSecurePayment}
+                processing={processing}
+                customerPhone={customerPhone}
+                onCustomerPhone={persistPhone}
+                orderingClosed={orderingClosed}
+                orderingReason={orderingReason}
+                couponCode={couponInput}
+                onCouponCodeChange={setCouponInput}
+                couponError={quote?.couponError}
+                couponApplied={quote?.couponApplied}
+                couponDiscount={quote ? (quote.couponDiscountPaise || 0) / 100 : 0}
+                pricingPending={quoteFetching}
+                amountToMinOrder={amountToMinOrder}
+                soldOutLineIds={soldOutLineIds}
+              />
+            </div>
           </div>
         </div>
       )}

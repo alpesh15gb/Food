@@ -29,7 +29,7 @@ export default function SearchAndFilters({
           className="text-[11px] font-extrabold uppercase tracking-[0.28em]"
           style={{ color: "var(--sf-primary)" }}
         >
-          Menu • Menu
+          Menu
         </p>
         <h2
           className="sf-serif mx-auto mt-4 max-w-2xl text-3xl font-bold leading-tight sm:text-5xl"

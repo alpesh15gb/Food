@@ -327,9 +327,11 @@ export default function CustomizationDrawer({
             />
           </div>
 
-          {/* Quantity */}
+          {/* Quantity — pinned at 1 with removal disabled: this drawer adds a
+              brand-new line rather than editing one, so a 0 here would put a
+              zero-quantity line into the cart. */}
           <div className="mt-5">
-            <Quantity value={quantity} onChange={onQuantity} />
+            <Quantity value={quantity} onChange={onQuantity} removable={false} />
           </div>
         </div>
 

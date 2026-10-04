@@ -8,6 +8,7 @@ import PhoneField from "./PhoneField";
 export default function CheckoutScreen({
   screen,
   cart,
+  totalQuantity,
   total,
   itemTotal,
   packaging,
@@ -15,16 +16,25 @@ export default function CheckoutScreen({
   taxes,
   onMenu,
   onQuantity,
+  canIncreaseLine,
   onCheckout,
   processing,
-  restaurant,
   customerPhone,
   onCustomerPhone,
   orderingClosed,
   orderingReason,
+  couponCode,
+  onCouponCodeChange,
+  couponError,
+  couponApplied,
+  couponDiscount,
+  pricingPending,
+  amountToMinOrder,
 }: {
   screen: string;
   cart: CartLine[];
+  /** Sum of line quantities — `cart.length` is the number of distinct lines. */
+  totalQuantity: number;
   total: number;
   itemTotal: number;
   packaging: number;
@@ -32,13 +42,22 @@ export default function CheckoutScreen({
   taxes: number;
   onMenu: () => void;
   onQuantity: (id: string, qty: number) => void;
+  /** Whether a line's "+" is interactive (sold-out dishes are frozen). */
+  canIncreaseLine?: (line: CartLine) => boolean;
   onCheckout: () => void;
   processing: boolean;
-  restaurant: any;
   customerPhone: string;
   onCustomerPhone: (v: string) => void;
   orderingClosed?: boolean;
   orderingReason?: string | null;
+  couponCode?: string;
+  onCouponCodeChange?: (value: string) => void;
+  couponError?: string | undefined;
+  couponApplied?: boolean;
+  couponDiscount?: number;
+  pricingPending?: boolean;
+  /** Server-computed minimum-order gap, in rupees. */
+  amountToMinOrder?: number;
 }) {
   if (screen === "confirmation") {
     return (
@@ -118,7 +137,8 @@ export default function CheckoutScreen({
               className="text-sm font-bold"
               style={{ color: "var(--sf-text)" }}
             >
-              {cart.length} item{cart.length !== 1 ? "s" : ""} from your order
+              {totalQuantity} item{totalQuantity !== 1 ? "s" : ""} from your
+              order
             </p>
             <button
               onClick={onMenu}
@@ -172,6 +192,8 @@ export default function CheckoutScreen({
                     compact
                     value={line.quantity}
                     onChange={(next) => onQuantity(line.id, next)}
+                    canIncrease={canIncreaseLine?.(line) ?? true}
+                    removeLabel={`Remove ${line.item.name}`}
                   />
                 </div>
               </div>
@@ -197,6 +219,16 @@ export default function CheckoutScreen({
             </div>
             <div className="space-y-3 p-5">
               <BillRow label="Item total" value={formatINR(itemTotal)} />
+              {/* A coupon typed in the cart slide-over is still redeemed here, so
+                  the discount has to be itemised — otherwise "To pay" is
+                  silently lower than item + packaging + delivery + taxes and the
+                  customer has no way to see why. */}
+              {couponDiscount ? (
+                <BillRow
+                  label={`Coupon${couponCode?.trim() ? ` (${couponCode.trim().toUpperCase()})` : ""}`}
+                  value={`\u2212 ${formatINR(couponDiscount)}`}
+                />
+              ) : null}
               <BillRow label="Packaging" value={formatINR(packaging)} />
               <BillRow label="Delivery" value={formatINR(delivery)} />
               <BillRow label="Taxes" value={formatINR(taxes)} />
@@ -208,21 +240,85 @@ export default function CheckoutScreen({
                 }}
               >
                 <span>To pay</span>
-                <span>{formatINR(total)}</span>
+                <span
+                  className={pricingPending ? "opacity-60" : undefined}
+                  aria-busy={pricingPending || undefined}
+                >
+                  {formatINR(total)}
+                </span>
               </div>
+              {pricingPending && (
+                <p
+                  className="text-right text-[11px] font-semibold"
+                  style={{ color: "var(--sf-text-muted)" }}
+                  role="status"
+                >
+                  Updating total…
+                </p>
+              )}
             </div>
           </div>
+
+          {/* Coupon — same field as the cart slide-over, validated by the server. */}
+          {onCouponCodeChange && cart.length > 0 && (
+            <div className="sf-card p-5">
+              <label
+                className="text-xs font-bold uppercase tracking-wide"
+                style={{ color: "var(--sf-text-secondary)" }}
+                htmlFor="checkout-coupon"
+              >
+                Coupon
+              </label>
+              <input
+                id="checkout-coupon"
+                value={couponCode ?? ""}
+                onChange={(e) => onCouponCodeChange(e.target.value.toUpperCase())}
+                onBlur={() => onCouponCodeChange(couponCode ?? "")}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") onCouponCodeChange(couponCode ?? "");
+                }}
+                placeholder="Enter code"
+                maxLength={48}
+                autoComplete="off"
+                autoCapitalize="characters"
+                spellCheck={false}
+                aria-invalid={!pricingPending && !!couponError}
+                aria-describedby="checkout-coupon-status"
+                className="mt-2 h-12 w-full rounded-[var(--sf-radius-btn)] border px-4 text-sm font-semibold outline-none focus:ring-2"
+                style={{
+                  background: "var(--sf-surface)",
+                  borderColor:
+                    !pricingPending && couponError
+                      ? "var(--sf-red)"
+                      : "var(--sf-border)",
+                  color: "var(--sf-text)",
+                }}
+              />
+              <p id="checkout-coupon-status" className="mt-1.5 min-h-[1rem]" role="status">
+                {!pricingPending && couponApplied ? (
+                  <span className="text-xs font-bold" style={{ color: "var(--sf-green)" }}>
+                    Coupon applied — you saved {formatINR(couponDiscount ?? 0)}.
+                  </span>
+                ) : !pricingPending && couponError ? (
+                  <span className="text-xs font-bold" style={{ color: "var(--sf-red)" }}>
+                    {couponError}
+                  </span>
+                ) : null}
+              </p>
+            </div>
+          )}
 
           {/* Contact number — required for order updates + dispatch */}
           <PhoneField value={customerPhone} onChange={onCustomerPhone} />
 
-          {/* Min order warning — server enforces itemTotal >= minOrder */}
-          {restaurant?.minOrder > 0 && itemTotal < restaurant.minOrder && (
+          {/* Min order warning — server enforces itemTotal >= minOrder, so the
+              gap must be measured against the item total, never the grand total. */}
+          {typeof amountToMinOrder === "number" && amountToMinOrder > 0 && (
             <p
               className="text-xs font-bold"
               style={{ color: "var(--sf-red)" }}
             >
-              Add {formatINR(restaurant.minOrder - itemTotal)} more for minimum order
+              Add {formatINR(amountToMinOrder)} more for minimum order
             </p>
           )}
 
@@ -241,7 +337,7 @@ export default function CheckoutScreen({
               processing ||
               orderingClosed ||
               cart.length === 0 ||
-              (restaurant?.minOrder > 0 && itemTotal < restaurant.minOrder)
+              (typeof amountToMinOrder === "number" && amountToMinOrder > 0)
             }
             className="h-12 w-full cursor-pointer touch-manipulation rounded-[var(--sf-radius-btn)] text-sm font-extrabold text-white transition-all duration-200 hover:brightness-110 active:scale-95 disabled:cursor-not-allowed [-webkit-tap-highlight-color:transparent]"
             style={{ background: "var(--sf-primary)" }}

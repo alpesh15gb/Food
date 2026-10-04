@@ -109,13 +109,17 @@ export default function TopBar({
               </span>
             )}
           </button>
-          <a
-            href="#menu"
+          {/* "Order now" is the page's primary CTA. As an `href="#menu"` anchor
+              it just scrolled to the menu, which is what the nav link next to it
+              already does — it now opens the cart, the way the icon does. */}
+          <button
+            type="button"
+            onClick={onCart}
             className="hidden cursor-pointer touch-manipulation rounded-full px-5 py-2.5 text-xs font-extrabold text-white shadow-[var(--sf-shadow-fab)] transition-all duration-200 hover:brightness-110 active:scale-95 [-webkit-tap-highlight-color:transparent] sm:inline-flex"
             style={{ background: "var(--sf-primary)" }}
           >
             Order now
-          </a>
+          </button>
         </nav>
       </div>
 

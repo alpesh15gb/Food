@@ -14,7 +14,10 @@ export default function DeliveryBar({
   onOpen: () => void;
 }) {
   return (
-    <div className="mx-auto max-w-[1440px] px-4 sm:px-6 lg:px-10">
+    // No page gutter here: OrderingApp already wraps this in the shared
+    // `mx-auto max-w-[1440px] px-4 sm:px-6 lg:px-10` container, and repeating
+    // it doubled the horizontal inset (32px instead of 16px on mobile).
+    <div>
       <button
         onClick={onOpen}
         className="sf-card flex w-full cursor-pointer touch-manipulation items-center gap-3 p-3 text-left transition-colors duration-200 hover:border-[var(--sf-primary)] active:scale-[0.99] [-webkit-tap-highlight-color:transparent]"

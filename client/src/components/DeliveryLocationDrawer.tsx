@@ -16,6 +16,13 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { MapPin, Navigation, Search, AlertTriangle, Loader2, Check, Crosshair } from "lucide-react";
+import {
+  capturePreciseLocation,
+  classifyAccuracy,
+  requiresMapConfirmation,
+  describeAccuracy,
+} from "@/lib/locationCapture";
+import { trpc } from "@/lib/trpc";
 import { MapView } from "@/components/Map";
 import {
   searchPlaces,
@@ -60,21 +67,11 @@ type GeoLocationState = {
   postalCode?: string;
   street?: string;
   mapInteracted?: boolean;
+  /** How the pin was obtained — shown as a trust cue next to the address. */
+  captureMethod?: "gps_multi_sample" | "gps_single" | "gps_coarse" | "network_ip";
 };
 
 type AccuracyLevel = "HIGH" | "GOOD" | "LOW" | "POOR" | "UNKNOWN";
-
-function classifyAccuracy(meters: number | null | undefined): AccuracyLevel {
-  if (meters == null || meters <= 0) return "UNKNOWN";
-  if (meters <= 20) return "HIGH";
-  if (meters <= 50) return "GOOD";
-  if (meters <= 100) return "LOW";
-  return "POOR";
-}
-
-function requiresMapConfirmation(level: AccuracyLevel): boolean {
-  return level === "LOW" || level === "POOR" || level === "UNKNOWN";
-}
 
 // Default map center: center of India (used only until GPS or search provides real coordinates)
 const DEFAULT_MAP_CENTER = { lat: 20.5937, lng: 78.9629 };
@@ -137,11 +134,18 @@ export default function DeliveryLocationDrawer({
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const reset = useCallback(() => {
+    // Drop any in-flight debounce: a pending lookup resolving after a reset
+    // repopulated the suggestion list the customer had just dismissed.
+    if (searchTimerRef.current) {
+      clearTimeout(searchTimerRef.current);
+      searchTimerRef.current = null;
+    }
     setStep("choose_method");
     setGeoState(null);
     setGpsError(null);
     setSearchQuery("");
     setSearchResults([]);
+    setSearching(false);
     if (!existingLocation) {
       setFlatHouse("");
       setBuilding("");
@@ -159,53 +163,67 @@ export default function DeliveryLocationDrawer({
   }, [onOpenChange, reset]);
 
   // --- Method A: Use Current Location ---
-  const useCurrentLocation = useCallback(() => {
+  //
+  // Delegates to capturePreciseLocation, which escalates rather than failing:
+  // multiple GPS samples reduced to a weighted median, then a coarse fix, then an
+  // IP-derived starting point. A single getCurrentPosition call with a 30s cache
+  // could hand back a fix from several minutes ago and present it as current.
+  const locateByIp = trpc.storefront.locateByIp.useQuery(undefined, {
+    enabled: false,
+    staleTime: 5 * 60 * 1000,
+    retry: false,
+  });
+
+  const useCurrentLocation = useCallback(async () => {
     setStep("loading");
     setGpsError(null);
 
-    if (!navigator.geolocation) {
-      setGpsError("Geolocation is not supported by your browser. Please search or place a pin instead.");
+    const result = await capturePreciseLocation({
+      ipFallback: async () => {
+        const data = await locateByIp.refetch();
+        const value = data.data;
+        if (!value?.found) return null;
+        return {
+          latitude: value.latitude,
+          longitude: value.longitude,
+          accuracyMeters: value.accuracyMeters,
+        };
+      },
+    });
+
+    if (!result.ok) {
+      setGpsError(result.message);
       setStep("choose_method");
       return;
     }
 
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        const { latitude, longitude, accuracy } = position.coords;
-        const level = classifyAccuracy(accuracy);
+    setGeoState({
+      latitude: result.latitude,
+      longitude: result.longitude,
+      accuracyMeters: result.accuracyMeters ?? undefined,
+      deviceAccuracyMeters: result.accuracyMeters ?? undefined,
+      source: result.method === "network_ip" ? "map_pin" : "device_gps",
+      captureMethod: result.method,
+    });
 
-        setGeoState({
-          latitude,
-          longitude,
-          accuracyMeters: accuracy,
-          deviceAccuracyMeters: accuracy,
-          source: "device_gps",
-        });
+    // Any fix we are not confident about — including every IP pin — goes to the map
+    // for confirmation before an address form is shown.
+    const needsConfirmation = result.method === "network_ip" || requiresMapConfirmation(result.level);
+    setStep(needsConfirmation ? "map_confirm" : "address_form");
 
-        if (requiresMapConfirmation(level)) {
-          setStep("map_confirm");
-        } else {
-          setStep("address_form");
-        }
+    reverseGeocode(result.latitude, result.longitude).then((geocode) => {
+      if (geocode.area) setArea(geocode.area);
+      if (geocode.city) setCity(geocode.city);
+      if (geocode.postalCode) setPostalCode(geocode.postalCode);
+      if (geocode.street) setStreet(geocode.street);
+    });
 
-        reverseGeocode(latitude, longitude).then((result) => {
-          if (result.area) setArea(result.area);
-          if (result.city) setCity(result.city);
-          if (result.postalCode) setPostalCode(result.postalCode);
-          if (result.street) setStreet(result.street);
-        });
-      },
-      (error) => {
-        let msg = "Unable to get your location.";
-        if (error.code === 1) msg = "Location permission denied. Please search or place a pin on the map.";
-        else if (error.code === 2) msg = "Location unavailable. Please search or place a pin on the map.";
-        else if (error.code === 3) msg = "Location request timed out. Please try again or place a pin.";
-        setGpsError(msg);
-        setStep("choose_method");
-      },
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 }
-    );
-  }, []);
+    // Tell the customer how much to trust the pin instead of silently showing it.
+    if (needsConfirmation) {
+      const note = describeAccuracy(result.level, result.accuracyMeters);
+      if (result.level !== "HIGH" && result.level !== "GOOD") setGpsError(note);
+    }
+  }, [locateByIp]);
 
   // --- Method B: Search Address (Google Places Autocomplete) ---
   const handleSearchInput = useCallback((value: string) => {
@@ -309,12 +327,13 @@ export default function DeliveryLocationDrawer({
     return () => clearTimeout(timer);
   }, [step, geoState?.latitude, geoState?.longitude, geoState?.mapInteracted]);
 
-  // Cleanup idle listener
+  // Cleanup idle listener and the debounced lookup
   useEffect(() => {
     return () => {
       if (idleListenerRef.current) {
         idleListenerRef.current.remove();
       }
+      if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
     };
   }, []);
 
@@ -341,6 +360,11 @@ export default function DeliveryLocationDrawer({
       confirmed: true,
     };
     onConfirm(location);
+    // Land on the summary step. `confirmAddress` closes via the raw prop rather
+    // than `handleOpenChange`, so `reset()` never ran and reopening the drawer
+    // replayed the address form instead of showing the saved location the parent
+    // now holds — which made the "confirmed" state unreachable in practice.
+    setStep("confirmed");
     onOpenChange(false);
   }, [flatHouse, building, street, landmark, area, city, postalCode, geoState, onConfirm, onOpenChange]);
 
@@ -393,22 +417,29 @@ export default function DeliveryLocationDrawer({
               </div>
 
               <div className="relative">
-                <div className="flex gap-2">
+                <div className="relative">
+                  <Search
+                    className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2"
+                    style={{ color: "var(--sf-text-muted)" }}
+                    aria-hidden="true"
+                  />
                   <Input
                     placeholder="Search address..."
                     value={searchQuery}
                     onChange={(e) => handleSearchInput(e.target.value)}
-                    className="h-12 rounded-xl border-[var(--sf-border)] bg-[var(--sf-surface)]"
+                    aria-label="Search address"
+                    autoComplete="off"
+                    className="h-12 rounded-xl border-[var(--sf-border)] bg-[var(--sf-surface)] pl-11"
                     style={{ color: "var(--sf-text)" }}
                   />
-                  <Button
-                    variant="outline"
-                    className="h-12 cursor-pointer touch-manipulation rounded-xl border-[var(--sf-border)] bg-[var(--sf-surface)] font-bold transition-colors duration-200 [-webkit-tap-highlight-color:transparent]"
-                    style={{ color: "var(--sf-text)" }}
-                    disabled={!searchQuery.trim()}
-                  >
-                    {searching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
-                  </Button>
+                  {searching && (
+                    <Loader2
+                      className="absolute right-4 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin"
+                      style={{ color: "var(--sf-text-muted)" }}
+                      role="status"
+                      aria-label="Searching"
+                    />
+                  )}
                 </div>
 
                 {searchResults.length > 0 && (
@@ -599,9 +630,15 @@ export default function DeliveryLocationDrawer({
                   <Input
                     placeholder="PIN code *"
                     value={postalCode}
-                    onChange={(e) => setPostalCode(e.target.value)}
+                    // Reverse geocoding often returns "560 038". `formValid`
+                    // demands six bare digits, so an autofilled value with a space
+                    // or "+91" silently left the Confirm button disabled with no
+                    // field to fix — strip to digits as the customer types.
+                    onChange={(e) => setPostalCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                    inputMode="numeric"
+                    autoComplete="postal-code"
                     maxLength={6}
-                    className="h-11 rounded-xl border-[var(--sf-border)] bg-[var(--sf-surface)]" style={{ color: "var(--sf-text)" }}
+                    className="h-11 rounded-xl border-[var(--sf-border)] bg-[var(--sf-surface)] tabular-nums" style={{ color: "var(--sf-text)" }}
                   />
                 </div>
               </div>

@@ -82,14 +82,20 @@ export default function MenuCard({
           )}
         </div>
         {cartQuantity > 0 && onQuantityChange ? (
-          <Quantity compact value={cartQuantity} onChange={onQuantityChange} />
+          <Quantity
+            compact
+            value={cartQuantity}
+            onChange={onQuantityChange}
+            canIncrease={!unavailable}
+            removeLabel={`Remove ${item.name}`}
+          />
         ) : (
           <button
             disabled={unavailable}
             onClick={onAdd}
             className="grid h-9 min-h-[44px] w-9 min-w-[44px] cursor-pointer touch-manipulation place-items-center rounded-full text-white outline-none transition-all duration-200 hover:brightness-110 active:scale-90 disabled:cursor-not-allowed disabled:opacity-40 focus-visible:ring-2 focus-visible:ring-[var(--sf-primary)] focus-visible:ring-offset-2 [-webkit-tap-highlight-color:transparent]"
             style={{ background: "var(--sf-primary)" }}
-            aria-label={`Add ${item.name}`}
+            aria-label={unavailable ? `${item.name} is unavailable` : `Add ${item.name}`}
           >
             <Plus className="h-4 w-4" />
           </button>
