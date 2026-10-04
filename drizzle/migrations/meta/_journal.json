@@ -6,28 +6,77 @@
       "idx": 0,
       "version": "7",
       "when": 1788555119171,
-      "tag": "0000_nebulous_layla_miller",
+      "tag": "0000_bootstrap",
       "breakpoints": true
     },
     {
       "idx": 1,
       "version": "7",
-      "when": 1788813180216,
-      "tag": "0001_swift_mojo",
+      "when": 1788555179171,
+      "tag": "0001_otp_and_tracking",
       "breakpoints": true
     },
     {
       "idx": 2,
       "version": "7",
-      "when": 1788813287439,
-      "tag": "0002_fine_stark_industries",
+      "when": 1788555239171,
+      "tag": "0002_location_serviceability",
       "breakpoints": true
     },
     {
       "idx": 3,
       "version": "7",
-      "when": 1788854525845,
-      "tag": "0003_hard_tag",
+      "when": 1788555299171,
+      "tag": "0003_outlet_coordinates",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1788555359171,
+      "tag": "0004_multi_tenant",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1788555419171,
+      "tag": "0005_razorpay_route",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1788555479171,
+      "tag": "0006_security_hardening",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1788555539171,
+      "tag": "0007_hardening_indexes",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1788555599171,
+      "tag": "0008_delivery_awb",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1788555659171,
+      "tag": "0009_delivery_timestamps",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1788555719171,
+      "tag": "0010_otp_whatsapp_meta",
       "breakpoints": true
     }
   ]
